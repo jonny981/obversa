@@ -63,7 +63,7 @@ writer-grader-cap › draft › draft-review › refine-judge • refine:judge
 
 writer-grader-cap › draft › draft-review › refine-judge   jev-latest: 10/5 tok
 writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.72},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6}}
-writer-grader-cap › draft › draft-review ◆ again on stop_reason: continue: the judge chose continue
+writer-grader-cap › draft › draft-review ◆ draft round 1: again on stop_reason: continue: the judge chose continue
 writer-grader-cap › draft › draft-review · review: fail
 review did not pass (Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 1: "the best in the business" breaks rule 3, no superlatives (the judge chose continue)); re-entering draft-review
 writer-grader-cap › draft › draft-review · iteration 2
@@ -82,7 +82,7 @@ writer-grader-cap › draft › draft-review › refine-judge • refine:judge
 
 writer-grader-cap › draft › draft-review › refine-judge   jev-latest: 10/5 tok
 writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.61},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6}}
-writer-grader-cap › draft › draft-review ◆ again on stop_reason: continue: the judge chose continue
+writer-grader-cap › draft › draft-review ◆ draft round 2: again on stop_reason: continue: the judge chose continue
 writer-grader-cap › draft › draft-review · review: fail
 review did not pass (Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 3: "40 percent" breaks rule 4; the brief gives no number (the judge chose continue)); re-entering draft-review
 writer-grader-cap › draft › draft-review · iteration 3
@@ -101,7 +101,7 @@ writer-grader-cap › draft › draft-review › refine-judge • refine:judge
 
 writer-grader-cap › draft › draft-review › refine-judge   jev-latest: 10/5 tok
 writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8}}
-writer-grader-cap › draft › draft-review ◆ stop as pass on stop_reason: holds: the judge chose holds
+writer-grader-cap › draft › draft-review ◆ draft round 3: stop as pass on stop_reason: holds: the judge chose holds
 writer-grader-cap › draft › draft-review · review: pass
 writer-grader-cap › draft › draft-review ◂ pass (3 iter)
 writer-grader-cap · node draft: done (pass)
@@ -406,8 +406,10 @@ holds, the rest is polish, or the same findings keep coming back. The judge
 decides a finding tagged block too.
 
 To bound the rounds as well, pass a cap as a backstop:
-`judge(judgeSeat, { cap: 3 })`. When the third draft does not pass, the
-judge is asked once more and told it is the last round. If it lets the
+`judge(judgeSeat, { cap: 3 })`. It allows three
+[refinements](/concepts/feedback-loops#counting-rounds), four drafts in
+all. When the fourth draft does not pass, the judge is told it is the last
+round. If it lets the
 draft stand, the draft goes to the editor, with the open findings on the
 record. Any other answer fails the run, and the reason names the cap, so
 the editor is never asked.

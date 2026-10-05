@@ -63,7 +63,7 @@ export const featureDelivery = pipeline(
     { name: 'analyse', job: analyse },
     { name: 'implement', job: implement },
     { name: 'test', job: testStage },
-    { name: 'review', job: review },
+    { name: 'review', job: review, acceptsKickbackTo: ['implement'] },
     { name: 'approve', job: approve },
   ],
   { maxKickbacks: 2 },

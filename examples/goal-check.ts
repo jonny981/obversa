@@ -88,7 +88,7 @@ const graph = dag({
         return `wrote draft ${builds}`;
       }),
     },
-    goal: { needs: 'build', job: goalCheck(checker, { target: 'build', text: brief }) },
+    goal: { needs: 'build', acceptsKickbackTo: ['build'], job: goalCheck(checker, { target: 'build', text: brief }) },
     review: { needs: 'goal', job: fnJob('review', () => 'reads well') },
   },
 });

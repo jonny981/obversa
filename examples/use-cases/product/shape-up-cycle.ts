@@ -202,7 +202,7 @@ const table = dag({
 });
 
 // 3. The build, inside the appetite: the pitch is the brief, the appetite
-// is the stage's time limit, refine is the rounds, scope is written down,
+// is the stage's time limit, refine is the rounds of rework, scope is written down,
 // and a check fails a change that names a no-go.
 function buildFor(request: Request) {
   const pitch = request.id;

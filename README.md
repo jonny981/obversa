@@ -107,8 +107,9 @@ purpose of the work and the revisions so far. `judge()` from
 Here Jev makes the judgement, and the returns to the builder end when Jev
 stops them or the review passes. Jev decides a blocking finding too. To
 bound the returns as well, pass
-`judge(judgeSeat, { cap: 4 })`: after the last review the cap allows, Jev is
-asked once more, and the run fails unless Jev lets the work stand. [Know when to stop](https://docs.obversa.ai/patterns/judge-stops-the-loop)
+`judge(judgeSeat, { cap: 4 })`: it allows four returns to the writer, Jev
+reads the review of the last one too, and the run fails unless Jev lets the
+work stand. [Know when to stop](https://docs.obversa.ai/patterns/judge-stops-the-loop)
 shows the questions and a complete writing example.
 
 ### Ask a panel
@@ -234,8 +235,8 @@ The feature team takes a ticket through seven steps:
 ```ts examples/teams/feature-delivery.ts (excerpt)
       nodes: {
         build: { job: build(ticket.brief, files, tests) },
-        goal: { needs: 'build', job: goalCheck(goalSeat, { target: 'build', text: ticket.brief }) },
-        review: { needs: 'goal', job: review(ticket.brief, files) },
+        goal: { needs: 'build', acceptsKickbackTo: ['build'], job: goalCheck(goalSeat, { target: 'build', text: ticket.brief }) },
+        review: { needs: 'goal', acceptsKickbackTo: ['build'], job: review(ticket.brief, files) },
         ...(attended ? { approve: { needs: 'review', job: approve(start!) } } : {}),
       },
 ```

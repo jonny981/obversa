@@ -156,8 +156,8 @@ export function featureTeam(ticket: BriefSource): Job {
       name: 'feature-delivery',
       nodes: {
         build: { job: build(ticket.brief, files, tests) },
-        goal: { needs: 'build', job: goalCheck(goalSeat, { target: 'build', text: ticket.brief }) },
-        review: { needs: 'goal', job: review(ticket.brief, files) },
+        goal: { needs: 'build', acceptsKickbackTo: ['build'], job: goalCheck(goalSeat, { target: 'build', text: ticket.brief }) },
+        review: { needs: 'goal', acceptsKickbackTo: ['build'], job: review(ticket.brief, files) },
         ...(attended ? { approve: { needs: 'review', job: approve(start!) } } : {}),
       },
       // Jev decides each finding the review sends back, a block included,

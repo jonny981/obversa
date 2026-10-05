@@ -13,6 +13,13 @@ import type {
 } from './types.js';
 import type { EnvHandle } from '../env/environment.js';
 
+/** Internal context key: the file the dag node that runs this job declares
+ * it builds (the node's `file`). A writer with no `writes` of its own checks
+ * this file alone for unchanged work. A child context keeps it, so a writer
+ * inside a `loop()` or a team checks its node's file too; each dag node sets
+ * or clears it. Not exported from the package. */
+export const NODE_FILE = Symbol('obversa:node-file');
+
 export interface ContextOverride {
   depth: number;
   path: readonly string[];
@@ -54,8 +61,9 @@ export function criterionFor(
 export function childContext(
   parent: JobContext,
   over: ContextOverride,
-): JobContext {
+): JobContext & { [NODE_FILE]?: string } {
   return {
+    [NODE_FILE]: (parent as JobContext & { [NODE_FILE]?: string })[NODE_FILE],
     engine: parent.engine,
     resolveEngine: parent.resolveEngine,
     signal: parent.signal,

@@ -520,12 +520,14 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
         desc: 'Write an executable plan from the requirements, one acceptance check per job.',
         gate: 'Every requirement has a check in the plan and no check asks for more than its requirement.',
         needs: ['research-requirements'],
+        acceptsKickbackTo: ['research-requirements'],
       },
       'plan-review': {
         job: planReview,
         desc: 'Have the reviewers read the plan against the requirements and send it back if it falls short.',
         gate: 'At least the threshold number of reviewers have accepted the plan.',
         needs: ['plan'],
+        acceptsKickbackTo: ['plan'],
       },
       'tests-first': {
         job: testsFirst,
@@ -538,6 +540,7 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
         desc: 'Have the reviewers check that the tests cover the plan and that any red test is red for a stated reason.',
         gate: 'At least the threshold number of reviewers have accepted the tests.',
         needs: ['tests-first'],
+        acceptsKickbackTo: ['tests-first'],
       },
       implement: {
         job: implementationLoop,

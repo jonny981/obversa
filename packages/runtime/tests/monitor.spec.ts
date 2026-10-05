@@ -166,7 +166,7 @@ function productDecisionReview(prompts: string[]) {
         label: 'write', model: 'writer-mock', prompt: 'Write the page.', consumeFeedback: true,
         engine: new MockEngine((request) => { prompts.push(request.prompt); return 'wrote the page'; }),
       }),
-      review: { needs: ['write'], job: fnJob('review', () => revisionRequest({
+      review: { needs: ['write'], acceptsKickbackTo: ['write'], job: fnJob('review', () => revisionRequest({
         target: 'write', reason: 'Choose the audience', findings: [{ severity: 'should-fix', evidence: 'The page must choose one audience.' }],
       })) },
     },
@@ -408,6 +408,7 @@ describe('the run monitor', () => {
         implement: fnJob('implement', () => 'wrote it'),
         review: {
           needs: 'implement',
+          acceptsKickbackTo: ['implement'],
           job: fnJob('review', (): Outcome => (reviews++ === 0 ? kickback('implement', 'missing header') : { status: 'pass', summary: 'fine' })),
         },
       },

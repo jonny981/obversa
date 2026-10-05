@@ -21,11 +21,11 @@ function workDir(): string {
 
 const FINDING = { severity: 'should-fix' as const, evidence: 'page.md:1 the title is vague' };
 
-/** A loop whose review always asks for changes, so it runs out after `max` rounds. */
+/** A loop whose review always asks for changes, so it runs out after `max` rejections in a row. */
 function neverPasses(name: string, max: number) {
   return loop({
     name,
-    max,
+    maxReviewRestarts: max,
     body: fnJob(`${name}-write`, async () => ({ status: 'pass', summary: 'wrote it' })),
     review: fnJob(`${name}-review`, async () => revisionRequest({ reason: 'the title is vague', findings: [FINDING] })),
   });
@@ -105,7 +105,7 @@ describe('a workflow stage reviewed by a panel', () => {
   it('fails the run with the last findings when the panel never clears it', async () => {
     const reviewCalls: AgentRequest[] = [];
     const writer = new MockEngine((req) => {
-      writeFileSync(join(req.cwd!, 'page.md'), 'draft');
+      writeFileSync(join(req.cwd!, 'page.md'), `draft ${reviewCalls.length}`);
       return JSON.stringify({ status: 'pass', summary: 'wrote it' });
     });
     const reviewer = new MockEngine((req) => {
@@ -121,9 +121,9 @@ describe('a workflow stage reviewed by a panel', () => {
     expect(reviewCalls.length).toBeGreaterThan(0);
     expect(result.outcome.status).toBe('fail');
     expect(exitCodeFor(result.outcome)).not.toBe(0);
-    expect(result.outcome.summary).toContain('"write" ran out of rounds');
     const write = (result.outcome.data as Record<string, Outcome>).write!;
-    expect(write.status).toBe('exhausted');
+    expect(write.status).toBe('fail');
+    expect(write.summary).toContain('with no refinements left');
     expect(write.revision?.findings?.map((f) => f.evidence)).toContain('REVIEW: the title is vague');
   });
 });
@@ -160,7 +160,7 @@ describe('an optional reviewed stage that runs out of rounds', () => {
       ],
     });
     const result = await run(job, { cwd: workDir() });
-    expect((result.outcome.data as Record<string, Outcome>).write!.status).toBe('exhausted');
+    expect((result.outcome.data as Record<string, Outcome>).write!.status).toBe('fail');
     expect(fallbacks).toBe(1);
     expect(result.outcome.status).toBe('pass');
   });

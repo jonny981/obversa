@@ -61,7 +61,9 @@ function scriptedTeam(opts: {
   const judgeCalls: AgentRequest[] = [];
   const writer = new MockEngine((req) => {
     writerCalls.push(req);
-    if (!(opts.skipFirstWrite && writerCalls.length === 1)) writeFileSync(join(req.cwd!, 'page.md'), `draft ${writerCalls.length}`);
+    // A revised draft differs from the one reviewed, even from a fresh worker.
+    const draft = `draft ${writerCalls.length}${req.prompt.includes('Previous review') ? ' (revised)' : ''}`;
+    if (!(opts.skipFirstWrite && writerCalls.length === 1)) writeFileSync(join(req.cwd!, 'page.md'), draft);
     return JSON.stringify({ status: 'pass', summary: 'wrote it' });
   });
   const goalEngine = new MockEngine(scripted(opts.goalReplies, goalCalls));
@@ -258,6 +260,7 @@ describe('goalCheck(): the dag() helper', () => {
         build: { job: fnJob('build', (ctx) => { builds.push(ctx.lastReview); return 'built'; }) },
         goal: {
           needs: 'build',
+          acceptsKickbackTo: ['build'],
           job: goalCheck(seat(goalEngine, 'goal-mock', ['Read']), {
             target: 'build',
             text: 'Write a welcome page that lists the opening hours.',
@@ -292,12 +295,13 @@ describe('goalCheck(): the dag() helper', () => {
         build: { job: fnJob('build', () => { builds += 1; return 'built'; }) },
         goal: {
           needs: 'build',
+          acceptsKickbackTo: ['build'],
           job: goalCheck(seat(goalEngine, 'goal-mock', ['Read']), {
             target: 'build',
             text: 'Write a welcome page that lists the opening hours.',
           }),
         },
-        review: { needs: 'goal', job: async () => { reviews += 1; return revisionRequest({ target: 'build', findings: [{ severity: 'should-fix', evidence: 'REVIEW: the title is vague' }] }); } },
+        review: { needs: 'goal', acceptsKickbackTo: ['build'], job: async () => { reviews += 1; return revisionRequest({ target: 'build', findings: [{ severity: 'should-fix', evidence: 'REVIEW: the title is vague' }] }); } },
       },
     });
     const result = await run(graph, { cwd: workDir() });

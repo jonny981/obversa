@@ -14,10 +14,10 @@ const testCommand = {
   timeoutMs: 30_000,
 };
 
-async function writePanelFiles(cwd: string): Promise<void> {
+async function writePanelFiles(cwd: string, revision = 1): Promise<void> {
   await mkdir(join(cwd, 'src'), { recursive: true });
   await mkdir(join(cwd, 'test'), { recursive: true });
-  await writeFile(join(cwd, 'src/result.mjs'), 'export const result = 7;\n');
+  await writeFile(join(cwd, 'src/result.mjs'), `export const result = 7; // revision ${revision}\n`);
   await writeFile(
     join(cwd, 'test/result.test.mjs'),
     "import assert from 'node:assert/strict';\nimport test from 'node:test';\nimport { result } from '../src/result.mjs';\ntest('result is written', () => assert.equal(result, 7));\n",
@@ -73,7 +73,7 @@ describe('thresholdPanel', () => {
           return pass('implementation written');
         },
         async (request) => {
-          await writePanelFiles(request.cwd!);
+          await writePanelFiles(request.cwd!, 2);
           return pass('implementation repaired');
         },
       ]);

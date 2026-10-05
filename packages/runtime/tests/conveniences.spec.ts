@@ -197,6 +197,7 @@ describe('commandJob', () => {
         implement: fnJob('implement', () => { implementRuns += 1; return `attempt ${implementRuns}`; }),
         test: {
           needs: 'implement',
+          acceptsKickbackTo: ['implement'],
           job: commandJob(
             'test',
             [node, '-e', `process.exit(process.env.RUNS === '1' ? 1 : 0)`],
@@ -409,6 +410,7 @@ describe('approval', () => {
       { name: 'implement', job: fnJob('implement', () => { implementRuns += 1; return `report.csv v${implementRuns}`; }) },
       {
         name: 'approve',
+        acceptsKickbackTo: ['implement'],
         job: approval('approve', {
           question: 'Ship this change?',
           target: 'implement',
@@ -441,7 +443,7 @@ describe('approval', () => {
     let implementRuns = 0;
     const ship = pipeline('ship', [
       { name: 'implement', job: fnJob('implement', () => { implementRuns += 1; return `report.csv v${implementRuns}`; }) },
-      { name: 'approve', job: approval('approve', { question: 'Ship this change?', target: 'implement' }) },
+      { name: 'approve', acceptsKickbackTo: ['implement'], job: approval('approve', { question: 'Ship this change?', target: 'implement' }) },
     ], { maxKickbacks: 1 });
     const first = await run(ship, { callbacks: client });
     expect(first.outcome.status).toBe('paused');

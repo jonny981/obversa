@@ -87,12 +87,14 @@ export function dagResumeIdentity(config: DagConfig): string {
   return createHash('sha256').update(JSON.stringify(declared)).digest('hex');
 }
 
-function recordedUsage(ctx: JobContext): readonly RecordedEngineUsage[] {
+function recordedUsage(ctx: Pick<JobContext, 'state'>): readonly RecordedEngineUsage[] {
   const value = ctx.state[RECORDED_ENGINE_USAGE];
   return Array.isArray(value) ? value as readonly RecordedEngineUsage[] : [];
 }
 
-function restoreRecordedUsage(ctx: JobContext): void {
+/** Put back the model answers the record holds for the step at `ctx.path`,
+ * when a resume reuses the step instead of running it. */
+export function restoreRecordedUsage(ctx: Pick<JobContext, 'state' | 'path'>): void {
   const priorUsage = (ctx.state[RESUME_RECORDED_USAGE] as ReadonlyMap<string, readonly RecordedEngineUsage[]> | undefined)
     ?.get(ctx.path.join('/'));
   if (priorUsage?.length) {
@@ -116,7 +118,9 @@ function restoreRecordedUsage(ctx: JobContext): void {
 
 /** Reuse a completed first attempt, or reconcile an unsafe interrupted one.
  * `anchor` is the record's anchor this graph invocation took; without one
- * the step runs. `isolated` marks a step that works in its own worktree and lands only when
+ * the step runs. `restored` marks a later attempt that a resume starts from
+ * the graph's saved rounds: an interrupted or paused record is about that
+ * attempt, and a finished one is an earlier attempt's, so it never stands. `isolated` marks a step that works in its own worktree and lands only when
  * it finishes: the caller wraps the fork itself, so a reused outcome or the
  * reconciliation question comes before any new worktree exists. */
 export function resumeGuard(
@@ -126,6 +130,7 @@ export function resumeGuard(
   retrySafe: boolean,
   anchor: ResumeAnchor | undefined,
   isolated = false,
+  restored = false,
 ): Job {
   const guarded: Job = async (ctx) => {
     const resumed = ctx.state[RESUME_STAGE_OUTCOMES] as ResumedStageRecords | undefined;
@@ -136,13 +141,13 @@ export function resumeGuard(
       restoreRecordedUsage(ctx);
       return delegateNodeJob(ctx, guarded, job, ctx);
     }
-    if (ctx.graph?.attempt === 1 && recorded !== undefined) {
+    if ((ctx.graph?.attempt === 1 || restored) && recorded !== undefined) {
       if (recorded.kind === 'interrupted') {
         if (!retrySafe) {
           restoreRecordedUsage(ctx);
           return reconcileInterrupted(ctx, guarded, job, label, identity, anchor!.recordId, recorded.startLine, isolated);
         }
-      } else if (recorded.outcome.status === 'pass'
+      } else if (!restored && recorded.outcome.status === 'pass'
           && (recorded.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true) {
         restoreRecordedUsage(ctx);
         return recorded.outcome;

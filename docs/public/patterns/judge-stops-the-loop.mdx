@@ -98,12 +98,12 @@ list, with who raised it and how the others voted.
 ## A cap as a backstop
 
 To bound the rounds as well, pass a cap: `judge(judgeSeat, { cap: 3 })`.
-On a `workflow()` stage, a cap of 3 gives the writer at most three rounds
-with the reader, its first draft included. On a `dag()`'s `maxKickbacks`, a
-cap of 3 allows three returns to the target.
+A cap of 3 allows three [refinements](/concepts/feedback-loops#counting-rounds):
+the first draft and three more, four builds in all. It means the same on a
+`workflow()` stage's `refine` and on a `dag()`'s `maxKickbacks`.
 
-When the last review the cap allows does not pass, the judge is asked once
-more and told that this is the last round. Its answer decides the outcome:
+When the review of the last build does not pass, the judge is asked about
+it too and told that this is the last round. Its answer decides the outcome:
 
 - **`holds` or `over_polishing`.** The work stands as a pass with the
   judge's reason. The findings still open are on the outcome as
@@ -120,10 +120,14 @@ goes to the judge too, with the same rules.
 
 ## The questions
 
-The judge sees the use case from the brief, the draft, the latest findings,
-the findings it skipped in earlier rounds with its reasons, and every earlier
-round it was asked about, with that round's counts and the size of its
-change.
+The judge sees the latest findings, the findings it skipped in earlier
+rounds with its reasons, the round number and the cap. It sees every
+earlier round it was asked about, with that round's counts and the size of
+that round's change. It also sees the use case and the current draft. A
+`workflow()` takes the use case from the brief's `Use case:` paragraph and
+the draft from the first file the stage `writes`. A `dag()` takes them from
+its `useCase` and the target node's `file`.
+Each judge entry in the record names the target and the round.
 
 For each finding in the round, the judge gets one `choice` question, keyed
 `finding-1`, `finding-2` and so on in the order of the round's findings. It
@@ -158,8 +162,12 @@ answer follows the round answer: it goes back when that answer is
 
 A `dag()` takes the same `judge()` value on `maxKickbacks`. The target that
 the work goes back to gets only the findings the judge acts on, and a stop
-means the same thing at both levels. The unmet requirements a `goalCheck()`
-node sends back go to the target without the judge.
+means the same thing at both levels. The judge runs as part of the node that
+sent the work back, inside that node's time limit. The unmet requirements a
+`goalCheck()` node sends back go to the target without the judge.
+
+A stage a person reviews takes the same judge. Each refusal goes to the
+judge with the person's note as a finding, as a reviewer's findings do.
 
 Pass your own set as `judge(seat, { questions })` when this wording
 does not fit your use case. With your own set, the judge is not asked about

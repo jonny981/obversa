@@ -44,7 +44,7 @@ export const shipIt = pipeline(
   [
     { name: 'analyse', job: analyse },
     { name: 'implement', job: implement },
-    { name: 'approve', job: approve },
+    { name: 'approve', job: approve, acceptsKickbackTo: ['implement'] },
   ],
   { maxKickbacks: 1 },
 );
