@@ -260,7 +260,7 @@ const PAGE = /http:\/\/127\.0\.0\.1:\d+\//;
 export async function runAnswering(
   file: string,
   args: readonly string[],
-  options: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; answer: Readonly<Record<string, unknown>>; beforeAnswer?: () => Promise<void> },
+  options: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; answer: Readonly<Record<string, unknown>>; beforeAnswer?: () => Promise<void>; trace?: (event: unknown) => void },
 ): Promise<SpawnedRun> {
   const child = spawn(file, [...args], { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
@@ -279,8 +279,9 @@ export async function runAnswering(
       const page = PAGE.exec(stdout)?.[0];
       if (page !== undefined) {
         try {
-          question = await answerOnPage(page, options.answer, options.beforeAnswer);
+          question = await answerOnPage(page, options.answer, options.beforeAnswer, options.trace);
         } catch (error) {
+          options.trace?.({ error: String(error), exited });
           // The run may end between a look at the page and the next; only a
           // page that refuses while the run is still going is a failure.
           await Promise.race([ended, delay(1_000)]);
@@ -303,8 +304,10 @@ export async function runAnswering(
 }
 
 /** Answer the first pending question on the page and return its text, or nothing while none is pending. */
-async function answerOnPage(page: string, response: Readonly<Record<string, unknown>>, beforeAnswer?: () => Promise<void>): Promise<string | undefined> {
-  const state = await (await fetch(`${page}state`)).json() as { pending: Array<{ requestId: string; decisionText: string }> };
+async function answerOnPage(page: string, response: Readonly<Record<string, unknown>>, beforeAnswer?: () => Promise<void>, trace?: (event: unknown) => void): Promise<string | undefined> {
+  const stateReply = await fetch(`${page}state`);
+  const state = await stateReply.json() as { pending: Array<{ requestId: string; decisionText: string }> };
+  trace?.({ method: 'GET', path: '/state', status: stateReply.status, pending: state.pending });
   const asked = state.pending[0];
   if (asked === undefined) return undefined;
   await beforeAnswer?.();
@@ -314,6 +317,7 @@ async function answerOnPage(page: string, response: Readonly<Record<string, unkn
     body: JSON.stringify({ requestId: asked.requestId, response }),
   });
   const result = await reply.json() as { ok: boolean; reason?: string };
+  trace?.({ method: 'POST', path: '/answer', requestId: asked.requestId, response, status: reply.status, result });
   if (!result.ok) throw new Error(`the page refused the answer to "${asked.decisionText}": ${result.reason ?? reply.status}`);
   return asked.decisionText;
 }

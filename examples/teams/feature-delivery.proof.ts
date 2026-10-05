@@ -299,7 +299,17 @@ try {
   // run's page and reads the question there while it is pending.
   const attended = await seed('attended', featureFiles, featureScript);
   const { file, args } = child('feature-delivery', []);
-  const asked = await runAnswering(file, args, { cwd: attended.dir, env: envFor(attended), timeoutMs: 120_000, answer: { approved: true } });
+  const traffic: unknown[] = [];
+  const asked = await runAnswering(file, args, {
+    cwd: attended.dir, env: envFor(attended), timeoutMs: 120_000, answer: { approved: true },
+    trace: (event) => { traffic.push(event); if (traffic.length > 20) traffic.shift(); },
+  });
+  if (asked.status !== 0 || printed(asked.stdout).status !== 'pass') {
+    console.error(JSON.stringify({
+      platform: process.platform, node: process.version, asked, traffic,
+      record: readRecord(attended.dir, 'feature-delivery'),
+    }, null, 2));
+  }
   assert.equal(asked.status, 0, `the attended run exited ${asked.status ?? `signal ${asked.signal}`}
   stdout: ${asked.stdout}
   stderr: ${asked.stderr}`);
