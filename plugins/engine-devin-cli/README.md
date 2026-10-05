@@ -28,7 +28,10 @@ Devin runs clean by default: with your own environment and Devin login,
 but with an empty config file in place of your Devin settings. Set
 `clean: false` to run with your Devin settings too. A
 read-only step runs with `--permission-mode auto`, and a step that may write
-runs with `--permission-mode accept-edits`. Devin has no mode without a
+runs with `--permission-mode accept-edits`. A write step under
+`accept-edits` cannot run commands, so a builder that runs its tests needs
+`devin('swe-2-max', { permissionMode: 'dangerous' })`. A read step refuses
+any mode but `auto`. Devin has no mode without a
 folder and no flag for a list of named tools. The plugin passes
 `--respect-workspace-trust false`, because print mode cannot show Devin's
 folder trust prompt.

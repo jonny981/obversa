@@ -58,7 +58,7 @@ create a file, and no file in the repository changed.
 | [Claude CLI](/packages/engine-claude-cli#clean) | Yes | Yes | The model's tools held; your hooks can write | Yes |
 | [Claude Agent SDK](/packages/engine-claude-agent-sdk#clean) | Yes | Yes | The model's tools held; your hooks can write | Yes |
 | [Codex CLI](/packages/engine-codex-cli#clean) | Yes | Yes | Yes | Yes |
-| [Devin CLI](/packages/engine-devin-cli#options) | Yes | Yes | Yes; a read step that tries to write ends without an answer | Yes; a read step that tries to write ends without an answer |
+| [Devin CLI](/packages/engine-devin-cli#options); a builder that runs commands needs `permissionMode: 'dangerous'` | Yes | Yes | Yes; a read step that tries to write ends without an answer | Yes; a read step that tries to write ends without an answer |
 | [OpenCode CLI](/packages/engine-opencode-cli#clean) | Yes | Yes | Yes | Yes |
 | [Grok CLI](/packages/engine-grok-cli#clean) | Yes | No | Yes | No clean mode |
 | [Anthropic API](/packages/engine-anthropic-api) | No setup to load | Always clean | Refuses a read step | Refuses a read step |
@@ -77,7 +77,9 @@ create a file, and no file in the repository changed.
   load in clean mode: clean mode replaces only your Devin settings file.
   In a read step, Devin refuses a write and no file changes. Devin then
   ends the whole run without an answer, so the step fails and says why.
-  A read step that only reads answers normally.
+  A read step that only reads answers normally. The default write mode,
+  `accept-edits`, edits files but refuses a command; a builder that runs
+  its tests needs `devin(model, { permissionMode: 'dangerous' })`.
 - **OpenCode CLI.** Your own skills in `~/.claude/skills` and
   `~/.agents/skills` still load in clean mode. OpenCode's switch that skips
   them also skips the repository's own skills. Clean mode moves the whole
