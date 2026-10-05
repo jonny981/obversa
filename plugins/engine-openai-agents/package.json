@@ -1,6 +1,6 @@
 {
   "name": "@obversa/engine-openai-agents",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Run an OpenAI Agents SDK agent as one Obversa engine.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",

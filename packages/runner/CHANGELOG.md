@@ -1,5 +1,15 @@
 # @obversa/runner
 
+## 0.2.12
+
+### Patch Changes
+
+- Updated dependencies [6ea2ab2]
+- Updated dependencies [229276b]
+  - @obversa/runtime@0.2.12
+  - @obversa/api@0.2.12
+  - @obversa/core@0.2.12
+
 ## 0.2.11
 
 ### Patch Changes
