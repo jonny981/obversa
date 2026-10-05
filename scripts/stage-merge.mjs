@@ -153,6 +153,7 @@ export const stageBranches = {
   F196: 'fix/devin-read-mode',
   F197: 'feat/improve-workflow',
   F200: 'docs/docs-at-obversa-path',
+  F203: 'feat/run-page-product-decision',
   F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',

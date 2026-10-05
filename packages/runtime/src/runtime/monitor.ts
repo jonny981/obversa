@@ -414,25 +414,17 @@ function page(name: string | undefined): string {
   const requiredOf = (schema) => shapeOf(schema).required;
   const isApproval = (schema) => requiredOf(schema).join() === 'approved';
   const typesOf = (field) => (field && field.type !== undefined ? [].concat(field.type) : []);
-  // The empty value a field accepts: an empty object when it accepts any value.
-  function emptyFor(field) {
-    const type = typesOf(field)[0];
-    return type === 'string' ? '' : type === 'array' ? [] : type === 'null' ? null : type === 'boolean' ? false : type === 'number' || type === 'integer' ? 0 : {};
-  }
-  // A field is filled in when its schema allows one value. A decision's feedback is
-  // also filled in when it only names a type, with that type's empty value. Otherwise the person types it.
+  // A field is filled in when its schema allows one value. Otherwise the person types it.
   function filledFor(schema, field) {
-    const property = shapeOf(schema).properties[field] || {};
-    const one = oneValue(property);
-    if (one) return one;
-    if (field !== 'feedback' || !requiredOf(schema).includes('prompt')) return undefined;
-    const rules = Object.keys(property).filter((k) => k !== 'title' && k !== 'description');
-    return rules.length === 0 || rules.join() === 'type' ? { value: emptyFor(property) } : undefined;
+    return oneValue(shapeOf(schema).properties[field]);
   }
   const asked = (schema) => requiredOf(schema).filter((f) => !filledFor(schema, f));
-  // What a person typed, as the field's type: text for a string or untyped field, JSON for the rest.
+  // What a person typed, as the field's type. A blank untyped or object field, such as a judge's
+  // default feedback, sends an empty object. Otherwise a string or untyped field sends the text,
+  // and any other field, an object field included, sends the text parsed as JSON, or the text when it does not parse.
   function valueFor(field, text) {
     const types = typesOf(field);
+    if (!text.trim() && (types.length === 0 || types.includes('object'))) return {};
     if (types.length === 0 || types.includes('string')) return text;
     try { return JSON.parse(text); } catch { return text; }
   }
@@ -445,9 +437,15 @@ function page(name: string | undefined): string {
     for (const field of requiredOf(schema)) { const filled = filledFor(schema, field); response[field] = filled ? filled.value : valueFor(properties[field], read(field)); }
     return response;
   }
+  // A field's label is its own description, when its schema gives one.
+  const describe = (property, fallback) => (property && typeof property.description === 'string' ? property.description : fallback);
   function formHtml(p) {
     const id = esc(p.requestId);
-    if (isApproval(p.responseSchema)) return '<form onsubmit="return false"><input name="note" placeholder="a note, if any"><button class="yes" data-answer="yes" data-request="' + id + '">Yes</button><button data-answer="no" data-request="' + id + '">No</button></form>';
+    if (isApproval(p.responseSchema)) {
+      const note = '<input name="note" placeholder="a note, if any">';
+      const described = describe(shapeOf(p.responseSchema).properties.note);
+      return '<form onsubmit="return false">' + (described === undefined ? note : '<label>' + esc(described) + note + '</label>') + '<button class="yes" data-answer="yes" data-request="' + id + '">Yes</button><button data-answer="no" data-request="' + id + '">No</button></form>';
+    }
     // With a choice of shapes, the form shows every field any choice asks for, and sends the chosen one's.
     const choices = choicesOf(p.responseSchema);
     const shapes = choices.length ? choices.map((_, i) => chosen(p.responseSchema, i)) : [p.responseSchema];
@@ -455,8 +453,8 @@ function page(name: string | undefined): string {
     const fields = [...new Set(shapes.flatMap(asked))];
     const pick = choices.length ? '<label>Answer with<select data-choice>' + choices.map((c, i) => '<option value="' + i + '">' + esc(choiceName(c, i)) + '</option>').join('') + '</select></label>' : '';
     return '<form class="fields" onsubmit="return false">' + pick + fields.map((f) => f === 'prompt'
-      ? '<label>Your decision<textarea name="prompt" rows="4"></textarea></label>'
-      : '<label>' + esc(f) + '<input name="' + esc(f) + '"' + (properties[f] && Array.isArray(properties[f].enum) ? ' placeholder="one of: ' + esc(properties[f].enum.join(', ')) + '"' : '') + '></label>').join('')
+      ? '<label>' + esc(describe(properties[f], 'Your decision')) + '<textarea name="prompt" rows="4"></textarea></label>'
+      : '<label>' + esc(describe(properties[f], f)) + '<input name="' + esc(f) + '"' + (properties[f] && Array.isArray(properties[f].enum) ? ' placeholder="one of: ' + esc(properties[f].enum.join(', ')) + '"' : '') + '></label>').join('')
       + '<button class="yes" data-request="' + id + '">Send</button></form>';
   }
   let schemas = new Map();
