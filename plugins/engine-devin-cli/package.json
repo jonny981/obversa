@@ -1,6 +1,6 @@
 {
   "name": "@obversa/engine-devin-cli",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Run engine requests through a fresh Devin CLI process.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",

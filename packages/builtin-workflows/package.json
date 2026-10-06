@@ -1,6 +1,6 @@
 {
   "name": "@obversa/builtin-workflows",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Ready-made team workflows for Obversa.",
   "keywords": [
     "agent",
