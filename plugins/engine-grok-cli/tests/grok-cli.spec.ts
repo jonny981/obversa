@@ -419,6 +419,18 @@ describe('Grok CLI adapter', () => {
     expect(invocations(calls).filter((call) => call.kind === 'model')).toEqual([]);
   });
 
+  it('reports a version answer that would come after the limit as a timeout', async () => {
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const engine = new GrokCliEngine({
+      ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls, OBVERSA_TEST_GROK_BOOT_DELAY_MS: '2000' },
+    });
+    // The stand-in waits 2,000 ms before it answers with the right version, long after the 250 ms limit.
+    await expect(engine.admit(admissionRequest(request({ timeoutMs: 250 })), new AbortController().signal))
+      .rejects.toMatchObject({ name: 'EngineError', kind: 'timeout' });
+    // It was stopped during that wait, before it recorded the call.
+    expect(invocations(calls)).toEqual([]);
+  });
+
   it('maps a successful version cleanup failure to an unknown EngineError', async () => {
     const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
     const engine = new GrokCliEngine({

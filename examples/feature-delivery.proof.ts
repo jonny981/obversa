@@ -105,6 +105,7 @@ const REPAIRED_TESTS = [
 const root = await mkdtemp(join(tmpdir(), 'obversa-feature-delivery-proof-'));
 const workspace = join(root, 'workspace');
 const bin = join(root, 'bin');
+let approvalQuestionSeen = false;
 try {
   await mkdir(workspace, { recursive: true });
   await mkdir(bin, { recursive: true });
@@ -152,12 +153,13 @@ try {
     answer: { approved: true },
   });
   const elapsed = Date.now() - started;
+  approvalQuestionSeen = run.question !== undefined;
 
   const mode = existsSync(compiled) ? 'compiled-from-dist' : existsSync(repoTsconfig) ? 'repo-tsx' : 'consumer-tsx';
   assert.equal(run.status, 0, `the example child ${child.file} ${child.args.join(' ')} exited ${run.status ?? `signal ${run.signal}`} after ${elapsed}ms in ${mode} mode
   spawn error: ${run.error ?? 'none'}
-  stdout: ${run.stdout}
-  stderr: ${run.stderr}`);
+  stdout: ${run.stdout.slice(-4_000)}
+  stderr: ${run.stderr.slice(-4_000)}`);
   const printed = JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('\n{') + 1));
   assert.match(run.stdout, /http:\/\/127\.0\.0\.1:\d+\//, 'the run prints the page to answer on');
   assert.equal(run.question, 'Approve shipping the retry helper and its tests?', 'the page shows the question');
@@ -191,6 +193,44 @@ try {
     answeredOnPage: 'approve',
     mode,
   }, null, 2));
+} catch (error) {
+  try {
+    const recordRoot = join(workspace, '.obversa', 'records');
+    const records = existsSync(recordRoot) ? (await readdir(recordRoot)).filter((name) => name.endsWith('.jsonl')).slice(0, 2) : [];
+    for (const name of records) {
+      const events = (await readFile(join(recordRoot, name), 'utf8')).split('\n').flatMap((line) => {
+        try {
+          return [JSON.parse(line) as {
+            kind?: string;
+            path?: string[];
+            node?: string;
+            phase?: string;
+            outcome?: { status?: string; summary?: string; error?: { code?: string; message?: string } };
+          }];
+        } catch { return []; }
+      });
+      const describe = (event: (typeof events)[number]) => ({
+        path: [...(event.path ?? []), ...(event.kind === 'dag:node' ? [event.node ?? ''] : [])].filter(Boolean).join('/'),
+        status: event.outcome?.status,
+        summary: event.outcome?.summary?.slice(0, 180),
+        errorCode: event.outcome?.error?.code,
+        error: event.outcome?.error?.message?.slice(0, 500),
+      });
+      const nonPass = events.filter((event) => ((event.kind === 'job:end' || (event.kind === 'dag:node' && event.phase === 'done')) && event.outcome?.status !== 'pass'));
+      const finalRun = events.findLast((event) => event.kind === 'run:end');
+      console.error(JSON.stringify({
+        record: name,
+        approvalQuestionSeen,
+        nonPass: nonPass.slice(0, 12).map(describe),
+        omitted: Math.max(0, nonPass.length - 12),
+        finalRun: finalRun ? describe(finalRun) : null,
+      }));
+    }
+    if (records.length === 0) console.error(JSON.stringify({ approvalQuestionSeen, record: 'missing' }));
+  } catch {
+    console.error(JSON.stringify({ approvalQuestionSeen, record: 'unreadable' }));
+  }
+  throw error;
 } finally {
   await rm(root, { recursive: true, force: true });
 }
