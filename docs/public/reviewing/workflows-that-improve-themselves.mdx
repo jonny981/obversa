@@ -1,0 +1,351 @@
+---
+title: "Workflows that Improve Themselves"
+sidebarTitle: "Self-improving workflows"
+description: "Score a proposed change to a workflow on a fixed set of tasks, and keep it only when the workflow does better."
+---
+
+Score a proposed change to a workflow file before you keep it. `climbWorkflow`
+from `@obversa/builtin-workflows` runs the workflow on a fixed set of tasks,
+as it is and with the change, several times each. It keeps the change only
+when the workflow scores better with it, and it checks tasks the change was
+not tuned on, so a change that only fits the tuning tasks is caught. A
+person approves a kept change, or the numbers alone decide.
+
+## Score a change
+
+The change is a unified diff against the committed files, as a step that
+proposes changes would hand it over. It can change the workflow file and
+the files beside it. In the example, the workflow's settings file names the
+brief its answer step reads, and the change points it at another brief:
+
+```ts examples/climb-a-workflow.ts (excerpt)
+/** The proposed change, as a unified diff against the committed files. */
+const CHANGE = `diff --git a/settings.json b/settings.json
+--- a/settings.json
++++ b/settings.json
+@@ -1,3 +1,3 @@
+ {
+-  "answer": { "brief": "briefs/words.md" }
++  "answer": { "brief": "briefs/number.md" }
+ }
+`;
+```
+
+Give the climb the file, the change, the tasks, and a `load` function that
+turns one version of the file into the job for one task:
+
+```ts examples/climb-a-workflow.ts (excerpt)
+  const climb = climbWorkflow({
+    file: join(repo, 'sums.ts'),
+    change: CHANGE,
+    // The climb hands over each version's own copy of the file.
+    load: async (file, task): Promise<Job> => {
+      const workflow = await import(pathToFileURL(file).href) as { sums: (task: string, engine: MockEngine) => Promise<Job> };
+      return workflow.sums(task, model);
+    },
+    tasks: { tuning: ['2 + 3', '4 + 4'], heldOut: ['10 + 7'] },
+    mode: 'auto',
+    // What automatic mode may change. Anything else goes to a person.
+    auto: {
+      files: ['briefs/*.md'],
+      settings: {
+        file: 'settings.json',
+        may: { 'answer.brief': { oneOf: ['briefs/words.md', 'briefs/number.md'] } },
+      },
+    },
+    // Only a change outside the auto option reaches a person.
+    approve: (request) => {
+      questions.push(request.decisionText);
+      return { approved: false };
+    },
+  });
+  const result = await run(climb);
+```
+
+The climb never loads code itself. You say how a file becomes a job, so a
+workflow file keeps the shape you already use. A task is a string: a brief,
+or the path of a brief file.
+
+## How a change is scored
+
+Each task runs on the committed file and on the changed file, `runs` times
+each, 3 by default. Every run starts from the commit the repository was at
+when the climb started, in a worktree of its own. The changed runs apply the diff in their worktree
+first. Each run writes its own record, and the record's `run:start` names
+the workflow file that ran with its SHA-256, so every number traces back to
+one version of the file. A change that leaves the workflow file as it is,
+such as a change to its settings file, gives both versions the same SHA-256.
+
+The worktrees and the records live under `.obversa/climb/` in the
+repository. The climb removes each worktree when its run ends and keeps the
+records.
+
+By default a run scores 1 when it passed and the last check of each goal
+check in it met every requirement. Any other run scores 0. Pass `score` to
+score a run another way. It gets what the record says about the run:
+
+| Field | What it holds |
+| --- | --- |
+| `passed` | The run ended `pass`. |
+| `goalMet` | Every requirement of the last goal check met, or true when the run had no goal check. |
+| `rounds` | One, plus one for each send-back to an earlier step, plus one for each round a loop runs after its first. A loop runs again when its build, check, goal check or review fails. A judge that stops the rounds adds no round. A build that waits out a rate limit and runs again stays one round. |
+| `usd` | The dollars of the calls with a figure, reported by the engine or estimated from the price table. |
+| `unknownCostCalls` | The calls with no cost figure, which `usd` leaves out. |
+| `durationMs` | The time from the run's start to its end. |
+
+## How a change is kept
+
+The climb compares the mean scores of the two versions:
+
+1. **On the tuning tasks, the change must win.** A higher mean score wins.
+   On the same mean score, fewer mean rounds win. On the same rounds, a
+   lower mean cost wins, but only when every call on both sides had a cost
+   figure.
+2. **On each held-out task, the change must do no worse.** The same rule
+   applies the other way round: when the workflow without the change has a
+   higher mean score, fewer mean rounds, or a lower mean cost on a held-out
+   task, the change is discarded.
+
+Quality comes first. A cheaper change that passes less often has a lower
+mean score, so it loses before cost is read.
+
+## What a person sees
+
+`formatClimbReport` prints the comparison. This is the run of the example
+above:
+
+```text Output
+Workflow file: sums.ts
+task                version    runs  pass rate  mean score  mean rounds  mean cost  calls with no cost  mean time
+tuning: 2 + 3       baseline   3     0%         0.00        1.00         $0.0000    3                   0.0s
+                    candidate  3     100%       1.00        1.00         $0.0000    3                   0.0s
+tuning: 4 + 4       baseline   3     0%         0.00        1.00         $0.0000    3                   0.0s
+                    candidate  3     100%       1.00        1.00         $0.0000    3                   0.0s
+held out: 10 + 7    baseline   3     0%         0.00        1.00         $0.0000    3                   0.0s
+                    candidate  3     100%       1.00        1.00         $0.0000    3                   0.0s
+all tuning tasks    baseline   6     0%         0.00        1.00         $0.0000    6                   0.0s
+                    candidate  6     100%       1.00        1.00         $0.0000    6                   0.0s
+all held-out tasks  baseline   3     0%         0.00        1.00         $0.0000    3                   0.0s
+                    candidate  3     100%       1.00        1.00         $0.0000    3                   0.0s
+The numbers say: keep. On the tuning tasks the change has a mean score of 1.00 against 0.00, and it does no worse on any held-out task.
+Records: /private/var/folders/dt/77b46dy94tg4mmwwr66jd7dc0000gn/T/obversa-climb-a13AjI/.obversa/climb/climb-QBGa59
+```
+
+The stand-in model in the example reports no cost, so every call is in the
+"calls with no cost" column and the mean cost is $0. With a real engine the
+column shows how much of the cost is missing.
+
+## Attended and automatic
+
+- **`attended`, the default.** When the numbers say keep, a person sees the
+  comparison and the diff and answers. The question goes through the run's
+  callbacks client, as an [approval](/patterns/approval) does. With no
+  answer, the run pauses with the question pending. Pass `approve` to
+  answer in the same process.
+- **`auto`.** The numbers alone decide for a change that the `auto` option
+  allows, and nobody is asked. Any other kept change goes to a person, as
+  in `attended` mode. See [What automatic mode may change](#what-automatic-mode-may-change).
+
+A kept change is applied and committed on its own, with the comparison in
+the commit message, so you can revert it as one commit. The commit holds
+each file the change touches and nothing else.
+The commit title follows Conventional Commits, such as
+`feat(workflow): improve sums.ts, tuning score 0.00 to 1.00`.
+The climb refuses a change to a file with changes that are not committed. It
+does not apply the change when the repository has a new commit or the workflow file
+changed while the climb ran. When the commit of a kept change fails, the
+climb puts each file back as it was. A
+discarded change is not applied. The run's `measure` step records it with
+its numbers and the reason.
+
+## What automatic mode may change
+
+A workflow keeps the values worth tuning in a JSON settings file beside it:
+models, effort, time limits, the most rounds, which brief a step reads.
+Prompts and briefs are text files of their own. The `auto` option says which
+of these automatic mode may change without a person. The example above
+writes it inline. This one, kept in a JSON file, has a rule of each kind:
+
+```json climb-auto.json
+{
+  "files": ["briefs/*.md"],
+  "settings": {
+    "file": "settings.json",
+    "may": {
+      "builder.effort": { "oneOf": ["medium", "high"] },
+      "*.timeLimitMinutes": { "min": 10, "max": 90 },
+      "maxRounds": { "min": 2, "max": 6 },
+      "prompts.*": true
+    },
+    "never": ["reviewers", "checks"]
+  }
+}
+```
+
+- **`files`** lists globs of text files the change may edit. Each glob is
+  relative to the workflow file's folder. `*` matches within one folder, and
+  `**` matches across folders.
+- **`settings.file`** is the workflow's settings file, also relative to the
+  workflow file's folder.
+- **`settings.may`** maps a key path to a rule. Dots go between keys, and
+  `*` stands for one key of any name. A rule is `true` for any value,
+  `{ oneOf: [...] }` for one of a list, or `{ min, max }` for a number in a
+  range. A rule checks the whole new value of the key it names. A rule on
+  `prompts` checks the `prompts` object, not each prompt inside it. To check
+  each prompt, name them with `prompts.*`. When several rules match a
+  changed key, the value each rule names must meet that rule.
+- **`settings.never`** lists key paths the change may not set, even when a
+  `may` rule matches. `never` also covers the keys inside its key, so
+  `never: ['reviewers']` keeps every reviewer setting out of automatic mode.
+
+Everything not listed is not allowed. The workflow file itself is never
+allowed. With `mode: 'auto'` and no `auto` option, nothing is allowed, so
+every kept change goes to a person.
+
+Before any run, the climb reads the change file by file. It compares the
+settings file's values before and after the change, key by key. A settings
+file that is only reformatted has no changed key. A key that the change
+adds or removes is a changed key.
+
+A change outside the `auto` option is not refused. The climb still measures
+it, and when the numbers say keep, a person decides, as in `attended` mode.
+The report's `needsPerson` lists each file or key outside the option, and
+the rule a value broke. The person sees the same list in the comparison.
+If the example's rule allowed only `briefs/words.md`, it would print:
+
+```text Output
+A person decides, because automatic mode may not make this change:
+- settings.json: answer.brief is "briefs/number.md", and the rule "answer.brief" allows only "briefs/words.md"
+```
+
+With no `approve` answer, the run pauses with the question pending, as an
+attended climb does.
+
+The `auto` option is a plain object. Write it inline, as the example does,
+or import it from a JSON file or a module and pass it as `auto`. The climb
+never reads it from disk itself.
+
+`climbWorkflow` checks the object when it builds the climb. It refuses a
+malformed one with a message that names the wrong key, such as
+`auto.settings.may["maxRounds"].min, 6, is above its max, 2`.
+
+A change inside the `auto` option still has to keep every protection, as
+the next section explains.
+
+## Changes that are never applied
+
+A change that makes the workflow run with less protection is never applied,
+in either mode. The climb reads what the runs did, not the text of the
+diff. After the runs on each task, it counts how many baseline runs and how
+many candidate runs recorded each protection. The candidate must record
+each protection in at least as many runs as the baseline. So a change that
+skips a check in one run of three is refused, and so is a change that runs
+a check in one run when the baseline ran it in two.
+
+When a protection is missing, the climb refuses the change and starts no
+more runs.
+
+The climb counts only runs that have a partner: the first baseline run on
+a task goes with the first candidate run, and so on. A run that ends paused or aborted
+counts with what it recorded before it stopped. When a baseline run ends
+that way, its candidate run still runs, so the pair can be compared. Then
+no more runs start. If a protection is missing, the change is refused.
+Otherwise the comparison is unfinished, and the change is not kept.
+
+The climb reads the protections from the events of each run's record, and
+the other questions to a person from the run's callbacks client:
+
+| Kind | Where the climb reads it | Its label |
+| --- | --- | --- |
+| `review` | `loop:review`, the `job:end` of a review panel, or a question that asks a person to approve a stage's work or send it back | The full path of the step, such as `note/write/write-review`. |
+| `reviewer` | The `job:end` of a review panel, which names each reviewer that ran | The panel's path, then the stage name and the reviewer's name, which is the stage name and its place in the panel, such as `note/write/write-review/review-panel: write/write-2`. |
+| `check` | `condition:result` or `loop:condition` | The full path, the check and the command it ran with each argument, such as `sums/last: test (pnpm test)`. A check also gives a `requires` label for each command whose failure alone fails the check, such as `answer: until requires (pnpm test)`. When some command's failure alone does not fail the check, as in `any` or `not`, it also gives one `requires` label for the whole check, such as `answer: until requires any((pnpm test), (pnpm lint))`. These labels count a command no round reached. |
+| `judge` | `dag:start`, which names each step that has a judge | The full path and the step the judge decides about, such as `note: write`. |
+| `goal check` | `goal:check` | The full path and the goal check's label. |
+| `approval` | The `job:end` of an approval step, which names the question it asked under `asked`. Any other question to a person comes from the run's callbacks client and names the step that asked it in its input, under `requester.path`. | The full path of the step that asked it, the gate and the question, such as `note/write/write-review: sign-off: Ship it?`. |
+
+Each label carries the full path of its step. So two checks with the same
+name in two nested workflows are two protections, and so are two steps
+that put the same question to the same person. Two approval steps that
+ask the same question about the same input share one request and its
+answer, and each still counts. A step that only has the
+label of an approval step asks no question, so it is not that approval. A reviewer has the name
+of its place in the panel, not of its model. So two reviewers on the same
+model are two protections. An approval is any question to a person: an
+approval step, a person who reviews a stage, or a person who gives input.
+A step whose result only looks like an answer is not an approval.
+
+A check that keeps its name but runs a different command is a different
+check. So a change that keeps the `test` step but runs a smaller suite is
+refused, because the command the baseline ran is missing. The same holds
+for a command the baseline's check holds but never reached, such as the
+last command of a loop's `until` array after an earlier one fails. A
+command the change's check still holds but no longer runs is missing too.
+So a change from `all(test)` to `any(always, test)` is refused, because
+`any` stops at `always` and never runs the test. A change from
+`all(test, lint)` to `any(test, lint)` is refused, though both commands
+still run, because a failed test no longer fails the check. A change that
+adds a command to an `all` keeps every label, so the climb scores it. A
+check on its own, such as one `commandSucceeds`, requires its command, as
+an `all` of that one command does. So a change from `test` to
+`any(test, always)` is refused, though the test still runs, and a change
+from `all(test)` to `test` keeps every label.
+
+A judge counts when the workflow has it, whether or not it decides in the
+run. A judge decides only after a review fails, so a run whose reviews all
+pass never uses it. A change that drops the judge is still refused, because
+the next task whose review fails would have no judge.
+
+A change that adds a reviewer, or that changes only a prompt, leaves every
+protection in place, so the climb scores it.
+
+The report's `refused` names the task and each missing protection, and
+`formatClimbReport` prints the reason:
+
+```text Output
+Refused. On "2 + 3" the workflow as it is ran the check "sums/last: test (pnpm test)", and a run of the change ran without it, so the change is never applied.
+```
+
+## A budget
+
+`budget: { runs, usd }` stops the climb before its next run once that many
+runs have run, or once they cost that many dollars. The climb checks the
+cost only between runs. So the run that crosses the limit still finishes,
+and the total can end above the limit. Calls with no cost figure count
+nothing toward it. The report says when the budget cut the climb short, and an unfinished
+comparison never keeps a change. A run that ends paused or aborted leaves
+the comparison unfinished too. So does a run that cannot run at all, such
+as a candidate file with a syntax error or a broken import. The report
+keeps the runs that ran, and its `failed` names the task, the version, the
+run and the error.
+
+## Limits
+
+- **A few runs are a small sample.** Three runs a task tell a large
+  difference from noise, not a small one. Raise `runs` when the scores are
+  close.
+- **The score is only as good as the workflow's own checks.** A workflow
+  with no check passes whatever its model writes.
+- **The climb sees what ran, not how strict it was.** It finds a review, a
+  check, a judge, an approval or a goal check that no longer runs. It does
+  not find one that still runs but asks for less, such as a review prompt
+  that passes everything. In `attended` mode the person sees the diff.
+- **A check written as plain code records no check.** A step such as
+  `fnJob('check', ...)` records only its start and its end, so the climb
+  cannot tell it from any other step. Write a check as `commandJob` or
+  `gateJob` and the climb compares it.
+- **A protection that runs only on a condition can refuse a good change.**
+  When fewer candidate runs met the condition than baseline runs did, the
+  protection counts as missing. A candidate run that stops before it
+  reaches a protection also counts as missing it.
+- **A new question to a person counts as a new approval.** A change that
+  rewords the question an approval asks removes the old approval, so the
+  climb refuses it.
+
+## Next steps
+
+- [Evals](/reviewing/evals): the checks inside a run that decide the next
+  step.
+- [Read a record](/recording/read-a-record): what each run's record holds.
+- [Built-in workflows](/packages/builtin-workflows): the other ready-made
+  workflows in the package.

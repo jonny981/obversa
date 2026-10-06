@@ -23,7 +23,7 @@ import {
   pipeline,
   run,
 } from '../src/api.ts';
-import type { CallbackClient, CallbackRequest, Job, LoopEvent, Outcome, Sha256Digest } from '../src/api.ts';
+import type { CallbackClient, CallbackRequest, Job, JsonValue, LoopEvent, Outcome, Sha256Digest } from '../src/api.ts';
 import { createApprovalCallbackGate, type ApprovalSubjectInput } from '../src/callback/approval.js';
 import { compileGraph } from '../src/graph/type.js';
 import { dag as dagGraphType } from '../src/graph-types/dag.js';
@@ -425,6 +425,49 @@ describe('approval', () => {
     expect(outcome.status).toBe('pass');
     expect(implementRuns).toBe(2);
     expect(new Set(asked).size).toBe(2);
+  });
+
+  it('records the path of each step that asked, so two steps with the same label, question and input have two paths', async () => {
+    const client = createCallbackClient();
+    const signOff = approval('sign off', { question: 'Ship?', input: { change: 1 }, answer: () => ({ approved: true }) });
+    const started: (readonly string[])[] = [];
+    const ended: Extract<LoopEvent, { kind: 'job:end' }>[] = [];
+    const { outcome } = await run(pipeline('ship', [
+      { name: 'first', job: signOff },
+      { name: 'second', job: signOff },
+    ]), {
+      callbacks: client,
+      onEvent: (event) => {
+        if (event.kind === 'job:start' && event.label === 'sign off') started.push(event.path);
+        if (event.kind === 'job:end' && event.label === 'sign off') ended.push(event);
+      },
+    });
+    expect(outcome.status).toBe('pass');
+    const requested = (await client.history()).filter((event) => event.kind === 'callback-requested');
+    // The second step finds the first step's answer to the same request.
+    expect(requested).toHaveLength(1);
+    expect(requested[0]!.request.input).toEqual({ change: 1 });
+    expect(started).toHaveLength(2);
+    expect(started[0]).not.toEqual(started[1]);
+    expect(ended.map((event) => event.path)).toEqual(started);
+    expect(ended.map((event) => event.asked)).toEqual([
+      { requestId: requested[0]!.request.requestId, gateId: 'sign off', question: 'Ship?' },
+      { requestId: requested[0]!.request.requestId, gateId: 'sign off', question: 'Ship?' },
+    ]);
+  });
+
+  it('gives an answer handler the input exactly as the approval was given it', async () => {
+    const seen: JsonValue[] = [];
+    const { outcome } = await run(approval('approve', {
+      question: 'Ship this change?',
+      input: { url: 'https://example.com/change/1' },
+      answer: (request) => {
+        seen.push(request.input);
+        return { approved: (request.input as { url?: string }).url === 'https://example.com/change/1' };
+      },
+    }));
+    expect(outcome.status).toBe('pass');
+    expect(seen).toEqual([{ url: 'https://example.com/change/1' }]);
   });
 
   it('pauses the whole pipeline, and the steps after it do not run', async () => {

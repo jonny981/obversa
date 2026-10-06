@@ -296,6 +296,7 @@ export type {
   Condition,
   ConditionInput,
   ConditionResult,
+  CheckRequirement,
   RawPredicate,
   LoopConfig,
   RetryPolicy,

@@ -293,7 +293,14 @@ covers how a run waits for the answer.
   model behind a role, or the question a person role asks, and the run
   starts again. For a `dag()`, the shape is its name, node names, needs,
   conditions, kickback limits, concurrency, which nodes are optional, and
-  which nodes run in their own worktree.
+  which nodes run in their own worktree. A change outside the shape, such
+  as the prompt of a job a `dag()` node runs, a node's timeout, or a
+  workflow's `timeout` option, does not start the graph again. The graph
+  carries on in the round it reached. A change to a declared setting of a
+  `workflow()` stage, such as its `desc`, `gate`, `writes` or `effort`,
+  starts the run again from the first round. The function a `fn` stage runs counts only by its source
+  text. A function made by `fnJob()` reads the same whatever its body does,
+  so an edit to that body does not start the run again.
 - **Only a `workflow()` stage and a `dag()` node ask before they run
   again.** A `loop()` that had not finished carries on in the round it
   reached. When its body is a graph, the graph skips the steps it finished

@@ -66,9 +66,10 @@ import { roundRule } from './rounds.js';
 export const TARGET_ROUNDS = Symbol('obversa:target-rounds');
 
 /**
- * Internal config key: some node runs its own judge (a `workflow()` stage
- * with `refine: judge(...)`), so the graph keeps the workspace as it was
- * when the work began, as it does for a judge in `maxKickbacks`.
+ * Internal config key: the nodes that run their own judge (a `workflow()`
+ * stage with `refine: judge(...)`). The graph keeps the workspace as it was
+ * when the work began for them, as it does for a judge in `maxKickbacks`,
+ * and names them in `dag:start`.
  */
 export const JUDGED_NODES = Symbol('obversa:judged-nodes');
 
@@ -253,11 +254,12 @@ export function dag(config: DagConfig): Job {
   // The declared shape a resumed run's record must match.
   const resumeIdentity = (config as DagConfig & { [RESUME_IDENTITY]?: string })[RESUME_IDENTITY]
     ?? dagResumeIdentity(config);
-  // Every round a target has been asked to redo work, kept only for a judge's
-  // own state, a plain numeric budget never needs this history. A `workflow()`
-  // gives its brief and roles only through the resume identity, so the saved
-  // state digests it too.
-  const identity = interactionIdentity({ config, resumeIdentity });
+  // The graph's own saved rounds are matched by the same declared shape as
+  // its finished steps, so a resume keeps both or neither. A change the shape
+  // leaves out, such as a timeout or the prompt of a job a `dag()` node runs,
+  // then keeps the round each step ran in, and a new round never reads an
+  // earlier round's record.
+  const identity = resumeIdentity;
 
   // Static graph relations for routing cross-stage feedback (kickback). All pure
   // functions of the declared `needs` edges, computed once. `dependents` is the
@@ -335,6 +337,10 @@ export function dag(config: DagConfig): Job {
     const anchorKey = recordKey(path, rounds.rounds);
     const prior = anchors?.get(anchorKey);
     if (anchors instanceof Map) anchors.delete(anchorKey);
+    // A graph that does not match its record starts again, and nothing the
+    // record holds under it stands, such as a step's own saved review rounds.
+    const startsAgain = prior !== undefined
+      && !(prior.identity === resumeIdentity && prior.workspace === parent.workspace.dir);
     // The saved rounds belong to the same invocation in the same round.
     const checkpointPath = [...path, '@judge-kickback'];
     const saved = prior === undefined ? undefined : savedInteraction(parent, checkpointPath, identity);
@@ -358,8 +364,11 @@ export function dag(config: DagConfig): Job {
     // The git workspace as it was when the work began, which a judge compares
     // the work with. It is saved as soon as it is taken, so a resume compares
     // with it too, even after a pause before any round.
-    const judges = (typeof maxKickbacks !== 'number' && Object.values(maxKickbacks).some(isJudge))
-      || (config as DagConfig & { [JUDGED_NODES]?: boolean })[JUDGED_NODES] === true;
+    const judgedNodes = [...new Set([
+      ...((config as DagConfig & { [JUDGED_NODES]?: readonly string[] })[JUDGED_NODES] ?? []),
+      ...(typeof maxKickbacks === 'number' ? [] : Object.keys(maxKickbacks).filter((target) => isJudge(maxKickbacks[target]))),
+    ])];
+    const judges = judgedNodes.length > 0;
     const basePath = [...path, '@judge-base'];
     const savedBase = prior === undefined ? undefined : savedInteraction(parent, basePath, identity)?.tree;
     const base = typeof savedBase === 'string' ? savedBase
@@ -411,7 +420,7 @@ export function dag(config: DagConfig): Job {
         : randomUUID(),
       ...rounds,
     });
-    parent.emit({ kind: 'dag:start', ts: ts(), path, depth, nodes: names });
+    parent.emit({ kind: 'dag:start', ts: ts(), path, depth, nodes: names, ...(judges ? { judged: judgedNodes } : {}) });
     // After the start, which a record reader takes as the point to forget
     // an earlier run's checkpoints from.
     if (base !== undefined && base !== savedBase) checkpointInteraction(parent, basePath, identity, { tree: base }, true);
@@ -585,7 +594,7 @@ export function dag(config: DagConfig): Job {
         depth,
         path: [...path, name],
         round: attempts.get(name) ?? 1,
-        staleUntil: needsFinished(name),
+        staleUntil: startsAgain ? Infinity : needsFinished(name),
         workspace,
         environment,
         lastReview: feedbackFor(name),

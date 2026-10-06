@@ -1187,11 +1187,11 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
     }];
   }));
-  const graphConfig: DagConfig & { [RESUME_IDENTITY]: string; [JUDGED_NODES]: boolean } = {
+  const graphConfig: DagConfig & { [RESUME_IDENTITY]: string; [JUDGED_NODES]: readonly string[] } = {
     name: workflowName,
     nodes,
     [RESUME_IDENTITY]: stageJobIdentity,
-    [JUDGED_NODES]: config.stages.some((named) => isJudge(named.config.refine)),
+    [JUDGED_NODES]: config.stages.filter((named) => isJudge(named.config.refine)).map((named) => named.name),
     ...(Object.keys(maxKickbacks).length ? { maxKickbacks } : {}),
     brief: brief.brief,
     ...(useCase === undefined ? {} : { useCase }),

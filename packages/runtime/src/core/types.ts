@@ -429,7 +429,32 @@ export interface ConditionResult {
   output?: string;
   /** The command a command check ran and how it ended. */
   command?: CommandRun;
+  /**
+   * The commands the checks inside a combined check (`all`, `any`, `not`,
+   * `quorum`, or an array) ran, in the order they ran. Absent when none ran.
+   */
+  commands?: readonly CommandRun[];
+  /**
+   * How a combined check (`all`, `any`, `not`, `quorum`, or an array)
+   * requires each command it was built from, whether or not this
+   * evaluation ran it: `all` stops at its first failure and `any` at its
+   * first success. Absent when it holds no command.
+   */
+  requires?: CheckRequirement;
 }
+
+/**
+ * How a check's result depends on the commands it was built from: one
+ * command, or `all`, `any`, `not` or `quorum` of other parts. `other` is a
+ * part with no command, such as a predicate.
+ */
+export type CheckRequirement =
+  | { readonly command: string; readonly args: readonly string[] }
+  | { readonly all: readonly CheckRequirement[] }
+  | { readonly any: readonly CheckRequirement[] }
+  | { readonly not: CheckRequirement }
+  | { readonly quorum: number; readonly of: readonly CheckRequirement[] }
+  | { readonly other: true };
 
 /**
  * The single condition primitive. A question answered against the context and
@@ -864,6 +889,12 @@ export type LoopEvent =
       path: string[];
       depth: number;
       nodes: string[];
+      /**
+       * The nodes whose rounds a judge decides: a node with its own judge, and
+       * each target of a send-back with a judge. Present when there is one,
+       * whether or not any judge is asked in the run.
+       */
+      judged?: string[];
     }
   | {
       kind: 'dag:node';
@@ -970,6 +1001,12 @@ export type LoopEvent =
       outcome: Outcome;
       /** The time since the matching `job:start`. */
       durationMs?: number;
+      /**
+       * On an `approval` step: the question it put to a person, or found
+       * already answered. Two steps that ask the same question about the same
+       * input share one request, and each names it here under its own path.
+       */
+      asked?: { requestId: string; gateId: string; question: string };
     }
   | { kind: 'engine:text'; ts: number; path: string[]; delta: string }
   | { kind: 'engine:thinking'; ts: number; path: string[]; delta: string }

@@ -291,6 +291,51 @@ async function untilResult(
   return result;
 }
 
+describe('a combined check', () => {
+  it('records the commands its parts ran, in the order they ran', async () => {
+    const node = process.execPath;
+    const pass = commandSucceeds(node, ['-e', '']);
+    const fail = commandSucceeds(node, ['-e', 'process.exit(1)']);
+    const ran = async (until: Condition) =>
+      (await untilResult(until, noEngine))?.commands?.map((command) => [command.command, ...command.args]);
+    expect(await ran(all(pass, fail))).toEqual([[node, '-e', ''], [node, '-e', 'process.exit(1)']]);
+    expect(await ran(any(fail, pass))).toEqual([[node, '-e', 'process.exit(1)'], [node, '-e', '']]);
+    expect(await ran(not(fail))).toEqual([[node, '-e', 'process.exit(1)']]);
+    expect(await ran(quorum(1, pass, () => true))).toEqual([[node, '-e', '']]);
+    expect(await ran(all(not(fail), any(fail, pass)))).toEqual([
+      [node, '-e', 'process.exit(1)'], [node, '-e', 'process.exit(1)'], [node, '-e', ''],
+    ]);
+    expect(await ran(all(() => true))).toBeUndefined();
+  });
+
+  it('records how it requires every command it was built from, also the ones a round does not reach', async () => {
+    const node = process.execPath;
+    const pass = commandSucceeds(node, ['-e', '']);
+    const fail = commandSucceeds(node, ['-e', 'process.exit(1)']);
+    const last = commandSucceeds(node, ['-e', 'process.exit(2)']);
+    const p = { command: node, args: ['-e', ''] };
+    const f = { command: node, args: ['-e', 'process.exit(1)'] };
+    const l = { command: node, args: ['-e', 'process.exit(2)'] };
+    const requires = async (until: Condition) => (await untilResult(until, noEngine))?.requires;
+    expect(await requires(all(pass, fail, last))).toEqual({ all: [p, f, l] });
+    expect(await requires(any(pass, fail, last))).toEqual({ any: [p, f, l] });
+    expect(await requires(quorum(2, pass, fail, () => true))).toEqual({ quorum: 2, of: [p, f, { other: true }] });
+    expect(await requires(all(not(pass), any(fail, last), () => true))).toEqual({
+      all: [{ not: p }, { any: [f, l] }, { other: true }],
+    });
+    expect(await requires(all(() => true))).toBeUndefined();
+
+    // A loop's `until` array is one combined check.
+    let result: ConditionResult | undefined;
+    await run(loop({ name: 'x', body: failingBody(), until: [pass, fail, last], max: 1 }), {
+      ...noEngine,
+      onEvent: (e: LoopEvent) => { if (e.kind === 'loop:condition' && e.which === 'until') result = e.result; },
+    });
+    expect(result?.commands?.map((command) => command.args[1])).toEqual(['', 'process.exit(1)']);
+    expect(result?.requires).toEqual({ all: [p, f, l] });
+  });
+});
+
 describe('commandSucceeds output capture', () => {
   it('captures exit/stdout/stderr as output on failure', async () => {
     const r = await untilResult(
