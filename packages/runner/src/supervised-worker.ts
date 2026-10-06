@@ -1,6 +1,6 @@
 import { pathToFileURL } from 'node:url';
 
-import { inspectOwnedProcessTree } from '@obversa/core/command';
+import { inspectOwnedProcessTree, readProcessIdentity } from '@obversa/core/command';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import {
   createGraphExecutor, GraphExecutionError, loadRunDefinition, readRunPreflight, validateDomainEventId,
@@ -18,8 +18,10 @@ for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
 const input = JSON.parse(Buffer.concat(chunks).toString('utf8')) as SupervisedWorkerInput;
 const storage = createLocalRunStorage(input.storage);
 const append = supervisionWriter(storage, input.runId);
+const self = readProcessIdentity(process.pid);
 const processes = await inspectOwnedProcessTree({
   rootPid: process.pid, rootProcessGroupId: process.pid,
+  ...(self === undefined ? {} : { rootStartedAt: self.startedAt }),
   attemptId: process.env.OBVERSA_ATTEMPT_ID as Sha256Digest,
 });
 const identity = processes.find((item) => item.pid === process.pid);

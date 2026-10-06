@@ -7,7 +7,7 @@ vi.mock('../src/command/process-tree.ts', async () => {
 
 import { stopOwnedProcessTree } from '../src/command/process-tree.ts';
 import { runOwnedCommand, type OwnedCommandRequest } from '../src/command/run.ts';
-import { parentFixture, fixtureDirectory, fixturePids, isProcessAlive, waitForFixtureRecord } from './process-fixture.ts';
+import { exactPid, parentFixture, fixtureDirectory, fixturePids, isProcessAlive, waitForFixtureRecord } from './process-fixture.ts';
 
 const ATTEMPT_ID = `sha256:${'3'.repeat(64)}` as const;
 const directories: string[] = [];
@@ -16,7 +16,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   for (const directory of directories.splice(0)) {
     for (const pid of fixturePids(directory)) {
-      try { process.kill(pid, 'SIGKILL'); } catch {}
+      try { process.kill(exactPid(pid), 'SIGKILL'); } catch {}
     }
   }
 });
@@ -62,7 +62,7 @@ describe.runIf(process.platform !== 'win32')('owned command output cleanup', () 
     });
     expect(isProcessAlive(survivor.pid)).toBe(true);
 
-    try { process.kill(survivor.pid, 'SIGKILL'); } catch {}
+    try { process.kill(exactPid(survivor.pid), 'SIGKILL'); } catch {}
     await expect.poll(() => isProcessAlive(survivor.pid), { timeout: 5_000 }).toBe(false);
   });
 });
