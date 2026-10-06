@@ -12,6 +12,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { CallbackEvent } from '../callback/client.js';
 import { createCallbackGate, type CallbackRequest } from '../callback/gate.js';
 import type { JsonObject, JsonValue } from '../graph/value.js';
+import { recordedRounds, roundsOf } from './context.js';
 import { setMeta } from './describe.js';
 import { LoopError } from './errors.js';
 import { redactSecrets } from './redact.js';
@@ -185,7 +186,7 @@ async function decide(
       phase: 'done', attempt: ctx.graph.attempt, needs: [...ctx.graph.needs],
       ...(ctx.graph.desc === undefined ? {} : { desc: ctx.graph.desc }),
       ...(ctx.graph.gate === undefined ? {} : { gate: ctx.graph.gate }),
-      timeoutMs: ctx.timeoutMs, outcome: paused,
+      timeoutMs: ctx.timeoutMs, outcome: paused, ...recordedRounds(roundsOf(ctx), ctx.graph.path.length),
     });
   }
   while (answer === undefined && ctx.onCallback === 'wait' && !ctx.signal.aborted

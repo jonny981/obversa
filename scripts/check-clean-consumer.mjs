@@ -874,6 +874,8 @@ async function main() {
     await copyFile(join(root, 'examples', 'human-feedback.ts'), join(consumerDirectory, 'human-feedback.ts'));
     await copyFile(join(root, 'examples', 'human-feedback.proof.ts'), join(consumerDirectory, 'human-feedback.proof.ts'));
     await cp(join(root, 'examples', 'human-feedback'), join(consumerDirectory, 'human-feedback'), { recursive: true });
+    await copyFile(join(root, 'examples', 'improve-a-workflow.ts'), join(consumerDirectory, 'improve-a-workflow.ts'));
+    await cp(join(root, 'examples', 'improve-a-workflow'), join(consumerDirectory, 'improve-a-workflow'), { recursive: true });
     await copyFile(describedTeamExamplePath, join(consumerDirectory, 'described-team.ts'));
     await copyFile(runnerExamplePath, join(consumerDirectory, 'supervised-run.ts'));
     await copyFile(runnerHostPath, join(consumerDirectory, 'supervised-host.mjs'));

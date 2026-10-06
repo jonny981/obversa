@@ -46,6 +46,9 @@ const CLEAN_BY_DEFAULT = true;
 /** The settings a clean-mode run reads in place of the person's Devin config file. */
 const CLEAN_CONFIG = '{}\n';
 
+type PermissionMode = NonNullable<DevinCliEngineOptions['permissionMode']>;
+const PERMISSION_MODES: readonly string[] = ['auto', 'accept-edits', 'smart', 'dangerous'];
+
 export interface DevinCliEngineOptions {
   /** Model for requests that name none. Without a model, Devin runs its own default model, or the one your Devin settings choose with `clean: false`. */
   readonly defaultModel?: string;
@@ -61,6 +64,15 @@ export interface DevinCliEngineOptions {
   readonly clean?: boolean;
   /** Unsupported: the Devin CLI has no reasoning effort switch, so setting it throws. */
   readonly effort?: string;
+  /**
+   * Devin's permission mode for a step that may write; `accept-edits` when
+   * unset, which edits files but refuses a command that needs confirmation
+   * and so ends the run. `dangerous` auto-approves tool calls, so a builder
+   * can run its tests and builds; a deny or ask rule from the organisation or
+   * the person's Devin setup can still refuse one.
+   * A read step always runs with `auto`, and refuses any other mode.
+   */
+  readonly permissionMode?: 'auto' | 'accept-edits' | 'smart' | 'dangerous';
 }
 
 export interface DevinSeat {
@@ -75,6 +87,7 @@ export interface DevinSeat {
 }
 
 export interface DevinSeatOptions {
+  readonly permissionMode?: DevinCliEngineOptions['permissionMode'];
   readonly clean?: boolean;
   /** Unsupported: the Devin CLI has no reasoning effort switch, so setting it throws. */
   readonly effort?: string;
@@ -90,6 +103,7 @@ export function devin(model?: string, options: DevinSeatOptions = {}): DevinSeat
   return {
     engine: new DevinCliEngine({
       ...(model === undefined ? {} : { defaultModel: model }),
+      ...(options.permissionMode === undefined ? {} : { permissionMode: options.permissionMode }),
       ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.clean === undefined ? {} : { clean: options.clean }),
     }),
@@ -108,9 +122,17 @@ function modelFor(req: AgentRequest, opts: DevinCliEngineOptions): string | unde
   return model === undefined || model === DEFAULT_MODEL ? undefined : model;
 }
 
-/** Devin's permission mode for a workspace mode: read-only tools, or those plus workspace edits. */
-function permissionMode(req: AgentRequest): 'auto' | 'accept-edits' {
-  return req.workspaceMode === 'write' ? 'accept-edits' : 'auto';
+/** Devin's permission mode for a step: `auto` to read, the engine's mode or `accept-edits` to write. */
+function permissionMode(req: AgentRequest, opts: DevinCliEngineOptions): PermissionMode {
+  if (opts.permissionMode !== undefined && !PERMISSION_MODES.includes(opts.permissionMode)) {
+    throw new TypeError('devin permission mode must be auto, accept-edits, smart or dangerous');
+  }
+  if (req.workspaceMode === 'write') return opts.permissionMode ?? 'accept-edits';
+  if (opts.permissionMode !== undefined && opts.permissionMode !== 'auto') {
+    throw new TypeError(`devin permission mode ${opts.permissionMode} can edit files or run commands, `
+      + 'so a read step cannot use it; leave permissionMode unset or set it to auto');
+  }
+  return 'auto';
 }
 
 /**
@@ -123,6 +145,7 @@ export function buildDevinArgs(
   files: { readonly promptFile: string; readonly exportFile: string; readonly configFile?: string },
 ): string[] {
   const clean = opts.clean ?? CLEAN_BY_DEFAULT;
+  let mode: PermissionMode;
   try {
     assertReadAccess(req);
     if (clean && files.configFile === undefined) {
@@ -135,6 +158,7 @@ export function buildDevinArgs(
       throw new TypeError('devin has no mode without workspace access; choose read or write');
     }
     if ((req.effort ?? opts.effort) !== undefined) throw new TypeError(NO_EFFORT);
+    mode = permissionMode(req, opts);
   } catch (cause) {
     throw new EngineError({
       kind: 'invalid-config',
@@ -147,7 +171,7 @@ export function buildDevinArgs(
     '-p',
     '--prompt-file', files.promptFile,
     '--export', files.exportFile,
-    '--permission-mode', permissionMode(req),
+    '--permission-mode', mode,
     // Print mode cannot show Devin's folder trust prompt; without this flag
     // every folder the person has not opened in Devin before refuses to run.
     '--respect-workspace-trust', 'false',
@@ -411,12 +435,12 @@ export class DevinCliEngine implements Engine {
       if (!answered) {
         // In print mode, Devin ends the whole run with exit 0 and no answer
         // when its permission mode refuses a tool, such as a write in a read step.
-        const refusedInRead = permissionMode(req) === 'auto'
+        const refusedInRead = req.workspaceMode !== 'write'
           && output(sub).includes(REFUSED_TOOL_WARNING);
         throw new EngineIncompleteResultError(
           `${refusedInRead
             ? 'devin refused a tool in read mode, which ends its run without an answer; no file changed'
-            : `devin ended without a final answer under permission mode ${permissionMode(req)}`}${
+            : `devin ended without a final answer under permission mode ${permissionMode(req, this.opts)}`}${
             diagnostic ? `: ${diagnostic}` : ''
           }`,
           { parts, usage: conversation.usage, requested, effective },

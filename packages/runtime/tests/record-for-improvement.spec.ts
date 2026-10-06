@@ -20,6 +20,7 @@ import {
   fnJob,
   judge,
   loop,
+  never,
   person,
   revisionRequest,
   run,
@@ -331,6 +332,75 @@ describe('totals', () => {
     expect(done.map((event) => [event.usage?.inputTokens, event.cost?.usd])).toEqual([[100, 1], [200, 2]]);
   });
 
+  it('a resume in the second round of a loop gives a node in that round only its own tokens and cost', async () => {
+    const recordTo = join(workDir(), 'record.jsonl');
+    let calls = 0;
+    let reviews = 0;
+    const job = loop({
+      name: 'again',
+      body: dag({
+        name: 'step',
+        nodes: {
+          work: fnJob('work', (ctx) => {
+            calls += 1;
+            ctx.emit({
+              kind: 'engine:usage', ts: Date.now(), path: [...ctx.path], model: SONNET,
+              usage: reportedUsage({ inputTokens: 100 * calls, outputTokens: 0 }),
+              cost: { kind: 'reported', usd: calls },
+            });
+            return 'done';
+          }),
+        },
+      }),
+      until: always,
+      review: fnJob('review', () => (reviews++ === 0 ? { status: 'fail', summary: 'again' } : 'fine')),
+      max: 3,
+    });
+    await run(job, { recordTo });
+    // The worker dies after the loop saves round 2, before its graph starts.
+    const lines = readFileSync(recordTo, 'utf8').split('\n').filter(Boolean);
+    const cut = lines.findIndex((line) => {
+      const event = JSON.parse(line) as LoopEvent;
+      return event.kind === 'workflow:start' && event.rounds !== undefined;
+    });
+    writeFileSync(recordTo, `${lines.slice(0, cut).join('\n')}\n`);
+    const resumed: LoopEvent[] = [];
+    await run(job, { recordTo, resume: true, onEvent: (event) => resumed.push(event) });
+    expect(calls).toBe(3);
+    const done = only(resumed, 'dag:node').filter((event) => event.phase === 'done');
+    expect(done.map((event) => [event.usage?.inputTokens, event.cost?.usd])).toEqual([[300, 3]]);
+  });
+
+  it('a resume of a loop that ran out of rounds keeps the tokens and cost of each round', async () => {
+    const recordTo = join(workDir(), 'record.jsonl');
+    let calls = 0;
+    const job = loop({
+      name: 'again',
+      body: dag({
+        name: 'step',
+        nodes: {
+          work: fnJob('work', (ctx) => {
+            calls += 1;
+            ctx.emit({
+              kind: 'engine:usage', ts: Date.now(), path: [...ctx.path], model: SONNET,
+              usage: reportedUsage({ inputTokens: 100 * calls, outputTokens: 0 }),
+              cost: { kind: 'reported', usd: calls },
+            });
+            return 'done';
+          }),
+        },
+      }),
+      until: never,
+      max: 2,
+    });
+    expect((await run(job, { recordTo })).outcome.status).toBe('exhausted');
+    const resumed: LoopEvent[] = [];
+    await run(job, { recordTo, resume: true, onEvent: (event) => resumed.push(event) });
+    expect(calls).toBe(2);
+    const done = only(resumed, 'dag:node').filter((event) => event.phase === 'done');
+    expect(done.map((event) => [event.usage?.inputTokens, event.cost?.usd])).toEqual([[100, 1], [200, 2]]);
+  });
+
   it("a dag:node done event counts the engine calls of the node's when check", async () => {
     const events: LoopEvent[] = [];
     const verdict = JSON.stringify({ verdict: 'yes', confidence: 0.95, reason: 'ready' });
@@ -533,6 +603,164 @@ describe('totals', () => {
     const third: LoopEvent[] = [];
     await run(job, { recordTo, resume: true, onEvent: (event) => third.push(event) });
     expect(done(third)).toEqual([expect.objectContaining({ usage: passed.usage, cost: passed.cost, durationMs: passed.durationMs })]);
+  });
+
+  it('a node a kickback ran again, which a resume runs again because its file is gone, carries only the tokens and cost of the new run', async () => {
+    const cwd = workDir();
+    const recordTo = join(cwd, 'record.jsonl');
+    let builds = 0;
+    let checks = 0;
+    const job = dag({
+      name: 'build-and-check',
+      maxKickbacks: 1,
+      nodes: {
+        implement: {
+          file: 'out.txt',
+          retrySafe: true,
+          job: fnJob('implement', (ctx) => {
+            builds += 1;
+            ctx.emit({
+              kind: 'engine:usage', ts: Date.now(), path: [...ctx.path], model: SONNET,
+              usage: reportedUsage({ inputTokens: 100 * builds, outputTokens: 0 }),
+              cost: { kind: 'reported', usd: builds },
+            });
+            writeFileSync(join(ctx.workspace.dir, 'out.txt'), `build ${builds}`);
+            return 'built';
+          }),
+        },
+        check: {
+          needs: 'implement',
+          acceptsKickbackTo: ['implement'],
+          job: fnJob('check', () => (checks++ === 0
+            ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
+            : 'green')),
+        },
+      },
+    });
+    await run(job, { cwd, recordTo });
+    rmSync(join(cwd, 'out.txt'));
+    const second: LoopEvent[] = [];
+    await run(job, { cwd, recordTo, resume: true, onEvent: (event) => second.push(event) });
+    expect(builds).toBe(3);
+    const done = only(second, 'dag:node').filter((event) => event.phase === 'done' && event.node === 'implement');
+    expect(done.map((event) => [event.attempt, event.usage?.inputTokens, event.cost?.usd])).toEqual([[2, 300, 3]]);
+  });
+
+  it('a node a resume skips keeps its figures when the worker dies just after the resume records it', async () => {
+    const recordTo = join(workDir(), 'record.jsonl');
+    let builds = 0;
+    let checks = 0;
+    const job = dag({
+      name: 'build-and-check',
+      maxKickbacks: 1,
+      nodes: {
+        implement: fnJob('implement', (ctx) => {
+          builds += 1;
+          ctx.emit({
+            kind: 'engine:usage', ts: Date.now(), path: [...ctx.path], model: SONNET,
+            usage: reportedUsage({ inputTokens: 100 * builds, outputTokens: 0 }),
+            cost: { kind: 'reported', usd: builds },
+          });
+          return 'built';
+        }),
+        check: {
+          needs: 'implement',
+          acceptsKickbackTo: ['implement'],
+          job: fnJob('check', () => (checks++ === 0
+            ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
+            : 'green')),
+        },
+      },
+    });
+    await run(job, { recordTo });
+    await run(job, { recordTo, resume: true });
+    // The worker dies just after the resume's first line for the skipped node.
+    const lines = readFileSync(recordTo, 'utf8').split('\n').filter(Boolean);
+    const resumedAt = lines.findIndex((line) => (JSON.parse(line) as { session?: number }).session === 2);
+    const cut = lines.findIndex((line, index) => {
+      const event = JSON.parse(line) as LoopEvent;
+      return index > resumedAt && event.kind === 'dag:node' && event.node === 'implement';
+    });
+    writeFileSync(recordTo, `${lines.slice(0, cut + 1).join('\n')}\n`);
+    const third: LoopEvent[] = [];
+    await run(job, { recordTo, resume: true, onEvent: (event) => third.push(event) });
+    expect(builds).toBe(2);
+    expect(checks).toBe(2);
+    const done = only(third, 'dag:node').filter((event) => event.phase === 'done' && event.node === 'implement');
+    expect(done.map((event) => [event.attempt, event.usage?.inputTokens, event.cost?.usd])).toEqual([[2, 200, 2]]);
+  });
+
+  it('a node a stop cut short, which a resume runs again, counts the calls it made before the stop', async () => {
+    const recordTo = join(workDir(), 'record.jsonl');
+    let tries = 0;
+    const job = dag({
+      name: 'cut',
+      nodes: {
+        work: {
+          retrySafe: true,
+          job: fnJob('work', (ctx) => {
+            tries += 1;
+            ctx.emit({
+              kind: 'engine:usage', ts: Date.now(), path: [...ctx.path], model: SONNET,
+              usage: reportedUsage({ inputTokens: 100 * tries, outputTokens: 0 }),
+              cost: { kind: 'reported', usd: tries },
+            });
+            return 'done';
+          }),
+        },
+      },
+    });
+    await run(job, { recordTo });
+    // The worker dies just after the node's call.
+    const lines = readFileSync(recordTo, 'utf8').split('\n').filter(Boolean);
+    const cut = lines.findIndex((line) => (JSON.parse(line) as LoopEvent).kind === 'engine:usage');
+    writeFileSync(recordTo, `${lines.slice(0, cut + 1).join('\n')}\n`);
+    const resumed: LoopEvent[] = [];
+    await run(job, { recordTo, resume: true, onEvent: (event) => resumed.push(event) });
+    expect(tries).toBe(2);
+    const done = only(resumed, 'dag:node').filter((event) => event.phase === 'done');
+    expect(done.map((event) => [event.usage?.inputTokens, event.cost?.usd])).toEqual([[300, 3]]);
+  });
+
+  it('a node a kickback ran again, which a stop cut short and a resume runs again, counts the calls it made before the stop', async () => {
+    const recordTo = join(workDir(), 'record.jsonl');
+    let builds = 0;
+    let checks = 0;
+    const job = dag({
+      name: 'build-and-check',
+      maxKickbacks: 1,
+      nodes: {
+        implement: {
+          retrySafe: true,
+          job: fnJob('implement', (ctx) => {
+            builds += 1;
+            ctx.emit({
+              kind: 'engine:usage', ts: Date.now(), path: [...ctx.path], model: SONNET,
+              usage: reportedUsage({ inputTokens: 100 * builds, outputTokens: 0 }),
+              cost: { kind: 'reported', usd: builds },
+            });
+            return 'built';
+          }),
+        },
+        check: {
+          needs: 'implement',
+          acceptsKickbackTo: ['implement'],
+          job: fnJob('check', () => (checks++ === 0
+            ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
+            : 'green')),
+        },
+      },
+    });
+    await run(job, { recordTo });
+    // The worker dies just after the second build's call.
+    const lines = readFileSync(recordTo, 'utf8').split('\n').filter(Boolean);
+    const cut = lines.findLastIndex((line) => (JSON.parse(line) as LoopEvent).kind === 'engine:usage');
+    writeFileSync(recordTo, `${lines.slice(0, cut + 1).join('\n')}\n`);
+    const resumed: LoopEvent[] = [];
+    await run(job, { recordTo, resume: true, onEvent: (event) => resumed.push(event) });
+    expect(builds).toBe(3);
+    const done = only(resumed, 'dag:node').filter((event) => event.phase === 'done' && event.node === 'implement');
+    expect(done.map((event) => [event.attempt, event.usage?.inputTokens, event.cost?.usd])).toEqual([[2, 500, 5]]);
   });
 
   it("run:end on a resumed run carries every session's tokens in totalUsage, and usage keeps this session's", async () => {

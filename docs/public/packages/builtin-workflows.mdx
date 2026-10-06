@@ -1,6 +1,6 @@
 ---
 title: "Built-in Workflows"
-description: "@obversa/builtin-workflows: three ready-made teams, a writer and reviewer, a review panel, and feature delivery, as jobs for run()."
+description: "@obversa/builtin-workflows: three ready-made teams, a writer and reviewer, a review panel, and feature delivery, and a workflow that improves a workflow from its record, as jobs for run()."
 ---
 
 `@obversa/builtin-workflows` ships three teams you configure instead of
@@ -10,6 +10,12 @@ test command and engine seats, and it returns a job for `run` from
 `@obversa/runtime`. To declare your own roles and stages, use `workflow()`
 from the [Runtime](/packages/runtime#declare-a-team) instead; this package
 doesn't export the builders.
+
+The package also ships `improveWorkflow`. It reads the record of a
+workflow's run, proposes one change to the workflow file, and applies it
+when a person says yes. [Workflows That Improve
+Themselves](/patterns/workflows-that-improve-themselves) shows it end to
+end.
 
 ## Install
 
@@ -202,13 +208,17 @@ try {
 - **`writerReviewerPair(config)`**, **`thresholdPanel(config)`**,
   **`featureDelivery(config)`**: the three recipes.
   [Choose a recipe](#choose-a-recipe).
+- **`improveWorkflow(config)`**: one change to a workflow file from its
+  run's record, applied on a person's yes. `ImproveWorkflowConfig` takes
+  `record`, `workflow`, `proposer` and `reviewer`.
+  [Workflows That Improve Themselves](/patterns/workflows-that-improve-themselves).
 - **`climbWorkflow(config)`**, **`formatClimbReport(report)`**: keep a
   change to a workflow only when it scores better.
   [Improve a workflow](#improve-a-workflow).
 - **`outcomeFromAgentText`**, **`INVALID_TEAM_DECISION`**: read a
   reviewer's reply. [Read a review decision](#read-a-review-decision).
 - **Types**: `PairConfig`, `PanelConfig`, `FeatureDeliveryConfig`,
-  `TeamInput`, `TestCommand`, `ReviewerSeat`, `ClimbAuto`, `ClimbConfig`,
+  `ImproveWorkflowConfig`, `TeamInput`, `TestCommand`, `ReviewerSeat`, `ClimbAuto`, `ClimbConfig`,
   `ClimbProtection`, `ClimbReport`, `ClimbRun`, `ClimbSettingRule`,
   `ClimbTaskReport`, `ClimbTotals`.
 

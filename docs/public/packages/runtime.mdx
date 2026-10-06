@@ -327,13 +327,14 @@ on-disk event and artifact store the examples use, and
 
 `recordTo` appends every event as one JSON line to the file you name, or
 under `.obversa/records` with `'auto'`. `resume: true` reads that record
-first: a `workflow()` or a `dag()` carries on from it and repeats no
-finished step; a `loop()` or a plain job appends to it and runs again. A
-graph that runs more than once, such as a loop's body, skips finished steps
-only the first time. To resume, keep the graph's name, workspace and
+first: a `workflow()`, a `dag()` or a `loop()` carries on from it in the
+round it reached; a plain job appends to it and runs again. A finished
+step is reused while the files it declares are still in the workspace. A
+graph that runs in many rounds, such as a loop's body, reuses the steps it
+finished in each round. To resume, keep the graph's name, workspace and
 shape the same (for a workflow, its brief, stage list and role seats too);
-change any and the run starts again. [The record](/concepts/record) says
-what a resumed run repeats.
+change any and the run starts again.
+[The record](/concepts/record) says what a resumed run repeats.
 
 ### `callbacks` and `onCallback`
 
@@ -382,7 +383,7 @@ variables for a job and every job beneath it.
 | `fn` | A plain function job: regular code, not another agent or command. The same `writes` rule as `run`; a fail with no target of its own goes to `sendsBackTo`. |
 | `writes` | The files this stage writes, relative to the workspace. For an agent stage, a missing or empty one fails the stage by name, and only these files count when the stage checks for work left unchanged after feedback. |
 | `desc`, `gate` | What the stage does and what must be true for it to count. Both go into the writing seat's prompt, the plan and the record. |
-| `reviewedBy` | A panel or a person role that reads this stage's work. A rejection runs the stage again with the findings; a writer that leaves the work unchanged after feedback fails the stage. A run that dies mid-review runs the round in flight again. The earlier rounds stay used, and the next build reads the findings of the last rejected round. |
+| `reviewedBy` | A panel or a person role that reads this stage's work. A rejection runs the stage again with the findings; a writer that leaves the work unchanged after feedback fails the stage. A run that dies during a round resumes in that round: at the review when the build had finished, and at the build when it had not. The earlier rounds stay used, and the next build reads the findings of the last rejected round. |
 | `agree` | On a stage a panel reviews: how many reviewers must accept; the default is all of them. |
 | `sendsBackTo` | The earlier stage a rejection or a red run goes to. A stage takes `reviewedBy` or `sendsBackTo`, not both. It declares the target when the graph is built, so a send-back to any other stage fails this stage with an error that names both. |
 | `synthesise` | On a stage whose `reviewedBy` or `panel` role has more than one seat: a seat, or `true` for the first reviewer's seat, that merges the findings naming the same problem. Each reviewer then votes once on the merged findings it did not raise, and the votes drop, replace or dispute findings by rule. Off unless set. [Ask a panel](/patterns/review-panel) has the steps. |

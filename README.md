@@ -46,8 +46,8 @@ plugin but four engines, which you install on their own:
 OpenAI Agents SDK agent.
 Use Claude Code, Codex, Grok or OpenCode with the command line tools you
 already have signed in, or use an API engine.
-[Installation](https://docs.obversa.ai/get-started/installation) covers
-setup. [First run](https://docs.obversa.ai/get-started/first-run) walks
+[Installation](https://obversa.ai/docs/get-started/installation) covers
+setup. [First run](https://obversa.ai/docs/get-started/first-run) walks
 through a complete file.
 
 ## Familiar patterns
@@ -60,7 +60,7 @@ file, inputs and result.
 
 A writer drafts a post and a different model reads it against the house
 style. The writer gets the review notes and revises the draft. In the
-[editorial example](https://docs.obversa.ai/workflows/editorial/writer-grader-cap),
+[editorial example](https://obversa.ai/docs/workflows/editorial/writer-grader-cap),
 Claude writes, Codex reviews, and a person is the editor:
 
 ```ts examples/use-cases/editorial/writer-grader-cap.ts (excerpt)
@@ -90,7 +90,7 @@ for revisions:
 ```
 
 In `workflow()`, the reviewer has to come from a different model family
-from the writer. [Get a second opinion](https://docs.obversa.ai/patterns/writer-and-reviewer)
+from the writer. [Get a second opinion](https://obversa.ai/docs/patterns/writer-and-reviewer)
 explains the review loop.
 
 ### Know when to stop
@@ -109,7 +109,7 @@ stops them or the review passes. Jev decides a blocking finding too. To
 bound the returns as well, pass
 `judge(judgeSeat, { cap: 4 })`: it allows four returns to the writer, Jev
 reads the review of the last one too, and the run fails unless Jev lets the
-work stand. [Know when to stop](https://docs.obversa.ai/patterns/judge-stops-the-loop)
+work stand. [Know when to stop](https://obversa.ai/docs/patterns/judge-stops-the-loop)
 shows the questions and a complete writing example.
 
 ### Ask a panel
@@ -129,7 +129,7 @@ stage names the panel and the number of approvals it needs:
 ```
 
 This example needs one approval from its two reviewers. Set `agree` to
-two when both must accept. [Ask a panel](https://docs.obversa.ai/patterns/review-panel)
+two when both must accept. [Ask a panel](https://obversa.ai/docs/patterns/review-panel)
 shows the full team and what happens when a reviewer cannot answer.
 
 ### Ask a person
@@ -149,7 +149,7 @@ in its `editor` role after the model review passes:
 
 With no answer the run pauses. A refusal with notes goes to the writer.
 Approval completes this example; a separate action would publish the
-post. [Ask a person](https://docs.obversa.ai/patterns/approval) shows how
+post. [Ask a person](https://obversa.ai/docs/patterns/approval) shows how
 the question and answer become part of the run.
 
 ### Automate the routine work
@@ -168,7 +168,7 @@ incident. Its exit code decides whether the writer tries again:
 ```
 
 The workflow runs the command directly. The model spends its turn on the
-draft. [Automate the routine work](https://docs.obversa.ai/patterns/command-kickback)
+draft. [Automate the routine work](https://obversa.ai/docs/patterns/command-kickback)
 shows the same pattern with a test command.
 
 ### Pick up unfinished work
@@ -191,10 +191,10 @@ Steps that finished are never repeated. A step that was mid-flight when the
 worker died runs again only if its binding declares it safe to retry; otherwise
 the run pauses and asks a person to reconcile it before it continues, so
 uncertain work is never repeated silently.
-[The complete example](https://docs.obversa.ai/workflows/ops/handoff-that-resumes)
+[The complete example](https://obversa.ai/docs/workflows/ops/handoff-that-resumes)
 shows which stages each worker ran.
 
-The [pattern collection](https://docs.obversa.ai/patterns) also covers
+The [pattern collection](https://obversa.ai/docs/patterns) also covers
 comparing different approaches, bringing a team together, and preparing
 context before handing over a task. Patterns can be combined inside a
 larger workflow.
@@ -205,13 +205,13 @@ A real use case combines these patterns around an outcome:
 
 | Workflow | How the team works |
 | --- | --- |
-| [Review an article](https://docs.obversa.ai/workflows/editorial/writer-grader-cap) | A writer drafts, a different model reviews, and an editor decides whether it is ready to publish. |
-| [Read research papers](https://docs.obversa.ai/workflows/research/literature-watch) | A model summarises supplied papers, a person selects the notes to keep, and those notes inform an answer. |
-| [Handle support tickets](https://docs.obversa.ai/workflows/support/triage-with-escalation) | Classify each ticket, draft a reply, and refer uncertain or sensitive cases to a person. |
-| [Prepare a shortlist](https://docs.obversa.ai/workflows/hiring/shortlist) | Apply rules in code, compare rankings from two models, and ask a person to choose the shortlist. |
-| [Deliver a feature](https://docs.obversa.ai/workflows/feature-team) | Build and test the change, check every requirement, review it with three model families and approve the exact bytes. |
+| [Review an article](https://obversa.ai/docs/workflows/editorial/writer-grader-cap) | A writer drafts, a different model reviews, and an editor decides whether it is ready to publish. |
+| [Read research papers](https://obversa.ai/docs/workflows/research/literature-watch) | A model summarises supplied papers, a person selects the notes to keep, and those notes inform an answer. |
+| [Handle support tickets](https://obversa.ai/docs/workflows/support/triage-with-escalation) | Classify each ticket, draft a reply, and refer uncertain or sensitive cases to a person. |
+| [Prepare a shortlist](https://obversa.ai/docs/workflows/hiring/shortlist) | Apply rules in code, compare rankings from two models, and ask a person to choose the shortlist. |
+| [Deliver a feature](https://obversa.ai/docs/workflows/feature-team) | Build and test the change, check every requirement, review it with three model families and approve the exact bytes. |
 
-[Browse the workflows](https://docs.obversa.ai/workflows) for the full
+[Browse the workflows](https://obversa.ai/docs/workflows) for the full
 files and examples from other fields.
 
 ### Deliver a feature
@@ -272,11 +272,11 @@ Keep a workflow in a central collection and point each run at a repository
 with `run(job, { cwd })`, keep it beside the code it works on, or import it
 from a service and call `run()` when the service decides. It runs the same
 way from each.
-[Where a workflow lives](https://docs.obversa.ai/concepts/where-a-workflow-lives).
+[Where a workflow lives](https://obversa.ai/docs/concepts/where-a-workflow-lives).
 
 ## Documentation
 
-[docs.obversa.ai](https://docs.obversa.ai): the first run, the concepts,
+[obversa.ai/docs](https://obversa.ai/docs): the first run, the concepts,
 the patterns, examples by field, and how Obversa sits beside LangGraph,
 CrewAI, Temporal, Claude Code subagents and eve.
 
@@ -286,7 +286,8 @@ CrewAI, Temporal, Claude Code subagents and eve.
 product: `@obversa/runtime` runs a workflow, `@obversa/api` holds the
 engine and memory contracts, `@obversa/core` runs bounded child processes,
 `@obversa/runner` supervises stored runs, `@obversa/builtin-workflows`
-ships three ready-made teams, `@obversa/obversa` is the install above,
+ships three ready-made teams and a workflow that proposes changes to a
+workflow from its record, `@obversa/obversa` is the install above,
 and `@obversa/surface` with `@obversa/surface-diff` is the local review
 page. `plugins/` holds the fourteen adapters: the ten engines above, three
 memories, and a notifier that posts run events to a URL.

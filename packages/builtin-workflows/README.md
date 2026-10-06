@@ -1,7 +1,8 @@
 # @obversa/builtin-workflows
 
-`@obversa/builtin-workflows` supplies three ready-made workflows, and a
-workflow that scores a change to a workflow before you keep it.
+`@obversa/builtin-workflows` supplies three ready-made teams and two workflows
+for improving a workflow file. One proposes a change from a run’s record;
+the other scores a change before you keep it.
 Use `workflow`, `stage`, `person`, and `briefFromFile` from
 `@obversa/runtime` to write your own.
 
@@ -14,6 +15,9 @@ npm install @obversa/runtime @obversa/builtin-workflows
 - **`writerReviewerPair`, `thresholdPanel`, `featureDelivery`.** The three
   teams as functions, for a program that builds a team from parts, and
   `outcomeFromAgentText`, which reads a reviewer's decision out of its text.
+- **`improveWorkflow`.** Reads the record of a workflow's run and proposes
+  one change to the workflow file. A seat from another model family checks
+  it, and it applies only when a person says yes.
 - **The builders they are made of**, `workflow`, `stage`, `person` and
   `briefFromFile`, come from `@obversa/runtime`. This package ships none of
   them.
@@ -38,4 +42,4 @@ It ships no command and chooses no model. Every seat comes from an engine
 plugin you install.
 
 The full pages, with a complete file and its captured output for each team,
-are at [docs.obversa.ai/workflows](https://docs.obversa.ai/workflows).
+are at [obversa.ai/docs/workflows](https://obversa.ai/docs/workflows).

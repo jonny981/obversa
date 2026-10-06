@@ -1,6 +1,6 @@
 {
   "name": "@obversa/core",
-  "version": "0.2.12",
+  "version": "0.2.14",
   "description": "Bounded child-process execution shared by Obversa packages.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",
@@ -71,7 +71,7 @@
     "type": "git",
     "url": "git+https://github.com/jonny981/obversa.git"
   },
-  "homepage": "https://docs.obversa.ai",
+  "homepage": "https://obversa.ai/docs",
   "bugs": {
     "url": "https://github.com/jonny981/obversa/issues"
   }

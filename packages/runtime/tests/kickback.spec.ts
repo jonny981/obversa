@@ -961,7 +961,8 @@ describe('a judge as a dag() maxKickbacks budget, with no cap or at its cap', ()
         .filter((event): event is Extract<LoopEvent, { kind: 'dag:node' }> => event.kind === 'dag:node' && event.node === 'review' && event.outcome !== undefined)
         .at(-1);
       expect(reviewEnd?.outcome).toMatchObject({ status: 'pass', openFindings: shouldFix });
-      const resumed = readResumeRecord(recordPath!).outcomes.stages.get('cap-holds-record/review');
+      // The review the judge let stand is the review's second run.
+      const resumed = readResumeRecord(recordPath!).outcomes.stages.get('cap-holds-record/review#2');
       expect(resumed).toMatchObject({ kind: 'completed', outcome: { status: 'pass', openFindings: shouldFix } });
     } finally {
       rmSync(cwd, { recursive: true, force: true });

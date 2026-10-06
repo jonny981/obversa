@@ -1,6 +1,6 @@
 {
   "name": "@obversa/builtin-workflows",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Ready-made team workflows for Obversa.",
   "keywords": [
     "agent",
@@ -59,7 +59,7 @@
     "type": "git",
     "url": "git+https://github.com/jonny981/obversa.git"
   },
-  "homepage": "https://docs.obversa.ai",
+  "homepage": "https://obversa.ai/docs",
   "bugs": {
     "url": "https://github.com/jonny981/obversa/issues"
   }

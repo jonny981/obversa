@@ -20,9 +20,62 @@ import type { EnvHandle } from '../env/environment.js';
  * or clears it. Not exported from the package. */
 export const NODE_FILE = Symbol('obversa:node-file');
 
+/** Internal context key: the round each loop or graph step on `ctx.path`
+ * runs in, by its position in the path, kept only past round 1. A child
+ * context keeps it, so a step's record names every round it ran in. Not
+ * exported from the package. */
+export const ROUNDS = Symbol('obversa:rounds');
+
+export type Rounds = Readonly<Record<number, number>>;
+
+export function roundsOf(ctx: object): Rounds {
+  return (ctx as { [ROUNDS]?: Rounds })[ROUNDS] ?? {};
+}
+
+/** The rounds on the first `length` segments of a path, for an event that a
+ * resume reads: absent when each of them ran in round 1, so a run with one
+ * round records what it always did. */
+export function recordedRounds(rounds: Rounds, length: number): { rounds?: Record<string, number> } {
+  const kept = Object.entries(rounds).filter(([index]) => Number(index) < length);
+  return kept.length ? { rounds: Object.fromEntries(kept) } : {};
+}
+
+/** The key a resume reads a recorded step by: its path, with the round of
+ * each loop or step on it that ran past round 1. */
+export function recordKey(path: readonly string[], rounds: Readonly<Record<string, number>> = {}): string {
+  return path.map((segment, index) => rounds[index] === undefined ? segment : `${segment}#${rounds[index]}`).join('/');
+}
+
+/** Internal context key: a resume reuses no finished step under this
+ * context's path that the record holds at or before this line, because work
+ * the path builds on ran again after it. `Infinity` when that work ran in
+ * this run, so nothing the record holds under the path stands. A child
+ * context keeps it. Not exported from the package. */
+export const STALE_UNTIL = Symbol('obversa:stale-until');
+
+export function staleUntil(ctx: object): number {
+  return (ctx as { [STALE_UNTIL]?: number })[STALE_UNTIL] ?? 0;
+}
+
+/** Internal context key: a step on this context's path runs again because a
+ * file it wrote is gone, so a resume reuses no finished step under it that
+ * the record holds at or before this line. Unlike `STALE_UNTIL`, the rounds
+ * a loop or graph under it saved still stand, so it rebuilds in the round it
+ * finished in. A child context keeps it. Not exported from the package. */
+export const REBUILD_UNTIL = Symbol('obversa:rebuild-until');
+
+export function rebuildUntil(ctx: object): number {
+  return (ctx as { [REBUILD_UNTIL]?: number })[REBUILD_UNTIL] ?? 0;
+}
+
 export interface ContextOverride {
   depth: number;
   path: readonly string[];
+  /** The round the last segment of `path` runs in: a loop's iteration, or
+   * which run of a graph step this is. */
+  round?: number;
+  /** A record line the child reuses nothing at or before, past the parent's. */
+  staleUntil?: number;
   iteration?: number;
   lastOutcome?: Outcome;
   lastReview?: Outcome;
@@ -61,9 +114,17 @@ export function criterionFor(
 export function childContext(
   parent: JobContext,
   over: ContextOverride,
-): JobContext & { [NODE_FILE]?: string } {
+): JobContext & { [NODE_FILE]?: string; [ROUNDS]: Rounds; [STALE_UNTIL]: number; [REBUILD_UNTIL]: number } {
+  const rounds: Record<number, number> = { ...roundsOf(parent) };
+  if (over.round !== undefined) {
+    if (over.round > 1) rounds[over.path.length - 1] = over.round;
+    else delete rounds[over.path.length - 1];
+  }
   return {
     [NODE_FILE]: (parent as JobContext & { [NODE_FILE]?: string })[NODE_FILE],
+    [ROUNDS]: rounds,
+    [STALE_UNTIL]: Math.max(staleUntil(parent), over.staleUntil ?? 0),
+    [REBUILD_UNTIL]: rebuildUntil(parent),
     engine: parent.engine,
     resolveEngine: parent.resolveEngine,
     signal: parent.signal,

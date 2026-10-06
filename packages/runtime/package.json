@@ -1,6 +1,6 @@
 {
   "name": "@obversa/runtime",
-  "version": "0.2.12",
+  "version": "0.2.14",
   "description": "Model how your team really works. Durable agent workflows, reviews that send work back, no database needed.",
   "license": "MIT",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
@@ -89,7 +89,7 @@
     "type": "git",
     "url": "git+https://github.com/jonny981/obversa.git"
   },
-  "homepage": "https://docs.obversa.ai",
+  "homepage": "https://obversa.ai/docs",
   "bugs": {
     "url": "https://github.com/jonny981/obversa/issues"
   }

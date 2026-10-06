@@ -242,6 +242,43 @@ stage or a `dag()` node, what happens depends on where it stopped:
 | Mid-flight, `retrySafe: true` | Runs again |
 | Mid-flight in the shared workspace, not marked safe | The run pauses and asks a person. If they say it didn't finish, the step runs in the same resumed run. If it did, it isn't repeated. |
 | A `dag()` node mid-flight in its own worktree, not marked safe | None of its work landed, so the run pauses and asks a person. If they approve, the node runs again from the start in a new worktree. If they refuse, the run stops, and they can recover the work by hand from the worktree the attempt left behind. |
+| Finished, but a file it declares is missing, `retrySafe: true` | Runs again. The record says which file was missing. |
+| Finished, but a file it declares is missing, not marked safe | The run pauses and asks a person. If they approve, the step runs again. If they refuse, the run stops. |
+
+A stage declares its files in `writes`, and a node in `file`. A resume
+checks only the files of the steps that passed. A step that its `when`
+condition skipped, or an optional step that failed, wrote nothing, so its
+file is not checked.
+
+A step that runs again because its file is missing runs every step inside
+it again too, such as the steps of a graph or a loop's body. This holds
+when only the outer step declares the file. A loop or a graph inside it
+builds again in the round it finished in. If the run stops again during
+that rebuild, the next resume keeps the steps the rebuild finished and runs
+the rest.
+
+When a step runs again on a resume, each later step that needs it runs
+again too, so it reads the new work. A later step that had finished runs
+again without asking a person, as it does after a send-back. The record
+says which step it needs ran again. Every step inside the later step, such
+as the steps of a graph, runs again as well. When a loop's body runs again,
+its review runs again in the same way. This holds even when the run stops
+again after the rebuild and before the later step starts.
+
+A run resumes at the step that was interrupted, in whatever round it was.
+This holds in a reviewed `workflow()` stage, in a `dag()` send-back and in
+a `loop()`, and in a loop inside another loop. The record keeps each step
+with the round it ran in. A step that finished in an earlier round never
+stands in for the round the run stopped in.
+
+A reviewed stage that died during its review resumes at that review, and
+the build it reviews does not run again. If a file the build wrote is
+missing, the build runs again in the same round, and the record says which
+file was missing. The stage itself follows the table above: a stage not
+marked safe asks a person first, and if they say it didn't finish, it
+carries on from that review. A stage that waits for a person's review
+works the same way when its file is missing: a stage marked safe builds
+again, and any other stage asks a person before it builds again.
 
 `resume: true` is how a workflow carries on when you start it yourself or a
 schedule starts it for you. [Callback gates](/reviewing/callback-gates)
@@ -256,11 +293,21 @@ covers how a run waits for the answer.
   model behind a role, or the question a person role asks, and the run
   starts again. For a `dag()`, the shape is its name, node names, needs,
   conditions, kickback limits, concurrency, which nodes are optional, and
-  which nodes run in their own worktree.
-- **`workflow()` and `dag()` skip finished steps.** A `loop()` or a plain
-  job given `resume: true` appends to the record and runs again. A graph
-  that runs more than once in a run, such as the body of a loop, skips
-  finished steps only the first time.
+  which nodes run in their own worktree. A change outside the shape, such
+  as the prompt of a job a `dag()` node runs, a node's timeout, or a
+  workflow's `timeout` option, does not start the graph again. The graph
+  carries on in the round it reached. A change to a declared setting of a
+  `workflow()` stage, such as its `desc`, `gate`, `writes` or `effort`,
+  starts the run again from the first round. The function a `fn` stage runs counts only by its source
+  text. A function made by `fnJob()` reads the same whatever its body does,
+  so an edit to that body does not start the run again.
+- **Only a `workflow()` stage and a `dag()` node ask before they run
+  again.** A `loop()` that had not finished carries on in the round it
+  reached. When its body is a graph, the graph skips the steps it finished
+  in that round. When its body is a plain job that was interrupted, the
+  job runs again without asking. A loop that passed but runs again because
+  a file it wrote is missing writes that file again in the round it passed
+  in. A plain job given `resume: true` on its own runs again.
 
 ## Next steps
 

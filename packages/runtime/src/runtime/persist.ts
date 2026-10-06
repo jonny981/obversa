@@ -6,6 +6,7 @@ import type { RecordedEngineUsage } from '../core/job.js';
 import type { JsonObject } from '../graph/value.js';
 import { cloneFrozenJson } from '../graph/value.js';
 import type { LoopEvent, Outcome, RecordedStage, ResumedStageRecords } from '../core/types.js';
+import { recordKey } from '../core/context.js';
 import type { RestoredEvent } from './record-totals.js';
 
 export type { RecordedStage, ResumedStageRecords } from '../core/types.js';
@@ -36,7 +37,7 @@ export function readResumeRecord(path: string): {
 } {
   const receipts: UsageReceipt[] = [];
   const calls: RestoredEvent[] = [];
-  const interactions = new Map<string, { identity: string; workspace: string; data: JsonObject; progress?: boolean }>();
+  const interactions = new Map<string, { identity: string; workspace: string; data: JsonObject; progress?: boolean; line: number; progressLine?: number }>();
   const anchors = new Map<string, { identity: string; workspace: string; recordId: string }>();
   const stages = new Map<string, RecordedStage>();
   const usage = new Map<string, RecordedEngineUsage[]>();
@@ -59,11 +60,12 @@ export function readResumeRecord(path: string): {
     if (event.kind === 'run:start' || event.kind === 'loop:iteration' || event.kind === 'workflow:start' || event.kind === 'dag:start' || event.kind === 'dag:node') calls.push(event);
     if (event.kind === 'run:start') sessions += 1;
     if (event.kind === 'interaction:checkpoint') {
-      const key = event.path.join('/');
+      const key = recordKey(event.path, event.rounds);
+      const progressLine = event.progress === true ? lineNumber : interactions.get(key)?.progressLine;
       if (event.data === null) interactions.delete(key);
-      else interactions.set(key, { identity: event.identity, workspace: event.workspace, data: cloneFrozenJson(event.data), ...(event.progress === true ? { progress: true } : {}) });
+      else interactions.set(key, { identity: event.identity, workspace: event.workspace, data: cloneFrozenJson(event.data), ...(event.progress === true ? { progress: true } : {}), line: lineNumber, ...(progressLine === undefined ? {} : { progressLine }) });
     } else if (event.kind === 'workflow:start') {
-      const key = event.path.join('/');
+      const key = recordKey(event.path, event.rounds);
       const prior = anchors.get(key);
       if (prior?.identity !== event.identity || prior.workspace !== event.workspace) {
         const prefix = key ? `${key}/` : '';
@@ -82,7 +84,7 @@ export function readResumeRecord(path: string): {
       }
       anchors.set(key, { identity: event.identity, workspace: event.workspace, recordId: event.recordId });
     } else if (event.kind === 'dag:node') {
-      const key = [...event.path, event.node].join('/');
+      const key = recordKey([...event.path, event.node], event.rounds);
       started.add(key);
       if (event.phase === 'start') {
         const prior = stages.get(key);
@@ -91,15 +93,41 @@ export function readResumeRecord(path: string): {
             || (prior.outcome.status === 'pass'
               && (prior.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true));
         if (event.attempt !== 1 || !safeCompletion) {
-          stages.set(key, { kind: 'interrupted', startLine: lineNumber });
+          // A finished step that runs again, or one a person said to run
+          // again because its files were gone or its rebuild did not
+          // finish, stays a rebuild until it finishes, however many times
+          // it starts.
+          const asked = prior?.kind === 'completed' ? prior.outcome.data as { input?: { missing?: unknown; rebuilds?: unknown } } | undefined : undefined;
+          const rebuilds = prior?.kind === 'interrupted'
+            ? prior.rebuilds
+            : prior?.kind === 'completed' && event.attempt !== 1 && (prior.outcome.status === 'pass' || asked?.input?.missing !== undefined)
+              ? prior.line
+              : event.attempt !== 1 && typeof asked?.input?.rebuilds === 'number'
+                ? asked.input.rebuilds
+                : undefined;
+          stages.set(key, { kind: 'interrupted', startLine: lineNumber, ...(rebuilds === undefined ? {} : { rebuilds }) });
         }
       } else if (event.outcome !== undefined) {
-        stages.set(key, { kind: 'completed', outcome: event.outcome });
+        // A skipped step wrote nothing. Its event says it was skipped, even
+        // where a compact record dropped the mark from its result.
+        const outcome = event.phase === 'skip'
+          ? { ...event.outcome, data: { ...(event.outcome.data as JsonObject | undefined), skipped: true } }
+          : event.outcome;
+        // A pass that follows the pass the record holds, with no start that
+        // set it aside, is a resume repeating that pass. It keeps the line
+        // of the work it repeats, so the steps that need it still read as
+        // newer.
+        const prior = stages.get(key);
+        const repeats = event.phase === 'done' && outcome.status === 'pass'
+          && (outcome.data as { skipped?: boolean } | undefined)?.skipped !== true
+          && prior?.kind === 'completed' && prior.outcome.status === 'pass'
+          && (prior.outcome.data as { skipped?: boolean } | undefined)?.skipped !== true;
+        stages.set(key, { kind: 'completed', outcome, line: repeats ? prior.line : lineNumber, ...(event.wrote === undefined ? {} : { wrote: event.wrote }) });
       }
     } else if (event.kind === 'engine:usage' && event.failed === undefined && event.role !== undefined && event.stage !== undefined) {
       for (let index = event.path.length; index > 0; index -= 1) {
         if (event.path[index - 1] !== event.stage) continue;
-        const key = event.path.slice(0, index).join('/');
+        const key = recordKey(event.path.slice(0, index), event.rounds);
         if (!started.has(key)) continue;
         const answers = usage.get(key) ?? [];
         answers.push({ model: event.model, path: event.path, role: event.role, stage: event.stage });
@@ -175,6 +203,14 @@ function thinOutcome(outcome: Outcome): Outcome {
   if (outcome.revision !== undefined) thin.revision = outcome.revision;
   if (outcome.discarded !== undefined) thin.discarded = outcome.discarded;
   if (outcome.openFindings !== undefined) thin.openFindings = outcome.openFindings;
+  // A resume reads the question it asked about a step back from the record,
+  // so it waits for the answer instead of running the step.
+  const asked = outcome.data as { requestId?: string; resumeReconciliation?: boolean; input?: JsonObject } | undefined;
+  if (outcome.status === 'paused' && asked?.resumeReconciliation === true) {
+    thin.data = { requestId: asked.requestId, resumeReconciliation: true, input: asked.input };
+  }
+  // A skipped step keeps its mark, so a resume never looks for its files.
+  if ((outcome.data as { skipped?: boolean } | undefined)?.skipped === true) thin.data = { skipped: true };
   if (outcome.command !== undefined) thin.command = outcome.command;
   return thin;
 }

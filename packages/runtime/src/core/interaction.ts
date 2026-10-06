@@ -3,6 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { createCallbackGate, validateCallbackResponse } from '../callback/gate.js';
 import { cloneFrozenJson, type JsonObject, type JsonValue } from '../graph/value.js';
+import { recordedRounds, recordKey, roundsOf, staleUntil } from './context.js';
 import { setMeta } from './describe.js';
 import { LoopError } from './errors.js';
 import type { InteractionBinding, InteractionResponse, Job, JobContext, Outcome, ResumedStageRecords } from './types.js';
@@ -61,25 +62,54 @@ function withoutErrors(value: unknown, seen = new Set<object>()): unknown {
       .map(([key, item]) => [key, withoutErrors(item, seen)]));
   } finally { seen.delete(value); }
 }
+/** The key of what `ctx` saves at `path`: the path with the rounds `ctx` runs in. */
+function savedKey(ctx: JobContext, path: readonly string[]): string {
+  return recordKey(path, recordedRounds(roundsOf(ctx), path.length).rounds);
+}
+/** Whether what the record saved at `line` still stands for `ctx`: work its
+ * path builds on did not run again after it. */
+function stands(ctx: JobContext, line: number | undefined): boolean {
+  return line === undefined || line > staleUntil(ctx);
+}
+function savedEntry(ctx: JobContext, path: readonly string[], identity: string) {
+  const saved = (ctx.state['obversa:resumed-stage-outcomes'] as ResumedStageRecords | undefined)?.interactions.get(savedKey(ctx, path));
+  return saved?.identity === identity && saved.workspace === ctx.workspace.dir && stands(ctx, saved.line) ? saved : undefined;
+}
 export function savedInteraction(ctx: JobContext, path: readonly string[], identity: string): JsonObject | undefined {
-  const saved = (ctx.state['obversa:resumed-stage-outcomes'] as ResumedStageRecords | undefined)?.interactions.get(path.join('/'));
-  return saved?.identity === identity && saved.workspace === ctx.workspace.dir ? saved.data : undefined;
+  return savedEntry(ctx, path, identity)?.data;
 }
-export function hasSavedInteraction(ctx: JobContext, path: readonly string[]): boolean {
-  const prefix = `${path.join('/')}/`;
+/** The record line where the rounds `savedInteraction` returns last
+ * advanced; 0 for rounds saved in this run. */
+export function savedProgressLine(ctx: JobContext, path: readonly string[], identity: string): number {
+  return savedEntry(ctx, path, identity)?.progressLine ?? 0;
+}
+/** The record line where `savedInteraction`'s data was saved; `Infinity`
+ * for data saved in this run. */
+export function savedLine(ctx: JobContext, path: readonly string[], identity: string): number {
+  return savedEntry(ctx, path, identity)?.line ?? Infinity;
+}
+/** Whether anything under `path` saved a step waiting on a person, or, with
+ * `withProgress`, saved rounds a resume continues from. */
+export function hasSavedInteraction(ctx: JobContext, path: readonly string[], withProgress = false): boolean {
+  const prefix = `${savedKey(ctx, path)}/`;
   return [...((ctx.state['obversa:resumed-stage-outcomes'] as ResumedStageRecords | undefined)?.interactions ?? [])]
-    .some(([key, saved]) => key.startsWith(prefix) && saved.progress !== true);
+    .some(([key, saved]) => key.startsWith(prefix) && stands(ctx, saved.line) && (withProgress || saved.progress !== true));
 }
-/** `progress` marks a graph's rounds so far, saved as they advance: a resume
- * reads them back, but they do not make the steps around the graph continue
- * without the question an interrupted step asks. */
+/** `progress` marks a graph's or a loop's rounds so far, saved as they
+ * advance: a resume reads them back, but they do not make the steps around
+ * them continue without the question an interrupted step asks. */
 export function checkpointInteraction(ctx: JobContext, path: readonly string[], identity: string, data: JsonObject | null, progress = false): void {
   const restored = (ctx.state['obversa:resumed-stage-outcomes'] as ResumedStageRecords | undefined)?.interactions;
+  const key = savedKey(ctx, path);
   if (restored instanceof Map) {
-    if (data === null) restored.delete(path.join('/'));
-    else restored.set(path.join('/'), { identity, workspace: ctx.workspace.dir, data: jsonSnapshot(data), ...(progress ? { progress } : {}) });
+    if (data === null) restored.delete(key);
+    else restored.set(key, { identity, workspace: ctx.workspace.dir, data: jsonSnapshot(data), ...(progress ? { progress } : {}) });
   }
-  ctx.emit({ kind: 'interaction:checkpoint', ts: Date.now(), path: [...path], identity, workspace: ctx.workspace.dir, data: data === null ? null : jsonSnapshot(data), ...(progress ? { progress: true as const } : {}) });
+  ctx.emit({
+    kind: 'interaction:checkpoint', ts: Date.now(), path: [...path], identity, workspace: ctx.workspace.dir,
+    data: data === null ? null : jsonSnapshot(data), ...(progress ? { progress: true as const } : {}),
+    ...recordedRounds(roundsOf(ctx), path.length),
+  });
 }
 export function interactionResponse(value: unknown): InteractionResponse {
   const response = cloneFrozenJson(value as JsonValue) as JsonObject;

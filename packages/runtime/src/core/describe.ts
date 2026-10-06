@@ -8,7 +8,7 @@
  * types stay plain functions and nothing downstream has to know meta exists.
  */
 
-import type { Job, JobMeta, ConditionInput } from './types.js';
+import type { Job, JobMeta, ConditionInput, Outcome } from './types.js';
 import type { AgentContractSummary } from './agent.js';
 
 const META = new WeakMap<object, JobMeta>();
@@ -29,6 +29,26 @@ export function jobMeta(job: Job): JobMeta | undefined {
 export function copyJobMeta<T extends object>(target: T, source: Job): T {
   const meta = jobMeta(source);
   return meta ? setMeta(target, meta) : target;
+}
+
+/** The files a job writes: a list, or the files its recorded outcome shows
+ * it wrote, for a job whose steps may not all run. */
+export type Writes = readonly string[] | ((outcome: Outcome | undefined) => readonly string[]);
+
+const WRITES = new WeakMap<Job, Writes>();
+
+/** Declare the files a job writes, relative to its workspace. A resume that
+ * would reuse the job's recorded result first checks they are all there. */
+export function declareWrites<T extends Job>(job: T, files: Writes): T {
+  if (typeof files === 'function' || files.length) WRITES.set(job, files);
+  return job;
+}
+
+/** The files a job declares it writes, as far as `outcome`, its recorded
+ * result, shows. */
+export function declaredWrites(job: Job, outcome?: Outcome): readonly string[] {
+  const files = WRITES.get(job) ?? [];
+  return typeof files === 'function' ? files(outcome) : files;
 }
 
 /** Register a one-line label for a condition (used by the gate-describing path). */

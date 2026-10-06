@@ -43,7 +43,7 @@ pnpm example:memory-markdown
 ```
 
 The complete source is on the
-[memory-markdown package page](https://docs.obversa.ai/packages/memory-markdown).
+[memory-markdown package page](https://obversa.ai/docs/packages/memory-markdown).
 
 ## License
 

@@ -149,11 +149,12 @@ The card builds each answer from the shape the question asks for. That
 shape is the question's `responseSchema`, and `/state` sends it with each
 waiting question.
 
-- **A judge's product decision** gets a box for your written decision and a
-  Send button. Write the decision the work should follow. The page sends it
-  as the answer's `prompt`. The page fills in `feedback` when the question
-  accepts an empty one or allows only one value. Otherwise the card asks
-  you for it too.
+- **A judge's product decision** gets a box for your written decision, a
+  `feedback` field and a Send button. Write the decision the work should
+  follow. The page sends it as the answer's `prompt`. You can write why in
+  `feedback`, and the writer gets that too. When the question asks for an
+  object in `feedback`, type it as JSON. If you leave `feedback` blank, the
+  page sends `{}`, or empty text when the question asks for text.
   [The judge page](/patterns/judge-stops-the-loop) says what the run does
   with it.
 - **Any other question** gets one labelled field for each field the answer
@@ -161,6 +162,11 @@ waiting question.
 - **A question that accepts more than one shape of answer** also gets an
   **Answer with** list. Pick a shape, fill in its fields, and send. The page
   sends only the fields of the shape you picked.
+
+On every card, each field you type is labelled with the `description` its
+schema gives it. A field with no description is labelled with its name, and
+the decision box with "Your decision". An approval's note field with no
+description has no label; it shows "a note, if any" until you type.
 
 When the run refuses an answer, the page says why, and what you typed stays
 in the form. The reason stays on the page until you send again or the

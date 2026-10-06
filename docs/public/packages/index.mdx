@@ -40,6 +40,7 @@ below say what else each one needs.
 | `runChild` | `@obversa/core` | One child process to a deadline | [Core](/packages/core) |
 | `resolveCommandExecutable`, `runOwnedCommand` | `@obversa/core/command` | Find and run a tool | [Core](/packages/core#run-an-owned-command) |
 | `writerReviewerPair`, `thresholdPanel`, `featureDelivery` | `@obversa/builtin-workflows` | Ready-made teams | [Built-in Workflows](/packages/builtin-workflows) |
+| `improveWorkflow` | `@obversa/builtin-workflows` | Propose one change to a workflow from its record | [Workflows That Improve Themselves](/patterns/workflows-that-improve-themselves) |
 | `runSurface`, `startSurface`, `openSurfaceUrl`, `parseFramedResult` | `@obversa/surface` | One page for one decision | [Surface](/packages/surface) |
 | `reviewDiff`, `parseUnifiedDiff`, `appendToThread` | `@obversa/surface-diff` | Review a diff in a browser | [Surface Diff](/packages/surface-diff) |
 | `claude`, `ClaudeCliEngine` | `@obversa/engine-claude-cli` | Claude Code as a seat | [Claude CLI Engine](/packages/engine-claude-cli) |
@@ -140,22 +141,22 @@ is.
 | Package | Purpose | Version |
 | --- | --- | --- |
 | `@obversa/obversa` | Installs every package below except Jev, Devin, Mastra and OpenAI Agents | `0.1.2` |
-| `@obversa/runtime` | Builds and runs workflows as graphs, team conversations or a review loop | `0.2.12` |
-| `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.2.12` |
-| `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.2.12` |
-| `@obversa/core` | Runs one child process with a deadline and a readable result | `0.2.12` |
+| `@obversa/runtime` | Builds and runs workflows as graphs, team conversations or a review loop | `0.2.14` |
+| `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.2.14` |
+| `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.2.14` |
+| `@obversa/core` | Runs one child process with a deadline and a readable result | `0.2.14` |
 | `@obversa/memory-simple` | Stores memory in one process | `0.1.2` |
 | `@obversa/memory-git` | Stores memory in private Git references, and writes a stage's reasoning into its commit | `0.1.2` |
 | `@obversa/memory-markdown` | Selects ranked passages from local Markdown files | `0.1.2` |
 | `@obversa/notify-webhook` | Posts one message per interesting run event to a URL you supply | `0.1.0` |
-| `@obversa/builtin-workflows` | Three ready-made workflows | `0.1.3` |
+| `@obversa/builtin-workflows` | Three ready-made teams, and a workflow that improves a workflow from its record | `0.1.4` |
 | `@obversa/surface` | Runs one local surface session | `0.1.1` |
 | `@obversa/surface-diff` | Opens a git diff for inline review | `0.1.1` |
 | `@obversa/engine-claude-agent-sdk` | Runs one engine attempt through the Agent SDK | `0.1.6` |
 | `@obversa/engine-anthropic-api` | Runs one engine attempt through the Anthropic API | `0.1.4` |
 | `@obversa/engine-claude-cli` | Runs one engine attempt through the Claude CLI | `0.1.6` |
 | `@obversa/engine-codex-cli` | Runs one engine attempt through the Codex CLI | `0.1.5` |
-| `@obversa/engine-devin-cli` | Runs one engine attempt through the Devin CLI | `0.1.3` |
+| `@obversa/engine-devin-cli` | Runs one engine attempt through the Devin CLI | `0.1.4` |
 | `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.8` |
 | `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.7` |
 | `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.5` |

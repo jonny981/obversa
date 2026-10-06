@@ -72,6 +72,49 @@ describe('Devin arguments', () => {
     expect(flag(args, '--permission-mode')).toBe('accept-edits');
   });
 
+  it('keeps the default arguments for a step that may write', () => {
+    expect(buildDevinArgs({ prompt: 'x', tools: ['read', 'edit'], workspaceMode: 'write', model: 'swe-2-max' }, {}, files))
+      .toEqual([
+        '-p', '--prompt-file', files.promptFile, '--export', files.exportFile,
+        '--permission-mode', 'accept-edits', '--respect-workspace-trust', 'false',
+        '--config', files.configFile, '--model', 'swe-2-max',
+      ]);
+  });
+
+  it.each(['auto', 'accept-edits', 'smart', 'dangerous'] as const)(
+    'passes the %s permission mode to a step that may write',
+    (permissionMode) => {
+      const args = buildDevinArgs({ prompt: 'x', tools: ['read', 'edit'], workspaceMode: 'write' }, { permissionMode }, files);
+      expect(flag(args, '--permission-mode')).toBe(permissionMode);
+    },
+  );
+
+  it('keeps a read step on auto when the permission mode is auto', () => {
+    expect(flag(buildDevinArgs({ prompt: 'x', tools: ['read'], workspaceMode: 'read' }, { permissionMode: 'auto' }, files),
+      '--permission-mode')).toBe('auto');
+  });
+
+  it.each([
+    ['accept-edits', 'read'],
+    ['smart', 'read'],
+    ['dangerous', 'read'],
+    ['dangerous', undefined],
+  ] as const)('refuses the %s permission mode in a read step (workspace mode %s)', (permissionMode, workspaceMode) => {
+    expect(() => buildDevinArgs({ prompt: 'x', tools: ['read'], ...(workspaceMode ? { workspaceMode } : {}) },
+      { permissionMode }, files)).toThrow(expect.objectContaining({
+      kind: 'invalid-config',
+      message: `devin permission mode ${permissionMode} can edit files or run commands, so a read step cannot use it; leave permissionMode unset or set it to auto`,
+    }));
+  });
+
+  it('refuses a permission mode Devin does not have', () => {
+    expect(() => buildDevinArgs({ prompt: 'x', tools: ['read'], workspaceMode: 'write' },
+      { permissionMode: 'bypassPermissions' as never }, files)).toThrow(expect.objectContaining({
+      kind: 'invalid-config',
+      message: 'devin permission mode must be auto, accept-edits, smart or dangerous',
+    }));
+  });
+
   it('uses the read-only mode when the step names no workspace mode', () => {
     expect(flag(buildDevinArgs({ prompt: 'x', tools: ['read'] }, {}, files), '--permission-mode')).toBe('auto');
   });
@@ -199,6 +242,29 @@ describe.runIf(process.platform !== 'win32')('Devin process', () => {
     expect(finalResultText(result)).toBe('answer');
   });
 
+  it('passes the engine\'s permission mode to Devin for a step that may write', async () => {
+    const f = fixture();
+    const engine = new DevinCliEngine({ cliBinary: f.bin, permissionMode: 'dangerous' });
+    const result = await engine.run({ ...f.request, tools: ['read', 'edit', 'exec'], workspaceMode: 'write' }, () => {}, signal());
+    expect(flag(f.models()[0]!.args, '--permission-mode')).toBe('dangerous');
+    expect(finalResultText(result)).toBe('answer');
+  });
+
+  it('runs a step that may write with accept-edits when no permission mode is set', async () => {
+    const f = fixture();
+    await f.engine.run({ ...f.request, workspaceMode: 'write' }, () => {}, signal());
+    expect(flag(f.models()[0]!.args, '--permission-mode')).toBe('accept-edits');
+  });
+
+  it('refuses a read step under a permission mode that can write, before any process starts', async () => {
+    const f = fixture();
+    const engine = new DevinCliEngine({ cliBinary: f.bin, permissionMode: 'smart' });
+    const error = await engine.run(f.request, () => {}, signal()).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
+    expect((error as Error).message).toContain('a read step cannot use it');
+    expect(existsSync(f.calls)).toBe(false);
+  });
+
   it('says why a read step ends without an answer after Devin refuses a tool', async () => {
     const f = fixture('refused-tool');
     const error = await f.engine.run(f.request, () => {}, signal()).catch((caught: unknown) => caught);
@@ -211,11 +277,14 @@ describe.runIf(process.platform !== 'win32')('Devin process', () => {
   });
 
   it.each([
-    ['a read step with no refused tool', 'no-answer', 'read', 'auto'],
-    ['a write step', 'refused-tool', 'write', 'accept-edits'],
-  ] as const)('keeps the general error when %s ends without an answer', async (_case, scenario, mode, permission) => {
+    ['a read step with no refused tool', 'no-answer', 'read', 'auto', undefined],
+    ['a write step', 'refused-tool', 'write', 'accept-edits', undefined],
+    ['a write step under its own permission mode', 'refused-tool', 'write', 'smart', 'smart'],
+    ['a write step under auto', 'refused-tool', 'write', 'auto', 'auto'],
+  ] as const)('keeps the general error when %s ends without an answer', async (_case, scenario, mode, permission, option) => {
     const f = fixture(scenario);
-    const error = await f.engine.run({ ...f.request, workspaceMode: mode }, () => {}, signal())
+    const engine = new DevinCliEngine({ cliBinary: f.bin, ...(option ? { permissionMode: option } : {}) });
+    const error = await engine.run({ ...f.request, workspaceMode: mode }, () => {}, signal())
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(EngineIncompleteResultError);
     expect((error as Error).message).toContain(`devin ended without a final answer under permission mode ${permission}`);

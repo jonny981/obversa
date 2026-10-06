@@ -144,11 +144,15 @@ export interface CommandRun {
 }
 
 export type RecordedStage =
-  | { readonly kind: 'interrupted'; readonly startLine: number }
-  | { readonly kind: 'completed'; readonly outcome: Outcome };
+  /** `rebuilds` is the line of the finished run this start runs again, when
+   * it runs a finished step again: nothing under it from that run stands. */
+  | { readonly kind: 'interrupted'; readonly startLine: number; readonly rebuilds?: number }
+  | { readonly kind: 'completed'; readonly outcome: Outcome; readonly line: number; readonly wrote?: readonly string[] };
 
 export interface ResumedStageRecords {
-  readonly interactions: ReadonlyMap<string, { identity: string; workspace: string; data: JsonObject; progress?: boolean }>;
+  /** `line` is where the record saved it, and `progressLine` where the
+   * rounds saved there last advanced; both absent for one saved in this run. */
+  readonly interactions: ReadonlyMap<string, { identity: string; workspace: string; data: JsonObject; progress?: boolean; line?: number; progressLine?: number }>;
   readonly anchors: ReadonlyMap<string, { readonly identity: string; readonly workspace: string; readonly recordId: string }>;
   readonly stages: ReadonlyMap<string, RecordedStage>;
 }
@@ -300,8 +304,9 @@ export interface JobContext {
    * `run` to keep questions across runs.
    */
   readonly callbacks?: RunCallbacks;
-  /** @internal Save enclosing work before a deliberate interactive pause. */
-  readonly interactionCheckpoint?: () => void;
+  /** @internal Save enclosing work before a deliberate interactive pause, or
+   * as a loop's rounds advance (`progress`). */
+  readonly interactionCheckpoint?: (progress?: boolean) => void;
   /** Wait for an outside answer, or return paused (the default). */
   readonly onCallback?: 'wait' | 'exit';
   /** Where this job's code lives — the working dir and branch (the substrate). */
@@ -594,7 +599,8 @@ export interface DagNode {
    * was asked about records how many lines that round changed. A writer sent
    * back to this node that leaves this file as it was returns the work
    * unchanged, whatever else it writes. Nothing checks that the node writes
-   * it.
+   * it, but a resume runs a finished node again when the file is missing,
+   * and asks a person first when the node is not `retrySafe`.
    */
   file?: string;
   /** An interrupted attempt may run again on resume without a person's reconciliation. */
@@ -790,6 +796,13 @@ export type LoopEvent =
       identity: string;
       workspace: string;
       recordId: string;
+      /**
+       * The round of each loop or step on this path that ran past round 1,
+       * by its position in the path. A resume reads the record by path and
+       * rounds, so the same step in two rounds has two records. Absent when
+       * every one ran in round 1.
+       */
+      rounds?: Record<string, number>;
     }
   | {
       kind: 'loop:start';
@@ -914,6 +927,20 @@ export type LoopEvent =
        * from the original and correlate it with the revision that caused it.
        */
       attempt?: number;
+      /**
+       * The round of each loop or step on `path` followed by `node` that ran
+       * past round 1, by its position there; the node's own position holds
+       * its attempt. A resume reads the record by path and rounds, so the
+       * same step in two rounds has two records. Absent when every one ran
+       * in round 1.
+       */
+      rounds?: Record<string, number>;
+      /**
+       * The files the node declares it wrote, on a done that passed. A resume
+       * checks they are still in the workspace before it reuses the node.
+       * Absent when the node declares none.
+       */
+      wrote?: string[];
       /** On a done after a start: the time from that start to the attempt's first done. */
       durationMs?: number;
       /** On a done after a start: the tokens of the node's engine calls in this attempt. */
@@ -1006,6 +1033,13 @@ export type LoopEvent =
       failed?: true;
       role?: 'writer' | 'reviewer';
       stage?: string;
+      /**
+       * The round of each loop or step on this path that ran past round 1,
+       * by its position in the path. A resume reads the record by path and
+       * rounds, so the same step in two rounds has two records. Absent when
+       * every one ran in round 1.
+       */
+      rounds?: Record<string, number>;
     }
   | {
       // A judge's answer, between a review's verdict and the send-back: what
@@ -1099,6 +1133,13 @@ export type LoopEvent =
        * around it again without asking.
        */
       progress?: true;
+      /**
+       * The round of each loop or step on this path that ran past round 1,
+       * by its position in the path. A resume reads the record by path and
+       * rounds, so the same step in two rounds has two records. Absent when
+       * every one ran in round 1.
+       */
+      rounds?: Record<string, number>;
     }
   | {
       kind: 'log';

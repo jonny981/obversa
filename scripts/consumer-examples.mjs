@@ -63,6 +63,8 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'human-feedback/workflow.ts',
   'human-feedback/surface.ts',
   'human-feedback/feedback.ts',
+  'improve-a-workflow.ts',
+  'improve-a-workflow/release-notes.ts',
   'teams/writer-reviewer-pair.ts',
   'teams/writer-reviewer-pair.proof.ts',
   'teams/threshold-panel.ts',

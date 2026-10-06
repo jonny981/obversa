@@ -71,7 +71,7 @@ import {
 } from './engine-meta.js';
 import { cloneFrozenJson, type JsonValue } from '../graph/value.js';
 import { workspaceContent } from './git.js';
-import { NODE_FILE } from './context.js';
+import { NODE_FILE, recordedRounds, roundsOf } from './context.js';
 import { oneLine } from './text.js';
 import { requireFinalResultText } from '../runtime/result-parts.js';
 
@@ -487,6 +487,7 @@ export function agentJob(config: AgentJobConfig): Job {
                     ...(e.billing === undefined ? {} : { billing: e.billing }),
                     ...(e.failed === undefined ? {} : { failed: e.failed }),
                     ...recordAs,
+                    ...(recordAs === undefined ? {} : recordedRounds(roundsOf(ctx), path.length)),
                   });
                   // A failed call is counted in the totals but gave no answer.
                   if (e.failed === undefined) recordEngineUsage(ctx, e.model, path, recordAs);

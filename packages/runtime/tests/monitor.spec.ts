@@ -7,7 +7,7 @@ import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { agentJob, approval, createCallbackClient, createCallbackGate, dag, fnJob, formatEvent, humanReview, judge, kickback, pipeline, revisionRequest, run } from '../src/api.ts';
-import type { JsonObject, LoopEvent, MonitorState, Outcome, RunResult } from '../src/api.ts';
+import type { InteractionBinding, JsonObject, LoopEvent, MonitorState, Outcome, RunResult } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 
 type MonitorEvent = Extract<LoopEvent, { kind: 'monitor' }>;
@@ -155,12 +155,12 @@ async function until<T>(read: () => T | undefined | Promise<T | undefined>): Pro
  * person for a product decision after the first review and lets the work
  * stand after the next. `prompts` collects what the writer is asked.
  */
-function productDecisionReview(prompts: string[]) {
+function productDecisionReview(prompts: string[], interaction?: InteractionBinding) {
   let judged = 0;
   const judgeEngine = new MockEngine(() => JSON.stringify({ stop_reason: { choice: judged++ === 0 ? 'product_decision' : 'holds' } }));
   return dag({
     name: 'product-review',
-    maxKickbacks: { write: judge({ engine: judgeEngine, identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge-mock', model: 'judge-mock', tools: [] } }) },
+    maxKickbacks: { write: judge({ engine: judgeEngine, identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge-mock', model: 'judge-mock', tools: [] } }, interaction ? { interaction } : {}) },
     nodes: {
       write: agentJob({
         label: 'write', model: 'writer-mock', prompt: 'Write the page.', consumeFeedback: true,
@@ -509,9 +509,11 @@ describe('the run monitor', () => {
     });
     expect(pending.decisionText).toBe('What product decision should guide this review?');
     expect(pending.responseSchema.required).toEqual(expect.arrayContaining(['prompt', 'feedback']));
+    expect(pending.responseSchema.properties).toEqual({ feedback: {}, prompt: { type: 'string', pattern: '\\S' } });
     const page = await loadMonitorPage(url);
     const card = page.html('pending');
     expect(card).toContain('<textarea name="prompt"');
+    expect(card).toContain('<label>feedback<input name="feedback">');
     expect(card).not.toContain('data-answer="yes"');
     // A poll while the question still waits leaves the card, and what a person typed into it, alone.
     page.type(pending.requestId, '<!-- typed -->');
@@ -523,6 +525,7 @@ describe('the run monitor', () => {
     await page.poll();
     expect(page.text('status')).toMatch(/^the answer was refused: /);
     expect(page.html('pending')).toContain('<!-- typed -->');
+    // The feedback box is left blank, as a person who only writes a decision leaves it.
     const body = await page.click(pending.requestId, { prompt: 'Write for new users.' });
     expect(body).toEqual({ requestId: pending.requestId, response: { prompt: 'Write for new users.', feedback: {} } });
     expect(page.text('status')).toBe('answered');
@@ -533,18 +536,96 @@ describe('the run monitor', () => {
     expect(prompts[1]).toContain('Write for new users.');
   });
 
+  it('sends a sentence typed into a judge\'s feedback box as text, and the writer gets it', async () => {
+    const events: LoopEvent[] = [];
+    const prompts: string[] = [];
+    const running = run(productDecisionReview(prompts), { cwd: home, monitor: true, onCallback: 'wait', onEvent: (e) => events.push(e) });
+    const url = await until(() => monitorEvents(events)[0]?.url);
+    const pending = await until(async () => (JSON.parse((await get(`${url}state`)).body) as MonitorState).pending[0]);
+    const page = await loadMonitorPage(url);
+    const body = await page.click(pending.requestId, { prompt: 'Write for new users.', feedback: 'Most readers are new.' });
+    expect(body.response).toEqual({ prompt: 'Write for new users.', feedback: 'Most readers are new.' });
+    expect(page.text('status')).toBe('answered');
+    const result = await running;
+    opened.push(result);
+    expect(result.outcome.status, result.outcome.summary).toBe('pass');
+    expect(prompts[1]).toContain('Most readers are new.');
+  });
+
+  it('sends {} for a product decision\'s object feedback left blank, and the run takes it', async () => {
+    const events: LoopEvent[] = [];
+    const prompts: string[] = [];
+    const interaction: InteractionBinding = { id: 'audience', responseSchema: { type: 'object', properties: { feedback: { type: 'object' } } } };
+    const running = run(productDecisionReview(prompts, interaction), { cwd: home, monitor: true, onCallback: 'wait', onEvent: (e) => events.push(e) });
+    const url = await until(() => monitorEvents(events)[0]?.url);
+    const pending = await until(async () => (JSON.parse((await get(`${url}state`)).body) as MonitorState).pending[0]);
+    const page = await loadMonitorPage(url);
+    const body = await page.click(pending.requestId, { prompt: 'Write for new users.' });
+    expect(body.response).toEqual({ prompt: 'Write for new users.', feedback: {} });
+    expect(page.text('status')).toBe('answered');
+    const result = await running;
+    opened.push(result);
+    expect(result.outcome.status, result.outcome.summary).toBe('pass');
+    expect(prompts[1]).toContain('Write for new users.');
+  });
+
+  it('sends JSON typed into a product decision\'s object feedback box as an object, and the run takes it', async () => {
+    const events: LoopEvent[] = [];
+    const prompts: string[] = [];
+    const client = createCallbackClient();
+    const interaction: InteractionBinding = { id: 'audience', responseSchema: { type: 'object', properties: { feedback: { type: 'object' } } } };
+    const running = run(productDecisionReview(prompts, interaction), { cwd: home, callbacks: client, monitor: true, onCallback: 'wait', onEvent: (e) => events.push(e) });
+    const url = await until(() => monitorEvents(events)[0]?.url);
+    const pending = await until(async () => (JSON.parse((await get(`${url}state`)).body) as MonitorState).pending[0]);
+    const page = await loadMonitorPage(url);
+    const body = await page.click(pending.requestId, { prompt: 'Write for new users.', feedback: '{ "who": "new users" }' });
+    expect(body.response).toEqual({ prompt: 'Write for new users.', feedback: { who: 'new users' } });
+    expect(page.text('status')).toBe('answered');
+    const result = await running;
+    opened.push(result);
+    expect(result.outcome.status, result.outcome.summary).toBe('pass');
+    const submitted = (await client.history(pending.requestId)).findLast((e) => e.kind === 'callback-submitted');
+    expect(submitted?.kind === 'callback-submitted' && submitted.response).toEqual({ prompt: 'Write for new users.', feedback: { who: 'new users' } });
+  });
+
+  it('asks for a product decision\'s string feedback in a box labelled with its description, and the run takes what was typed', async () => {
+    const events: LoopEvent[] = [];
+    const prompts: string[] = [];
+    const client = createCallbackClient();
+    const interaction: InteractionBinding = { id: 'audience', responseSchema: { type: 'object', properties: {
+      prompt: { type: 'string', description: 'Who the page is for' },
+      feedback: { type: 'string', description: 'Why you chose that audience' },
+    } } };
+    const running = run(productDecisionReview(prompts, interaction), { cwd: home, callbacks: client, monitor: true, onCallback: 'wait', onEvent: (e) => events.push(e) });
+    const url = await until(() => monitorEvents(events)[0]?.url);
+    const pending = await until(async () => (JSON.parse((await get(`${url}state`)).body) as MonitorState).pending[0]);
+    const page = await loadMonitorPage(url);
+    const card = page.html('pending');
+    expect(card).toContain('<label>Who the page is for<textarea name="prompt"');
+    expect(card).toContain('<label>Why you chose that audience<input name="feedback">');
+    const body = await page.click(pending.requestId, { prompt: 'New users.', feedback: 'Most readers are new.' });
+    expect(body.response).toEqual({ prompt: 'New users.', feedback: 'Most readers are new.' });
+    expect(page.text('status')).toBe('answered');
+    const result = await running;
+    opened.push(result);
+    expect(result.outcome.status, result.outcome.summary).toBe('pass');
+    const submitted = (await client.history(pending.requestId)).findLast((e) => e.kind === 'callback-submitted');
+    expect(submitted?.kind === 'callback-submitted' && submitted.response).toEqual({ prompt: 'New users.', feedback: 'Most readers are new.' });
+    expect(prompts[1]).toContain('New users.');
+  });
+
   it('shows any other schema\'s required fields as labelled inputs and posts what a person typed', async () => {
     const client = createCallbackClient();
     const result = await run(fnJob('a', () => {}), { monitor: true, callbacks: client });
     opened.push(result);
     const request = createCallbackGate({
       gateId: 'ticket', gateVersion: 1, decisionText: 'Which ticket, and how many people?', input: null,
-      responseSchema: { type: 'object', properties: { ticket: { type: 'string' }, people: { type: 'integer' } }, required: ['ticket', 'people'] },
+      responseSchema: { type: 'object', properties: { ticket: { type: 'string', description: 'The ticket to work on' }, people: { type: 'integer' } }, required: ['ticket', 'people'] },
     });
     await client.post(request);
     const page = await loadMonitorPage(result.monitor!.url);
     const card = page.html('pending');
-    expect(card).toMatch(/<label>ticket<input name="ticket"/);
+    expect(card).toMatch(/<label>The ticket to work on<input name="ticket"/);
     expect(card).toMatch(/<label>people<input name="people"/);
     const body = await page.click(request.requestId, { ticket: 'ABC-1', people: '3' });
     expect(body.response).toEqual({ ticket: 'ABC-1', people: 3 });
@@ -602,6 +683,7 @@ describe('the run monitor', () => {
     const page = await loadMonitorPage(result.monitor!.url);
     const card = page.html('pending');
     expect(card).toContain('<option value="0">decision: approved; ticket</option>');
+    expect(card).toMatch(/<label>feedback<input name="feedback"/);
     expect(card).toMatch(/<label>ticket<input name="ticket"/);
     expect(card).toMatch(/<label>reason<input name="reason"/);
     const requestId = client.listPending()[0]!.requestId;
@@ -645,7 +727,7 @@ describe('the run monitor', () => {
     opened.push(await running);
   });
 
-  it('fills a decision\'s feedback with the empty value its schema accepts', async () => {
+  it('asks for a decision\'s string feedback and sends an empty one when the box is left blank', async () => {
     const client = createCallbackClient();
     const result = await run(fnJob('a', () => {}), { monitor: true, callbacks: client });
     opened.push(result);
@@ -655,8 +737,8 @@ describe('the run monitor', () => {
     });
     await client.post(request);
     const page = await loadMonitorPage(result.monitor!.url);
-    expect(page.html('pending')).not.toContain('name="feedback"');
-    const body = await page.click(request.requestId, { prompt: 'New users.' });
+    expect(page.html('pending')).toContain('<label>feedback<input name="feedback">');
+    const body = await page.click(request.requestId, { prompt: 'New users.', feedback: '' });
     expect(body.response).toEqual({ prompt: 'New users.', feedback: '' });
     expect(page.text('status')).toBe('answered');
   });
@@ -683,10 +765,32 @@ describe('the run monitor', () => {
     const result = await run(approval('approve', { question: 'Ship?', input: { change: 'abc' } }), { monitor: true, callbacks: client });
     opened.push(result);
     const page = await loadMonitorPage(result.monitor!.url);
-    expect(page.html('pending')).not.toContain('<textarea');
+    const card = page.html('pending');
+    expect(card).not.toContain('<textarea');
+    expect(card).toContain('<form onsubmit="return false"><input name="note" placeholder="a note, if any">');
     const requestId = client.listPending()[0]!.requestId;
     const body = await page.click(requestId, { note: 'looks right' }, 'yes');
     expect(body.response).toEqual({ approved: true, note: 'looks right' });
     expect(page.text('status')).toBe('answered');
+  });
+
+  it('labels an approval\'s note with its description and still answers with yes or no', async () => {
+    const client = createCallbackClient();
+    const result = await run(fnJob('a', () => {}), { monitor: true, callbacks: client });
+    opened.push(result);
+    const request = createCallbackGate({
+      gateId: 'ship', gateVersion: 1, decisionText: 'Ship?', input: null,
+      responseSchema: { type: 'object', properties: { approved: { type: 'boolean' }, note: { type: 'string', description: 'What to change first' } }, required: ['approved'] },
+    });
+    await client.post(request);
+    const page = await loadMonitorPage(result.monitor!.url);
+    const card = page.html('pending');
+    expect(card).toContain('<label>What to change first<input name="note" placeholder="a note, if any"></label>');
+    expect(card).toContain('data-answer="yes"');
+    expect(card).toContain('data-answer="no"');
+    const body = await page.click(request.requestId, { note: 'Fix the title.' }, 'no');
+    expect(body.response).toEqual({ approved: false, note: 'Fix the title.' });
+    expect(page.text('status')).toBe('answered');
+    expect(client.listPending()).toHaveLength(0);
   });
 });
