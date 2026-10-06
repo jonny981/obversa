@@ -5,6 +5,10 @@
  * calls and the model that produced it.
  */
 import type { EngineStreamEvent, UsageReceipt } from '@obversa/api';
+import { toolTarget } from '@obversa/core/tool-target';
+
+/** What Devin writes as the result of a tool call its permission mode refused. */
+const REFUSED_RESULT = 'Tool execution was rejected';
 
 export interface DevinConversation {
   /** Every non-empty agent message, in order. */
@@ -14,7 +18,15 @@ export interface DevinConversation {
   /** The model named on the last agent step, when Devin names one. */
   readonly model: string | undefined;
   readonly toolEvents: readonly Extract<EngineStreamEvent, { type: 'tool' }>[];
+  /**
+   * The totals of every run in the session: Devin's export of a continued
+   * session holds the whole session.
+   */
   readonly usage: UsageReceipt;
+  /** The session id `devin -r` continues, when the export names one. */
+  readonly sessionId: string | undefined;
+  /** What each refused tool call acted on, or the tool's name, in order. */
+  readonly refused: readonly string[];
 }
 
 function record(value: unknown, what: string): Record<string, unknown> {
@@ -69,6 +81,7 @@ export function readDevinExport(value: unknown): DevinConversation {
 
   const messages: string[] = [];
   const toolEvents: Extract<EngineStreamEvent, { type: 'tool' }>[] = [];
+  const refused: string[] = [];
   let answered = false;
   let model: string | undefined;
   for (const value of root.steps) {
@@ -81,6 +94,7 @@ export function readDevinExport(value: unknown): DevinConversation {
       model = step.model_name;
     }
     const calls = new Map<string, string>();
+    const targets = new Map<string, string>();
     if (Array.isArray(step.tool_calls)) {
       for (const value of step.tool_calls) {
         const call = record(value, 'tool call');
@@ -88,6 +102,7 @@ export function readDevinExport(value: unknown): DevinConversation {
           throw new Error('Devin export has a tool call without an id or a name');
         }
         calls.set(call.tool_call_id, call.function_name);
+        targets.set(call.tool_call_id, toolTarget(call.arguments) ?? call.function_name);
         toolEvents.push({ type: 'tool', name: call.function_name, phase: 'use' });
       }
     }
@@ -96,14 +111,22 @@ export function readDevinExport(value: unknown): DevinConversation {
       : record(step.observation, 'observation').results;
     if (Array.isArray(results)) {
       for (const value of results) {
-        const id = record(value, 'tool result').source_call_id;
+        const result = record(value, 'tool result');
+        const id = result.source_call_id;
         const name = typeof id === 'string' ? calls.get(id) : undefined;
         if (name !== undefined) toolEvents.push({ type: 'tool', name, phase: 'result' });
+        if (name !== undefined && typeof result.content === 'string' && result.content.startsWith(REFUSED_RESULT)) {
+          refused.push(targets.get(id as string)!);
+        }
       }
     }
     const text = messageText(step.message);
     if (text.length > 0) messages.push(text);
     answered = text.length > 0 && calls.size === 0;
   }
-  return { messages, answered, model, toolEvents, usage: usage(root.final_metrics) };
+  return {
+    messages, answered, model, toolEvents, usage: usage(root.final_metrics),
+    sessionId: typeof root.session_id === 'string' && root.session_id.length > 0 ? root.session_id : undefined,
+    refused,
+  };
 }

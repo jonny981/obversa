@@ -1,8 +1,8 @@
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { engineSelection, type AgentRequest } from '@obversa/api';
 import { runEngineConformance } from '@obversa/api/testing';
 import { DevinCliEngine } from '../src/index.ts';
@@ -14,6 +14,11 @@ it('runs the full kit through the Devin process boundary', async () => {
     const calls = join(dir, 'calls.jsonl');
     copyFileSync(fileURLToPath(new URL('./fixtures/devin-cli.mjs', import.meta.url)), bin);
     chmodSync(bin, 0o755);
+    // A run on the person's own setup reads their Devin config file or a copy of it.
+    const ownConfig = '{ "theme_mode": "dark" }\n';
+    mkdirSync(join(dir, '.config', 'devin'), { recursive: true });
+    writeFileSync(join(dir, '.config', 'devin', 'config.json'), ownConfig);
+    vi.stubEnv('HOME', dir);
     const env = { OBVERSA_TEST_DEVIN_CALLS: calls, OBVERSA_ENGINE_CONFORMANCE_SCENARIO: '' };
     const request: AgentRequest = {
       prompt: 'fixture', model: 'swe-2-max', tools: ['read'], allowedTools: ['read'],
@@ -47,8 +52,10 @@ it('runs the full kit through the Devin process boundary', async () => {
           const mode = args[args.indexOf('--permission-mode') + 1];
           if (models.length > 0) expect(['auto', 'accept-edits']).toContain(mode);
           // A clean run reads an empty config file in place of the person's own.
-          const ownSetup = !args.includes('--config');
-          expect(models.at(-1)?.config ?? null).toBe(ownSetup ? null : '{}\n');
+          const config = models.at(-1)?.config ?? null;
+          expect(config === null).toBe(!args.includes('--config'));
+          expect([null, '{}\n', ownConfig]).toContain(config);
+          const ownSetup = config !== '{}\n';
           return { modelCalls: models.length, canRead: true, canWrite: mode === 'accept-edits', ownSetup };
         },
       },
@@ -61,6 +68,7 @@ it('runs the full kit through the Devin process boundary', async () => {
     expect(report).toMatchObject({ ok: true, cases: 21, failures: [] });
     expect(report.unsupported.map((item) => item.case)).toEqual(['cancellation']);
   } finally {
+    vi.unstubAllEnvs();
     rmSync(dir, { recursive: true, force: true });
   }
 }, 30_000);

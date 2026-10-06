@@ -157,6 +157,7 @@ export const stageBranches = {
   F201: 'fix/devin-permission-mode',
   F203: 'feat/run-page-product-decision',
   F202: 'fix/grok-version-timeout-under-load',
+  F206: 'feat/devin-read-commands',
   F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',

@@ -1,9 +1,9 @@
 ---
 title: "Devin CLI Engine"
-description: "@obversa/engine-devin-cli: Devin as a seat, one fresh process per call."
+description: "@obversa/engine-devin-cli: Devin as a seat, a fresh process for each call."
 ---
 
-`@obversa/engine-devin-cli` runs Devin as an engine: every request is one
+`@obversa/engine-devin-cli` runs Devin as an engine: every request starts a
 fresh `devin -p` process. Use it to put a Devin model in a writing,
 checking or review seat.
 
@@ -86,10 +86,13 @@ only these flags:
 | `--permission-mode` | Set from the step's workspace mode and the `permissionMode` option. See [Workspace modes](#workspace-modes). |
 | `--respect-workspace-trust false` | Print mode cannot show Devin's folder trust prompt. Without this flag, Devin refuses every folder you have not opened in Devin before. |
 | `--model` | Only when the seat or the request names a model. |
-| `--config` | Only in [clean mode](#options), the default: an empty config file in place of yours. |
+| `--config` | In [clean mode](#options), the default: an empty config file in place of yours. With `clean: false`, in a read step with [commands](#a-reviewer-that-runs-commands): a copy of your config file with the commands added. |
+| `-r` | Only to continue the attempt's own Devin session after Devin refuses a tool in a read step. See [A refused tool in a read step](#a-refused-tool-in-a-read-step). |
 
-Each attempt is a new process. The plugin never continues or resumes an
-earlier Devin conversation.
+Each attempt starts a new process and a new Devin conversation. The plugin
+never continues an earlier attempt's conversation. In a read step, it can
+continue the attempt's own conversation in a new process after Devin
+refuses a tool.
 
 ## Identity
 
@@ -128,20 +131,104 @@ model to change. `smart`
 runs only the commands a fast model judges safe, so it can still refuse a
 command and end the run.
 
+### A reviewer that runs commands
+
+A read step runs with `auto`. Devin decides by itself which commands `auto`
+runs. It runs some commands that only read, and refuses others, such as
+`rg`. In print mode a refused command ends Devin's run without an answer.
+The plugin then continues the run, as
+[A refused tool in a read step](#a-refused-tool-in-a-read-step) describes.
+
+The `commands` option lists more commands a read step may run, besides
+those `auto` runs by itself. Each entry is the start of a command. The plugin adds each entry to Devin's allow list as
+`Exec(<entry>)`, in the config file it writes for each attempt. Devin then
+runs a command that starts with the entry as whole words. Devin still refuses
+a command chained with `&&` or `;`, a redirect, or command substitution, and
+it checks each part of a pipe. There are no commands by default.
+
+A step can carry its own list. A read step whose `allowedTools` hold
+entries of the form `Exec(<entry>)` runs with those entries in place of the
+engine's `commands`. The plugin checks them the same way. A read step with
+no `Exec(...)` entry runs with the engine's `commands`.
+
+A list for review steps:
+`devin('swe-2-max', { commands: ['git diff', 'git log', 'git show', 'git status', 'rg', 'grep', 'ls', 'cat', 'head', 'tail', 'wc'] })`.
+
+Name the commands in the reviewer's prompt. Devin may refuse a command
+outside the list. The plugin then continues the run with a message that
+names the list.
+
+- **Clean mode.** The commands go in the empty config file.
+- **`clean: false`.** The plugin writes a copy of your own Devin config file
+  (`~/.config/devin/config.json`, or `{}` when it does not exist) with the
+  commands added to `permissions.allow`, and passes the copy. Your own file
+  is never written.
+- **Write steps.** A write step does not get the commands, in either mode.
+  Its permission mode decides what it may run.
+- **Refused entries.** An entry that is empty, or holds `&`, `;`, `|`, `<`,
+  `>`, `` ` ``, `$` or a newline, cannot be one read-only command.
+  `devin()` and `new DevinCliEngine()` throw a `TypeError` that names the
+  entry.
+- **The record.** An attempt records the step's tools. `devin()` adds each
+  command as `Exec(<entry>)` to the seat's tools, so a step on that seat
+  lists them in its tools, and a reviewer's record shows the commands it
+  could run. A write step on that seat records them too,
+  because the seat declares them, although Devin does not get them in a
+  write step. With `new DevinCliEngine({ commands })` and a step whose
+  tools leave the rules out, Devin gets the commands but the record does
+  not show them. The record lists the seat's commands, and a step whose
+  own list differs runs with its own list.
+
 In print mode Devin cannot ask you. When Devin wants a tool that its
 permission mode does not approve, it refuses the tool and does not wait.
 Devin then ends the whole run without an answer.
 
+### A refused tool in a read step
+
+When Devin refuses a tool in a read step, the plugin continues the same
+Devin session with `devin -r <session id>`. The continued run has the same
+config file, permission mode and flags. Its prompt is this message, here
+for a step with the commands `git diff` and `git log`:
+
+```text
+That tool call was refused: it is not allowed in this step. The only shell commands this step may run are `git diff`, `git log`. Finish the task with your file reading tools and those commands only.
+```
+
+For a step with no commands, the message ends with `This step may run no
+shell command. Finish the task with your file reading tools only.` The
+answer of the continued run is the step's answer.
+
+- **How many times.** `refusalRetries` sets how many times the plugin
+  continues the session in one attempt. It is 2 by default.
+- **Turning it off.** `devin(model, { refusalRetries: 0 })` or
+  `new DevinCliEngine({ refusalRetries: 0 })`. The first refusal then ends
+  the step.
+- **Limits.** Every run in the attempt counts against the step's one time
+  limit and one output limit.
+- **Usage.** Devin's export of a continued session holds the token counts
+  of every run in the session, so the result's usage covers every run in
+  the attempt.
+- **The record.** Each continuation sends a tool event named
+  `devin --resume`. Its target says what the refused tool call acted on:
+  `refused: rg TODO` for the command `rg TODO src`, a file for a write, or
+  the tool's name.
+- **Write steps.** A write step is never continued. Its permission mode
+  decides what it may do.
+
 Read-only holds in a `read` step. A read step that only reads answers
 normally. A read step whose model tries to write gets the write refused, and
-no file changes. Devin then stops the run, so the attempt fails with
-`EngineIncompleteResultError`. The message says that Devin refused a tool in
-read mode, which ends its run without an answer, and that no file changed.
-It also repeats Devin's warning. A run in either mode that exits 0 and
+no file changes. Devin then stops the run, and the plugin continues it. When
+Devin is refused again after the last continuation, the attempt fails with
+`EngineIncompleteResultError`. It fails the same way when Devin's export
+names no session. The message says that Devin
+refused a tool in read mode, with the number of refusals, which ends its run
+without an answer, and that no file changed.
+It also repeats Devin's last warning. A run in either mode that exits 0 and
 writes its conversation export, but has no final answer for any other
 reason, fails with the same error, and its message names the permission
 mode. A timeout, a non-zero exit or a missing export fails with its own
-error instead.
+error instead. A time limit that runs out during a continued run is a
+timeout.
 
 ## What Devin cannot do through the plugin
 
@@ -155,7 +242,7 @@ error instead.
 - **No structured result.** The final message is text. A request's
   `jsonSchema` is not sent to Devin.
 - **No live events.** The plugin reads the conversation after Devin exits,
-  so text and tool events arrive together at the end.
+  so a run's text and tool events arrive together when the run ends.
 - **No folder trust check.** The plugin skips it, for the reason in the
   table above.
 
@@ -167,10 +254,13 @@ error instead.
 | `cliBinary` | `string` | `devin` on `PATH` | The executable to run. |
 | `effort` | `string` | none | Not supported: the Devin CLI has no effort switch, so setting it throws. A step that sets `effort` fails the same way. Also a `DevinSeatOptions` field. |
 | `clean` | `boolean` | [See the default](/packages/engines#the-default) | On by default: your own Devin settings stay out. `false` uses them. Also an option of `devin(model, options)`. |
+| `commands` | `readonly string[]` | none | Commands a read step may run, such as `git diff` or `rg`. See [A reviewer that runs commands](#a-reviewer-that-runs-commands). Also an option of `devin(model, options)`. |
+| `refusalRetries` | `number` | `2` | How many times a read step's Devin session is continued after Devin refuses a tool. `0` turns it off. See [A refused tool in a read step](#a-refused-tool-in-a-read-step). Also an option of `devin(model, options)`. |
 | `permissionMode` | `'auto'`, `'accept-edits'`, `'smart'` or `'dangerous'` | `accept-edits` | Devin's permission mode for a write step. A builder that runs commands needs `dangerous`; see [A builder that runs commands](#a-builder-that-runs-commands). A read step refuses any mode but `auto`. Also an option of `devin(model, options)`. |
 
 By default Devin runs with `--config` pointed at an empty config file
-for each attempt, so your own Devin settings file
+for each attempt, or one that holds only the `commands` allow rules in a
+read step, so your own Devin settings file
 (`~/.config/devin/config.json`) stays out. The repository's instruction
 files and rules still apply, and the run keeps your login.
 
@@ -185,10 +275,14 @@ to leave them out.
 - **`EngineError` of kind `invalid-config`** for a step without a folder, a
   step with `tools: []`, a step that sets `effort`, a read step with a
   `permissionMode` other than `auto`, or a `devin --version` output the
-  plugin cannot read.
+  plugin cannot read. With `clean: false` and commands in a read step, also
+  when your Devin config file is not a JSON object or its
+  `permissions.allow` is not a list.
+- **`TypeError`** when `refusalRetries` is not a whole number of 0 or more.
 - **`EngineIncompleteResultError`** when Devin exits 0 and writes its
-  conversation export, but has no final answer, for example after it
-  refuses a write in a read step.
+  conversation export, but has no final answer, for example when it
+  refuses a tool in a read step and the plugin does not continue the run
+  again.
 - **`EngineError`** when Devin times out, exits with another code, or
   writes no readable conversation export, and has no final answer.
 - **Other `EngineError` kinds**, such as `auth` or `rate-limit`, are read

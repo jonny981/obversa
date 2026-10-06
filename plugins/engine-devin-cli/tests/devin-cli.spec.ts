@@ -1,5 +1,5 @@
 import {
-  chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync,
+  chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,6 +26,7 @@ interface Invocation {
   cwd: string;
   pid: number;
   prompt: string | null;
+  config: string | null;
   env: Record<string, string | null>;
 }
 
@@ -46,6 +47,22 @@ function fixture(scenario?: string) {
     : []).filter((call) => call.kind === 'model');
   return { dir, bin, calls, request, models, engine: new DevinCliEngine({ cliBinary: bin }) };
 }
+
+/** A home folder for the test, holding a Devin config file with this text when one is given. */
+function home(config?: string): { dir: string; configFile: string } {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'devin-home-')));
+  directories.push(dir);
+  const configFile = join(dir, '.config', 'devin', 'config.json');
+  if (config !== undefined) {
+    mkdirSync(join(dir, '.config', 'devin'), { recursive: true });
+    writeFileSync(configFile, config);
+  }
+  vi.stubEnv('HOME', dir);
+  return { dir, configFile };
+}
+
+const REVIEW_COMMANDS = ['git diff', 'git log'];
+const REVIEW_RULES = ['Exec(git diff)', 'Exec(git log)'];
 
 function flag(args: readonly string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -131,10 +148,52 @@ describe('Devin arguments', () => {
       expect(flag(buildDevinArgs({ prompt: 'x', tools: ['read'] }, opts, files), '--config')).toBe('/tmp/config.json');
     }
     expect(buildDevinArgs({ prompt: 'x', tools: ['read'] }, { clean: false }, files)).not.toContain('--config');
+    expect(buildDevinArgs({ prompt: 'x', tools: ['read', 'edit'], workspaceMode: 'write' },
+      { clean: false, commands: REVIEW_COMMANDS }, files)).not.toContain('--config');
     const withoutConfig = { promptFile: files.promptFile, exportFile: files.exportFile };
     expect(() => buildDevinArgs({ prompt: 'x', tools: ['read'] }, {}, withoutConfig)).toThrow(
       expect.objectContaining({ kind: 'invalid-config', message: 'devin clean mode requires an empty config file' }),
     );
+  });
+
+  it('passes a config file to a read step with commands, in clean mode and with clean: false', () => {
+    for (const clean of [true, false]) {
+      expect(flag(buildDevinArgs({ prompt: 'x', tools: ['read'] }, { clean, commands: REVIEW_COMMANDS }, files), '--config'))
+        .toBe(files.configFile);
+    }
+    expect(() => buildDevinArgs({ prompt: 'x', tools: ['read'] }, { clean: false, commands: REVIEW_COMMANDS },
+      { promptFile: files.promptFile, exportFile: files.exportFile })).toThrow(
+      expect.objectContaining({ kind: 'invalid-config', message: 'devin needs a config file for this step' }),
+    );
+  });
+
+  it('leaves a write step\'s arguments as they are when the engine has commands', () => {
+    const write: AgentRequest = { prompt: 'x', tools: ['read', 'edit'], workspaceMode: 'write' };
+    for (const clean of [true, false]) {
+      expect(buildDevinArgs(write, { clean, commands: REVIEW_COMMANDS }, files)).toEqual(buildDevinArgs(write, { clean }, files));
+    }
+  });
+
+  it.each(['&', ';', '|', '>', '<', '`', '$', '\n'])('refuses a command with the shell character %j', (character) => {
+    const entry = `git diff ${character} touch x`;
+    const message = `devin commands entry ${JSON.stringify(entry)} has a shell character `
+      + '(&, ;, |, <, >, `, $ or a newline), so it cannot be a read-only command';
+    expect(() => buildDevinArgs({ prompt: 'x', tools: ['read'] }, { commands: ['git log', entry] }, files))
+      .toThrow(expect.objectContaining({ kind: 'invalid-config', message }));
+    expect(() => buildDevinArgs({ prompt: 'x', tools: ['read'], allowedTools: ['Exec(git log)', `Exec(${entry})`] }, {}, files))
+      .toThrow(expect.objectContaining({ kind: 'invalid-config', message }));
+    expect(() => new DevinCliEngine({ commands: [entry] })).toThrow(message);
+    expect(() => devin('swe-2-max', { commands: [entry] })).toThrow(message);
+  });
+
+  it.each(['', '  '])('refuses an empty command %j', (entry) => {
+    const message = `devin commands entry ${JSON.stringify(entry)} is empty`;
+    expect(() => buildDevinArgs({ prompt: 'x', tools: ['read'] }, { commands: [entry] }, files))
+      .toThrow(expect.objectContaining({ kind: 'invalid-config', message }));
+    expect(() => buildDevinArgs({ prompt: 'x', tools: ['read'], allowedTools: [`Exec(${entry})`] }, {}, files))
+      .toThrow(expect.objectContaining({ kind: 'invalid-config', message }));
+    expect(() => new DevinCliEngine({ commands: [entry] })).toThrow(message);
+    expect(() => devin('swe-2-max', { commands: [entry] })).toThrow(message);
   });
 
   it.each<[string, AgentRequest]>([
@@ -265,15 +324,119 @@ describe.runIf(process.platform !== 'win32')('Devin process', () => {
     expect(existsSync(f.calls)).toBe(false);
   });
 
-  it('says why a read step ends without an answer after Devin refuses a tool', async () => {
+  it('with refusalRetries: 0, ends a read step after Devin refuses a tool and says why', async () => {
     const f = fixture('refused-tool');
-    const error = await f.engine.run(f.request, () => {}, signal()).catch((caught: unknown) => caught);
+    const engine = new DevinCliEngine({ cliBinary: f.bin, refusalRetries: 0 });
+    const error = await engine.run(f.request, () => {}, signal()).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(EngineIncompleteResultError);
     expect((error as Error).message).toMatch(
-      /^devin refused a tool in read mode, which ends its run without an answer; no file changed: /,
+      /^devin refused a tool in read mode 1 time, which ends its run without an answer; no file changed: /,
     );
     expect((error as Error).message).toContain('rejected a tool call that requires confirmation');
     expect((error as EngineIncompleteResultError).evidence.parts).toEqual([]);
+    expect(f.models()).toHaveLength(1);
+  });
+
+  it('continues a read step\'s session after Devin refuses a command, and the continued run\'s answer is the step\'s', async () => {
+    const f = fixture('refused-command-once');
+    const events: EngineStreamEvent[] = [];
+    const result = await f.engine.run(f.request, (event) => events.push(event), signal());
+    expect(finalResultText(result)).toBe('answer');
+    expect(result.parts).toEqual([
+      { kind: 'assistant', text: 'Searching.', final: false },
+      { kind: 'assistant', text: 'answer', final: true },
+    ]);
+    const [first, second] = f.models();
+    expect(f.models()).toHaveLength(2);
+    expect(flag(first!.args, '-r')).toBeUndefined();
+    expect(flag(second!.args, '-r')).toBe(`session-${first!.pid}`);
+    for (const name of ['--config', '--permission-mode', '--respect-workspace-trust', '--model']) {
+      expect(flag(second!.args, name)).toBe(flag(first!.args, name));
+    }
+    expect(flag(second!.args, '--permission-mode')).toBe('auto');
+    expect(second!.config).toBe(first!.config);
+    expect(flag(second!.args, '--export')).not.toBe(flag(first!.args, '--export'));
+    expect(events.filter((event) => event.type !== 'usage')).toEqual([
+      { type: 'text', delta: 'Searching.' },
+      { type: 'tool', name: 'exec', phase: 'use' },
+      { type: 'tool', name: 'exec', phase: 'result' },
+      { type: 'tool', name: 'devin --resume', phase: 'use', target: 'refused: rg word-' },
+      { type: 'tool', name: 'devin --resume', phase: 'result', target: 'refused: rg word-' },
+      { type: 'text', delta: 'answer' },
+      { type: 'tool', name: 'read', phase: 'use' },
+      { type: 'tool', name: 'read', phase: 'result' },
+    ]);
+  });
+
+  it('reports the usage of every run in a continued attempt', async () => {
+    const f = fixture('refused-command-once');
+    const events: EngineStreamEvent[] = [];
+    const result = await f.engine.run(f.request, (event) => events.push(event), signal());
+    // The first run reports 5 and 3 tokens, the continued run 7 and 2.
+    expect(result.usage).toEqual({ kind: 'reported', inputTokens: 12, outputTokens: 5 });
+    expect(events.filter((event) => event.type === 'usage')).toEqual([
+      { type: 'usage', usage: result.usage, model: 'swe-2-max' },
+    ]);
+  });
+
+  it.each<[string, readonly string[] | undefined, string[] | undefined, string]>([
+    ['no commands', undefined, undefined,
+      'That tool call was refused: it is not allowed in this step. '
+      + 'This step may run no shell command. Finish the task with your file reading tools only.'],
+    ['the engine\'s commands', REVIEW_COMMANDS, undefined,
+      'That tool call was refused: it is not allowed in this step. '
+      + 'The only shell commands this step may run are `git diff`, `git log`. '
+      + 'Finish the task with your file reading tools and those commands only.'],
+    ['the step\'s own commands', REVIEW_COMMANDS, ['read', 'Exec(rg)'],
+      'That tool call was refused: it is not allowed in this step. '
+      + 'The only shell commands this step may run are `rg`. '
+      + 'Finish the task with your file reading tools and those commands only.'],
+  ])('names %s in the message that continues the session', async (_case, commands, allowedTools, message) => {
+    const f = fixture('refused-command-once');
+    const engine = new DevinCliEngine({ cliBinary: f.bin, ...(commands ? { commands } : {}) });
+    await engine.run({ ...f.request, ...(allowedTools ? { allowedTools } : {}) }, () => {}, signal());
+    expect(f.models()[1]!.prompt).toBe(message);
+  });
+
+  it.each([
+    [undefined, 3],
+    [1, 2],
+  ] as const)('with refusalRetries %s, stops after %i refusals and says how many', async (refusalRetries, runs) => {
+    const f = fixture('refused-tool');
+    const engine = new DevinCliEngine({ cliBinary: f.bin, ...(refusalRetries === undefined ? {} : { refusalRetries }) });
+    const error = await engine.run(f.request, () => {}, signal()).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(EngineIncompleteResultError);
+    expect((error as Error).message).toMatch(new RegExp(
+      `^devin refused a tool in read mode ${runs} times, which ends its run without an answer; no file changed: `,
+    ));
+    const models = f.models();
+    expect(models).toHaveLength(runs);
+    expect(models.slice(1).map((call) => flag(call.args, '-r'))).toEqual(models.slice(1).map(() => `session-${models[0]!.pid}`));
+  });
+
+  it('counts every continued run against the attempt\'s output limit', async () => {
+    // Each refused run prints a 91-byte warning: the first fits, the second goes over what is left.
+    const f = fixture('refused-tool');
+    const error = await f.engine.run({ ...f.request, maxOutputBytes: 150 }, () => {}, signal())
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'OUTPUT_LIMIT' });
+    expect(f.models()).toHaveLength(2);
+  });
+
+  it('counts every continued run against the attempt\'s time limit', async () => {
+    // Each refused run takes 600 ms, so the second run starts with about 400 ms left and times out.
+    const f = fixture('refused-tool');
+    const error = await f.engine.run({
+      ...f.request, timeoutMs: 1_000, env: { ...f.request.env, OBVERSA_TEST_DEVIN_DELAY_MS: '600' },
+    }, () => {}, signal()).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ name: 'EngineError', kind: 'timeout' });
+    expect(f.models()).toHaveLength(2);
+  });
+
+  it.each([-1, 1.5, Number.NaN])('refuses refusalRetries %s', (refusalRetries) => {
+    const message = 'devin refusalRetries must be a whole number of 0 or more';
+    expect(() => new DevinCliEngine({ refusalRetries })).toThrow(message);
+    expect(() => devin('swe-2-max', { refusalRetries })).toThrow(message);
   });
 
   it.each([
@@ -281,13 +444,14 @@ describe.runIf(process.platform !== 'win32')('Devin process', () => {
     ['a write step', 'refused-tool', 'write', 'accept-edits', undefined],
     ['a write step under its own permission mode', 'refused-tool', 'write', 'smart', 'smart'],
     ['a write step under auto', 'refused-tool', 'write', 'auto', 'auto'],
-  ] as const)('keeps the general error when %s ends without an answer', async (_case, scenario, mode, permission, option) => {
+  ] as const)('keeps the general error, and never continues the session, when %s ends without an answer', async (_case, scenario, mode, permission, option) => {
     const f = fixture(scenario);
     const engine = new DevinCliEngine({ cliBinary: f.bin, ...(option ? { permissionMode: option } : {}) });
     const error = await engine.run({ ...f.request, workspaceMode: mode }, () => {}, signal())
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(EngineIncompleteResultError);
     expect((error as Error).message).toContain(`devin ended without a final answer under permission mode ${permission}`);
+    expect(f.models()).toHaveLength(1);
   });
 
   it.each([
@@ -345,6 +509,96 @@ describe.runIf(process.platform !== 'win32')('Devin process', () => {
     const why = 'devin has no reasoning effort switch, so it cannot take effort; leave effort unset';
     expect(() => devin('swe-2-max', { effort: 'high' })).toThrow(why);
     expect(() => new DevinCliEngine({ effort: 'high' })).toThrow(why);
+  });
+
+  it('allows each command in the empty config file of a clean read step, and records only the step\'s tools', async () => {
+    const f = fixture();
+    const engine = new DevinCliEngine({ cliBinary: f.bin, commands: REVIEW_COMMANDS });
+    const result = await engine.run(f.request, () => {}, signal());
+    expect(JSON.parse(f.models()[0]!.config!)).toEqual({ permissions: { allow: REVIEW_RULES } });
+    expect(result.requested.capabilities).toEqual(['read']);
+    expect(result.effective.capabilities).toEqual(['read']);
+  });
+
+  it('adds the commands to a copy of the person\'s own config with clean: false, and never writes theirs', async () => {
+    const own = JSON.stringify({ theme_mode: 'dark', permissions: { allow: ['Read(docs/**)'], deny: ['Exec(rm)'] } });
+    const { configFile } = home(own);
+    const f = fixture();
+    const engine = new DevinCliEngine({ cliBinary: f.bin, clean: false, commands: REVIEW_COMMANDS });
+    await engine.run(f.request, () => {}, signal());
+    const call = f.models()[0]!;
+    expect(flag(call.args, '--config')).not.toBe(configFile);
+    expect(JSON.parse(call.config!)).toEqual({
+      theme_mode: 'dark',
+      permissions: { allow: ['Read(docs/**)', ...REVIEW_RULES], deny: ['Exec(rm)'] },
+    });
+    expect(readFileSync(configFile, 'utf8')).toBe(own);
+  });
+
+  it('allows the commands with clean: false when the person has no Devin config file', async () => {
+    const { configFile } = home();
+    const f = fixture();
+    const engine = new DevinCliEngine({ cliBinary: f.bin, clean: false, commands: REVIEW_COMMANDS });
+    await engine.run(f.request, () => {}, signal());
+    expect(JSON.parse(f.models()[0]!.config!)).toEqual({ permissions: { allow: REVIEW_RULES } });
+    expect(existsSync(configFile)).toBe(false);
+  });
+
+  it.each([
+    ['is not JSON', '{ "theme_mode": '],
+    ['is not an object', '[]'],
+    ['has an allow entry that is not a list', '{ "permissions": { "allow": "Exec(ls)" } }'],
+  ])('refuses commands with clean: false when the person\'s config file %s', async (_case, own) => {
+    home(own);
+    const f = fixture();
+    const engine = new DevinCliEngine({ cliBinary: f.bin, clean: false, commands: REVIEW_COMMANDS });
+    const error = await engine.run(f.request, () => {}, signal()).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ name: 'EngineError', kind: 'invalid-config' });
+    expect(f.models()).toHaveLength(0);
+  });
+
+  it('leaves the config as it is without commands', async () => {
+    home(JSON.stringify({ theme_mode: 'dark' }));
+    const f = fixture();
+    await f.engine.run(f.request, () => {}, signal());
+    await new DevinCliEngine({ cliBinary: f.bin, clean: false }).run(f.request, () => {}, signal());
+    const [clean, own] = f.models();
+    expect(clean!.config).toBe('{}\n');
+    expect(own!.args).not.toContain('--config');
+    expect(own!.config).toBeNull();
+  });
+
+  it('allows a read step\'s own Exec rules in place of the engine\'s commands, and the engine\'s when it has none', async () => {
+    const f = fixture();
+    const engine = new DevinCliEngine({ cliBinary: f.bin, commands: REVIEW_COMMANDS });
+    await engine.run({ ...f.request, allowedTools: ['read', 'Exec(rg)', 'Exec(git status)'] }, () => {}, signal());
+    await engine.run({ ...f.request, allowedTools: ['read', 'exec'] }, () => {}, signal());
+    const [own, fallback] = f.models();
+    expect(JSON.parse(own!.config!)).toEqual({ permissions: { allow: ['Exec(rg)', 'Exec(git status)'] } });
+    expect(JSON.parse(fallback!.config!)).toEqual({ permissions: { allow: REVIEW_RULES } });
+  });
+
+  it('gives a write step no commands in its config file', async () => {
+    const f = fixture();
+    const engine = new DevinCliEngine({ cliBinary: f.bin, commands: REVIEW_COMMANDS });
+    await engine.run({ ...f.request, workspaceMode: 'write', allowedTools: ['Exec(rg)'] }, () => {}, signal());
+    expect(f.models()[0]!.config).toBe('{}\n');
+  });
+
+  it('declares the commands in the seat\'s tools, and a read or write step on the seat records exactly those tools', async () => {
+    const f = fixture();
+    const seat = devin('swe-2-max', { commands: [...REVIEW_COMMANDS, 'git diff'] });
+    expect(seat.identity.tools).toEqual(['read', 'edit', 'exec', ...REVIEW_RULES]);
+    const engine = new DevinCliEngine({ cliBinary: f.bin, commands: [...REVIEW_COMMANDS, 'git diff'] });
+    const read = await engine.run({ ...f.request, tools: [...seat.identity.tools] }, () => {}, signal());
+    const write = await engine.run(
+      { ...f.request, tools: [...seat.identity.tools], workspaceMode: 'write' }, () => {}, signal(),
+    );
+    expect(read.requested.capabilities).toEqual(seat.identity.tools);
+    expect(write.requested.capabilities).toEqual(seat.identity.tools);
+    const [readCall, writeCall] = f.models();
+    expect(JSON.parse(readCall!.config!)).toEqual({ permissions: { allow: REVIEW_RULES } });
+    expect(writeCall!.config).toBe('{}\n');
   });
 
   it('refuses a step that sets effort before any process starts', async () => {
