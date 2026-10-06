@@ -9,7 +9,6 @@ import {
   inspectPipeHoldingProcesses,
   parseWindowsProcessRows,
   readAttemptMarkerProcessIds,
-  readProcessIdentity,
   stopOwnedProcessTree,
 } from '../src/command/process-tree.ts';
 import {
@@ -84,10 +83,8 @@ describe.runIf(process.platform !== 'win32')('owned process trees', () => {
     const commandUrl = new URL('../dist/command.js', import.meta.url).href;
     const reader = (targetPid: number, env: Record<string, string>) => {
       const script = [
-        `const { inspectOwnedProcessTree, readProcessIdentity } = await import(${JSON.stringify(commandUrl)});`,
-        // The tree matches the target only if both reads spell its start time the same way.
-        `const rootStartedAt = readProcessIdentity(${targetPid}).startedAt;`,
-        `const tree = await inspectOwnedProcessTree({ rootPid: ${targetPid}, rootProcessGroupId: ${targetPid}, rootStartedAt, attemptId: ${JSON.stringify(ATTEMPT_ID)} });`,
+        `const { inspectOwnedProcessTree } = await import(${JSON.stringify(commandUrl)});`,
+        `const tree = await inspectOwnedProcessTree({ rootPid: ${targetPid}, rootProcessGroupId: ${targetPid}, attemptId: ${JSON.stringify(ATTEMPT_ID)} });`,
         `const me = tree.find((item) => item.pid === ${targetPid});`,
         "if (me === undefined) throw new Error('target missing from owned tree');",
         'process.stdout.write(`${JSON.stringify(me)}\\n`);',
@@ -152,14 +149,12 @@ describe.runIf(process.platform !== 'win32')('owned process trees', () => {
       },
     );
 
-    const rootStartedAt = readProcessIdentity(root.pid!)!.startedAt;
     await waitForFixtureRecord(directory, 'parent');
     const expected = fixturePids(directory);
     const observed = await inspectOwnedProcessTree({
       attemptId,
       rootPid: root.pid!,
       rootProcessGroupId: root.pid!,
-      rootStartedAt,
     });
 
     expect(observed.map((process) => process.pid).sort()).toEqual(
@@ -176,7 +171,6 @@ describe.runIf(process.platform !== 'win32')('owned process trees', () => {
       attemptId,
       rootPid: root.pid!,
       rootProcessGroupId: root.pid!,
-      rootStartedAt,
       observed,
       graceMs: 100,
     });
@@ -199,7 +193,6 @@ describe.runIf(process.platform !== 'win32')('owned process trees', () => {
       [parentFixture, 'ignore', unrelatedDirectory],
       { detached: true, stdio: 'ignore' },
     );
-    const rootStartedAt = readProcessIdentity(owned.pid!)!.startedAt;
     await Promise.all([
       waitForFixtureRecord(directory, 'parent'),
       waitForFixtureRecord(unrelatedDirectory, 'parent'),
@@ -209,13 +202,11 @@ describe.runIf(process.platform !== 'win32')('owned process trees', () => {
       attemptId,
       rootPid: owned.pid!,
       rootProcessGroupId: owned.pid!,
-      rootStartedAt,
     });
     await stopOwnedProcessTree({
       attemptId,
       rootPid: owned.pid!,
       rootProcessGroupId: owned.pid!,
-      rootStartedAt,
       observed,
       graceMs: 100,
     });

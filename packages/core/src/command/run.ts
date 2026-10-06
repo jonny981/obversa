@@ -19,7 +19,6 @@ import {
   inspectOwnedProcessTree,
   inspectPipeHoldingProcesses,
   measureOwnedProcessMemory,
-  readProcessIdentity,
   stopOwnedProcessTree,
   type ProcessIdentity,
 } from './process-tree.js';
@@ -379,7 +378,6 @@ export async function runOwnedCommand(
     readonly ownerId?: Sha256Digest;
     readonly rootPid: number;
     readonly rootProcessGroupId: number;
-    readonly rootStartedAt?: string;
   } | undefined;
   let pipeProbe: ReturnType<typeof capturePipeOwnerProbe> | undefined;
   let observed: readonly ProcessIdentity[] = [];
@@ -477,21 +475,12 @@ export async function runOwnedCommand(
         onSpawn: (child) => {
           const rootPid = child.pid;
           if (rootPid === undefined) throw new Error('owned command has no process id');
-          let root: ProcessIdentity | undefined;
-          try {
-            root = readProcessIdentity(rootPid);
-          } catch (error) {
-            inspectionFailure = error;
-            throw error;
-          }
           treeRequest = {
             attemptId: request.attemptId,
             ...(ownsOwner ? { ownerId } : {}),
             rootPid,
             rootProcessGroupId: rootPid,
-            ...(root === undefined ? {} : { rootStartedAt: root.startedAt }),
           };
-          if (root !== undefined) observed = [root];
           const descriptors = [
             pipeFileDescriptor(child.stdout),
             pipeFileDescriptor(child.stderr),
@@ -636,7 +625,6 @@ export {
   measureOwnedProcessMemory,
   parseWindowsProcessRows,
   readAttemptMarkerProcessIds,
-  readProcessIdentity,
   stopOwnedProcessTree,
   type OwnedProcessTreeRequest,
   type PipeOwnerProbe,

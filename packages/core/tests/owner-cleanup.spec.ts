@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { describe, expect, it, vi } from 'vitest';
-import { cleanupFixture, exactPid, fixtureDirectory, isProcessAlive } from './process-fixture.ts';
+import { cleanupFixture, fixtureDirectory, isProcessAlive } from './process-fixture.ts';
 import { inspectOwnerMarkedProcesses } from '../src/command/run.ts';
 
 // Real work: these tests build real process fixtures in temporary
@@ -38,7 +38,7 @@ async function record(directory: string, name: string): Promise<Record<string, u
 }
 
 function stop(pid: number): void {
-  try { process.kill(exactPid(pid), 'SIGKILL'); } catch {}
+  try { process.kill(pid, 'SIGKILL'); } catch {}
 }
 
 describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('command owner cleanup', () => {

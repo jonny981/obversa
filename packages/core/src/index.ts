@@ -1,8 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 
-import { readProcessIdentities, readProcessIdentity } from './command/process-tree.js';
-
 const MAX_TIMER_MS = 2_147_483_647;
 const DRAIN_GRACE_MS = 500;
 const PARENT_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
@@ -11,10 +9,6 @@ type ParentSignal = (typeof PARENT_SIGNALS)[number];
 interface LiveChild {
   readonly child: ChildProcess;
   readonly detached: boolean;
-  /** The child's start time, read as it starts; undefined if it could not be read. */
-  readonly startedAt: number | undefined;
-  /** Members of the child's group read while it ran: pid to start time. */
-  readonly members: Map<number, string>;
 }
 
 const liveChildren = new Set<LiveChild>();
@@ -122,54 +116,10 @@ function validate(options: RunChildOptions): Required<Pick<RunChildOptions, 'tim
   };
 }
 
-/** A ps start time, read with LC_ALL=C and TZ=UTC, in milliseconds. */
-function startTime(startedAt: string): number {
-  return Date.parse(`${startedAt} UTC`);
-}
-
-function signalProcess(entry: LiveChild, signal: NodeJS.Signals): boolean {
-  const { child, detached, members } = entry;
-  const pid = child.pid;
-  if (pid === undefined || pid < 1) return false;
-  // After Node sees the exit, the system can give the child's pid, and so its
-  // group id, to any new process.
-  const running = child.exitCode === null && child.signalCode === null;
-  if (detached) {
-    // While the child runs, every process the table shows with the child's
-    // pid as its group id gets the signal by its own pid and is recorded,
-    // whatever its origin, if ps shows it starting no earlier than the child,
-    // to the second. Nothing in the group is signalled when the child's start
-    // time could not be read. After the child exits, only recorded members
-    // still running with the same start time get it. A process that joins
-    // the group after the last read is not signalled.
-    let targets: readonly number[] = [];
-    try {
-      const table = readProcessIdentities();
-      if (running) {
-        const group = entry.startedAt === undefined ? [] : table.filter((member) =>
-          member.processGroupId === pid &&
-          member.pid !== pid &&
-          startTime(member.startedAt) >= entry.startedAt!);
-        for (const member of group) members.set(member.pid, member.startedAt);
-        targets = group.map((member) => member.pid);
-      } else {
-        targets = table
-          .filter((member) => members.get(member.pid) === member.startedAt)
-          .map((member) => member.pid);
-      }
-    } catch {
-      // The child is still signalled below.
-    }
-    for (const member of targets) {
-      try {
-        process.kill(member, signal);
-      } catch {
-        // The member may have exited since the table was read.
-      }
-    }
-  }
-  if (!running) return false;
+function signalProcess(child: ChildProcess, signal: NodeJS.Signals, detached: boolean): boolean {
+  if (child.pid === undefined) return false;
   try {
+    if (detached) return process.kill(-child.pid, signal);
     return child.kill(signal);
   } catch {
     return false;
@@ -177,8 +127,8 @@ function signalProcess(entry: LiveChild, signal: NodeJS.Signals): boolean {
 }
 
 function stopLiveChildren(signal: NodeJS.Signals): void {
-  for (const entry of liveChildren) {
-    signalProcess(entry, signal);
+  for (const { child, detached } of liveChildren) {
+    signalProcess(child, signal, detached);
   }
 }
 
@@ -211,8 +161,9 @@ function installParentCleanup(): void {
   }
 }
 
-function registerLiveChild(entry: LiveChild): () => void {
+function registerLiveChild(child: ChildProcess, detached: boolean): () => void {
   installParentCleanup();
+  const entry = { child, detached };
   liveChildren.add(entry);
   return () => liveChildren.delete(entry);
 }
@@ -260,22 +211,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
   }
 
   const detached = options.detached === true && process.platform !== 'win32';
-  let startedAt: number | undefined;
-  if (detached && child.pid !== undefined) {
-    try {
-      const identity = readProcessIdentity(child.pid);
-      if (identity !== undefined) startedAt = startTime(identity.startedAt);
-    } catch {
-      // The group is then left alone; the child is still signalled.
-    }
-  }
-  const live: LiveChild = {
-    child,
-    detached,
-    startedAt: startedAt !== undefined && Number.isFinite(startedAt) ? startedAt : undefined,
-    members: new Map(),
-  };
-  const unregisterChild = registerLiveChild(live);
+  const unregisterChild = registerLiveChild(child, detached);
 
   return new Promise<RunChildResult>((resolve, reject) => {
     const stdoutChunks: Uint8Array[] = [];
@@ -287,7 +223,6 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
     let closeCode: number | null = null;
     let closeSignal: NodeJS.Signals | null = null;
     let stoppedAt: number | undefined;
-    let stopSignalledAt: number | undefined;
     let stopPromise: Promise<void> | undefined;
     let exitPromise: Promise<void> | undefined;
     let stopError: unknown;
@@ -372,8 +307,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
         stopError = error;
         stopHook = Promise.resolve();
       }
-      stopSignalledAt = performance.now();
-      signalProcess(live, 'SIGTERM');
+      signalProcess(child, 'SIGTERM', detached);
       stopPromise = (async () => {
         try {
           await Promise.race([
@@ -386,7 +320,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
         if (closed) return;
         forceKillTimer = setTimeout(() => {
           if (closed) return;
-          signalProcess(live, 'SIGKILL');
+          signalProcess(child, 'SIGKILL', detached);
           teardownTimer = setTimeout(() => {
             if (closed) return;
             destroyOutput();
@@ -394,24 +328,6 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
           }, limits.killGraceMs);
         }, limits.killGraceMs);
       })();
-    };
-
-    // A child that exits on SIGTERM cancels its SIGKILL. A recorded member of
-    // its group that the table still shows once the output has closed gets
-    // one here, when the grace ends.
-    const killRemainingMembers = async (): Promise<void> => {
-      if (stopSignalledAt === undefined || live.members.size === 0) return;
-      try {
-        const remaining = readProcessIdentities().some(
-          (member) => live.members.get(member.pid) === member.startedAt,
-        );
-        if (!remaining) return;
-      } catch {
-        return;
-      }
-      const wait = stopSignalledAt + limits.killGraceMs - performance.now();
-      if (wait > 0) await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, wait));
-      signalProcess(live, 'SIGKILL');
     };
 
     const retain = (target: Uint8Array[], chunk: Uint8Array): void => {
@@ -472,7 +388,6 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
           stopError = error;
         }
         await stopPromise;
-        await killRemainingMembers();
         finish();
       })();
     });

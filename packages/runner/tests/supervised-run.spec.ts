@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { digestJson } from '@obversa/api';
-import { inspectOwnedProcessTree, readProcessIdentity, runOwnedCommand, stopOwnedProcessTree } from '@obversa/core/command';
+import { inspectOwnedProcessTree, runOwnedCommand, stopOwnedProcessTree } from '@obversa/core/command';
 
 import * as runtime from '@obversa/runtime';
 import * as runner from '../src/index.js';
@@ -879,10 +879,7 @@ process.stdout.write(JSON.stringify(await handle.done));
         } finally {
           clearTimeout(timeout);
           if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
-            const owned = {
-              attemptId: digestJson({ watchdog: child.pid }), rootPid: child.pid, rootProcessGroupId: child.pid,
-              rootStartedAt: readProcessIdentity(child.pid)!.startedAt,
-            };
+            const owned = { attemptId: digestJson({ watchdog: child.pid }), rootPid: child.pid, rootProcessGroupId: child.pid };
             const observed = await inspectOwnedProcessTree(owned);
             child.kill('SIGTERM');
             await Promise.race([closed.catch(() => undefined), delay(3_000)]);
@@ -1890,7 +1887,6 @@ process.stdout.write(JSON.stringify(await handle.done));
     try {
       const processes = await inspectOwnedProcessTree({
         attemptId: `sha256:${'a'.repeat(64)}`, rootPid: child.pid!, rootProcessGroupId: child.pid!,
-        rootStartedAt: readProcessIdentity(child.pid!)!.startedAt,
       });
       const identity = processes.find((item) => item.pid === child.pid)!;
       expect(identity).toBeDefined();
@@ -2479,14 +2475,10 @@ describe('supervised preflight storage and ownership', () => {
     expect(Number.isSafeInteger(workerPid) && workerPid > 0 && workerPid !== childPid).toBe(true);
     const kill = process.kill.bind(process);
     const refusedSignals: NodeJS.Signals[] = [];
-    const groupSignals: unknown[] = [];
+    const refusedGroupSignals: NodeJS.Signals[] = [];
     const signalSpy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
-      if (pid < 1) {
-        groupSignals.push([pid, signal]);
-        return true;
-      }
-      if (pid === childPid && (signal === 'SIGTERM' || signal === 'SIGKILL')) {
-        refusedSignals.push(signal);
+      if ((pid === childPid || pid === -workerPid) && (signal === 'SIGTERM' || signal === 'SIGKILL')) {
+        (pid === childPid ? refusedSignals : refusedGroupSignals).push(signal);
         return true;
       }
       return kill(pid, signal);
@@ -2495,7 +2487,7 @@ describe('supervised preflight storage and ownership', () => {
       await expect(handle.stop()).resolves.toMatchObject({ kind: 'fail', code: 'TEARDOWN_INCOMPLETE' });
       expect(refusedSignals).toContain('SIGTERM');
       expect(refusedSignals).toContain('SIGKILL');
-      expect(groupSignals).toEqual([]);
+      expect(refusedGroupSignals).toContain('SIGTERM');
       expect(() => kill(childPid, 0)).not.toThrow();
       expect(await handle.status()).toMatchObject({ cleanupVerified: false, leaseRetained: true });
       const state = await runtime.readRunPreflight(createLocalRunStorage(options.storage), 'fixture');
