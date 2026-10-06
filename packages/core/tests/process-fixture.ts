@@ -64,16 +64,7 @@ export function fixturePids(directory: string): readonly number[] {
   return [...pids];
 }
 
-/** Return `pid` only if it names one process; zero or a negative number names a group. */
-export function exactPid(pid: unknown): number {
-  if (!Number.isSafeInteger(pid) || (pid as number) < 1) {
-    throw new TypeError(`expected a positive process id, got ${String(pid)}`);
-  }
-  return pid as number;
-}
-
 export function isProcessAlive(pid: number): boolean {
-  exactPid(pid);
   try {
     process.kill(pid, 0);
     return true;
@@ -85,7 +76,7 @@ export function isProcessAlive(pid: number): boolean {
 export function cleanupFixture(directory: string): void {
   for (const pid of fixturePids(directory)) {
     try {
-      process.kill(exactPid(pid), 'SIGKILL');
+      process.kill(pid, 'SIGKILL');
     } catch {}
   }
   rmSync(directory, { recursive: true, force: true });

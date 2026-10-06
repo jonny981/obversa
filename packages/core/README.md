@@ -24,14 +24,7 @@ end, at a deadline, with a typed result.
   child is stopped and the result says `timedOut: true`, even when the
   stopped child reports no exit code. By default only the child is
   signalled, so a process the child started and left behind is not stopped.
-  Pass `detached: true` to put the child in its own process group. While
-  the child runs, each signal goes to every process in that group that `ps`
-  shows starting no earlier than the child, each by its own process id. If
-  the child's start time cannot be read, only the child is signalled. If
-  the child exits on SIGTERM, a process signalled this way that `ps` still
-  shows once the child's output has closed gets SIGKILL when `killGraceMs`
-  has passed since the stop began. A process that joins the group after the
-  last signal is not stopped.
+  Pass `detached: true` to stop the child's whole process group.
 - **No pipe can stall it.** Standard input is closed after the optional
   input is written, and both output streams are drained until they close
   or for a short grace after the child exits, under one combined byte cap.
