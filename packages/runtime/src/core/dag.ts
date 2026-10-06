@@ -253,11 +253,12 @@ export function dag(config: DagConfig): Job {
   // The declared shape a resumed run's record must match.
   const resumeIdentity = (config as DagConfig & { [RESUME_IDENTITY]?: string })[RESUME_IDENTITY]
     ?? dagResumeIdentity(config);
-  // Every round a target has been asked to redo work, kept only for a judge's
-  // own state, a plain numeric budget never needs this history. A `workflow()`
-  // gives its brief and roles only through the resume identity, so the saved
-  // state digests it too.
-  const identity = interactionIdentity({ config, resumeIdentity });
+  // The graph's own saved rounds are matched by the same declared shape as
+  // its finished steps, so a resume keeps both or neither. A change the shape
+  // leaves out, such as a timeout or the prompt of a job a `dag()` node runs,
+  // then keeps the round each step ran in, and a new round never reads an
+  // earlier round's record.
+  const identity = resumeIdentity;
 
   // Static graph relations for routing cross-stage feedback (kickback). All pure
   // functions of the declared `needs` edges, computed once. `dependents` is the
@@ -335,6 +336,10 @@ export function dag(config: DagConfig): Job {
     const anchorKey = recordKey(path, rounds.rounds);
     const prior = anchors?.get(anchorKey);
     if (anchors instanceof Map) anchors.delete(anchorKey);
+    // A graph that does not match its record starts again, and nothing the
+    // record holds under it stands, such as a step's own saved review rounds.
+    const startsAgain = prior !== undefined
+      && !(prior.identity === resumeIdentity && prior.workspace === parent.workspace.dir);
     // The saved rounds belong to the same invocation in the same round.
     const checkpointPath = [...path, '@judge-kickback'];
     const saved = prior === undefined ? undefined : savedInteraction(parent, checkpointPath, identity);
@@ -585,7 +590,7 @@ export function dag(config: DagConfig): Job {
         depth,
         path: [...path, name],
         round: attempts.get(name) ?? 1,
-        staleUntil: needsFinished(name),
+        staleUntil: startsAgain ? Infinity : needsFinished(name),
         workspace,
         environment,
         lastReview: feedbackFor(name),

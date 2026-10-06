@@ -5,10 +5,10 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createCallbackClient, dag, fnJob, kickback, loop, person, predicate, run, stage, withEnv, workflow } from '../src/api.ts';
+import { agentJob, createCallbackClient, dag, fnJob, judge, kickback, loop, person, predicate, revisionRequest, run, stage, withEnv, workflow } from '../src/api.ts';
 import type { Job, LoopEvent, RunOptions, RunResult } from '../src/api.ts';
 import { makeRecorder, readResumeRecord } from '../src/runtime/persist.ts';
-import { MockEngine } from '../src/testing.ts';
+import { MockEngine, recordedJudge } from '../src/testing.ts';
 
 let cwd: string;
 
@@ -1696,5 +1696,215 @@ describe('a run with one round', () => {
     await writeFile(safePath, cut);
     expect((await result(build(true), { recordTo: safePath, resume: true })).outcome.status).toBe('pass');
     expect(runs).toEqual({ one: 1, two: 2 });
+  });
+});
+
+describe('a resume after a change the record does not match steps by', () => {
+  /** What each step saw: the prompt of every build that ran, and how many checks and reviews ran. */
+  type Seen = { builds: string[]; checks: number; reviews: number };
+
+  /** A build, a check, and a review that sends the build back with a new
+   * finding each time until its fourth review passes; a recorded judge lets
+   * every send-back go ahead. `rules` is a line of the build's prompt, which
+   * a person may edit before the resume. */
+  function delivery(rules: string, judgeFile: string, seen: Seen): Job {
+    return dag({
+      name: 'delivery',
+      maxKickbacks: { build: judge(recordedJudge(judgeFile)) },
+      nodes: {
+        build: {
+          job: agentJob({
+            label: 'build',
+            engine: new MockEngine((request) => { seen.builds.push(request.prompt); return 'built'; }),
+            prompt: `Build the change. ${rules}`,
+            consumeFeedback: true,
+          }),
+        },
+        checks: { needs: 'build', job: fnJob('checks', () => { seen.checks += 1; }) },
+        review: {
+          needs: ['checks', 'build'], acceptsKickbackTo: ['build'],
+          job: fnJob('review', () => {
+            seen.reviews += 1;
+            return seen.reviews < 4
+              ? revisionRequest({ target: 'build', reason: 'not yet', findings: [{ severity: 'should-fix', evidence: `finding from review ${seen.reviews}` }] })
+              : undefined;
+          }),
+        },
+      },
+    });
+  }
+
+  /** The rounds of every step the resumed run reported, by step. */
+  async function resumedRounds(path: string): Promise<Record<string, number[]>> {
+    const events = await recordEvents(path);
+    const resumedAt = events.findLastIndex((event) => event.kind === 'run:start');
+    const rounds: Record<string, number[]> = {};
+    for (const event of events.slice(resumedAt)) {
+      if (event.kind !== 'dag:node' || event.phase !== 'done') continue;
+      (rounds[event.node] ??= []).push(Number(event.rounds?.[event.path.length] ?? 1));
+    }
+    return rounds;
+  }
+
+  async function judgeAnswers(): Promise<string> {
+    const file = join(cwd, 'judge.json');
+    await writeFile(file, JSON.stringify([{ stop_reason: { choice: 'continue' } }]));
+    return file;
+  }
+
+  it('builds again with the new findings when a dag() send-back follows a resume, never reusing an earlier round', async () => {
+    const judgeFile = await judgeAnswers();
+    const seen: Seen = { builds: [], checks: 0, reviews: 0 };
+    const path = recordTo();
+    expect((await result(delivery('Keep it small.', judgeFile, seen), { recordTo: path })).outcome.status).toBe('pass');
+    expect({ builds: seen.builds.length, checks: seen.checks, reviews: seen.reviews }).toEqual({ builds: 4, checks: 4, reviews: 4 });
+
+    // The worker dies once the second send-back's build finished; a person
+    // edits the build's prompt before the resume.
+    await cutAfter(path, nodeDone('build'), 3);
+    const resumedSeen: Seen = { builds: [], checks: 0, reviews: 2 };
+    const resumed = await result(delivery('Keep it small. Clean up after yourself.', judgeFile, resumedSeen), { recordTo: path, resume: true });
+
+    expect(resumed.outcome.status).toBe('pass');
+    // Round 3's check and review run; the review's new finding goes to a
+    // fourth build, which runs and reads it.
+    expect(resumedSeen.checks).toBe(2);
+    expect(resumedSeen.reviews).toBe(4);
+    expect(resumedSeen.builds).toHaveLength(1);
+    expect(resumedSeen.builds[0]).toContain('finding from review 3');
+    // Nothing from round 1 or 2 stands in for the rounds after the stop.
+    expect(await resumedRounds(path)).toEqual({ build: [3, 4], checks: [3, 4], review: [3, 4] });
+    const events = await recordEvents(path);
+    expect(events.some((event) => event.kind === 'dag:node' && event.outcome?.status === 'paused')).toBe(false);
+  });
+
+  it('asks about a dag() step only in the round it was interrupted in', async () => {
+    const judgeFile = await judgeAnswers();
+    const seen: Seen = { builds: [], checks: 0, reviews: 0 };
+    const path = recordTo();
+    expect((await result(delivery('Keep it small.', judgeFile, seen), { recordTo: path })).outcome.status).toBe('pass');
+
+    // The worker dies while round 3's check runs; a person edits the build's prompt.
+    await cutAfter(path, nodeStart('checks'), 3);
+    const resumedSeen: Seen = { builds: [], checks: 0, reviews: 2 };
+    const paused = await result(delivery('Keep it small. Clean up after yourself.', judgeFile, resumedSeen), { recordTo: path, resume: true, callbacks: createCallbackClient() });
+
+    // The check of round 3 is the one step the worker left unfinished: the
+    // run asks about it before anything else runs.
+    expect(paused.outcome.status).toBe('paused');
+    expect(paused.outcome.summary).toMatch(/Did stage "checks" finish/);
+    expect(resumedSeen).toEqual({ builds: [], checks: 0, reviews: 2 });
+    // The review waits behind the check, in the same round.
+    expect(await resumedRounds(path)).toEqual({ build: [3], checks: [3], review: [3] });
+  });
+
+  it('builds a workflow() reviewed stage again with the new findings when a send-back follows a resume', async () => {
+    const judgeFile = await judgeAnswers();
+    const prompts: string[] = [];
+    let checks = 0;
+    const writer = new MockEngine((request) => {
+      prompts.push(request.prompt);
+      writeFileSync(join(request.cwd!, 'page.md'), `draft ${prompts.length}`);
+      return JSON.stringify({ status: 'pass', summary: 'wrote it' });
+    });
+    const reviewer = new MockEngine(() => JSON.stringify({ status: 'pass', summary: 'reads well' }));
+    const seat = (engine: MockEngine, model: string, tools: readonly string[] = []) =>
+      ({ engine, identity: { adapter: 'mock', provider: 'mock', modelFamily: model, model, tools } });
+    // A person may raise the step timeout before the resume.
+    const build = (timeout: string) => workflow('rounds', {
+      brief: 'Write the page.',
+      options: { timeout },
+      roles: { writer: seat(writer, 'writer-mock', ['Write']), reviewer: [seat(reviewer, 'reviewer-mock', ['Read'])] },
+      stages: [
+        stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', retrySafe: true, refine: judge(recordedJudge(judgeFile)) }),
+        stage('check', {
+          sendsBackTo: 'write',
+          fn: fnJob('check', () => {
+            checks += 1;
+            return checks < 4
+              ? revisionRequest({ target: 'write', reason: 'not yet', findings: [{ severity: 'should-fix', evidence: `finding from check ${checks}` }] })
+              : undefined;
+          }),
+        }),
+      ],
+    });
+    const path = recordTo();
+    expect((await result(build('10m'), { recordTo: path })).outcome.status).toBe('pass');
+    expect({ builds: prompts.length, checks }).toEqual({ builds: 4, checks: 4 });
+
+    // The worker dies once the second send-back's build finished.
+    await cutAfter(path, nodeDone('write'), 3);
+    prompts.length = 0;
+    checks = 2;
+    const resumed = await result(build('20m'), { recordTo: path, resume: true });
+
+    expect(resumed.outcome.status).toBe('pass');
+    expect(checks).toBe(4);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('finding from check 3');
+    expect(await readFile(join(cwd, 'page.md'), 'utf8')).toBe('draft 1');
+    expect(await resumedRounds(path)).toEqual({ write: [3, 4], check: [3, 4] });
+  });
+
+  it.each([
+    ['its desc', { desc: 'Write the page.', retrySafe: true }, { desc: 'Write the page for new readers.', retrySafe: true }],
+    ['retrySafe', { desc: 'Write the page.', retrySafe: false }, { desc: 'Write the page.', retrySafe: true }],
+  ] as const)('starts a workflow() again from its first round when a reviewed stage changes %s before the resume', async (_, before, after) => {
+    const prompts: string[] = [];
+    let reviews = 0;
+    let checks = 0;
+    const writer = new MockEngine((request) => {
+      prompts.push(request.prompt);
+      writeFileSync(join(request.cwd!, 'page.md'), `draft ${prompts.length}`);
+      return JSON.stringify({ status: 'pass', summary: 'wrote it' });
+    });
+    // The stage's own review sends the first draft back once.
+    const reviewer = new MockEngine(() => {
+      reviews += 1;
+      return JSON.stringify(reviews === 1
+        ? { status: 'revise', summary: 'not yet', findings: [{ severity: 'should-fix', evidence: 'finding from review 1' }] }
+        : { status: 'pass', summary: 'reads well' });
+    });
+    const seat = (engine: MockEngine, model: string, tools: readonly string[] = []) =>
+      ({ engine, identity: { adapter: 'mock', provider: 'mock', modelFamily: model, model, tools } });
+    // A person may change a setting of the write stage before the resume.
+    // Its two refinements are spent exactly: one on its own review, one on
+    // the check's send-back.
+    const build = (settings: { desc: string; retrySafe: boolean }) => workflow('rounds', {
+      brief: 'Write the page.',
+      roles: { writer: seat(writer, 'writer-mock', ['Write']), reviewer: [seat(reviewer, 'reviewer-mock', ['Read'])] },
+      stages: [
+        stage('write', { ...settings, agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', refine: 2 }),
+        stage('check', {
+          sendsBackTo: 'write',
+          fn: fnJob('check', () => {
+            checks += 1;
+            return checks < 2
+              ? revisionRequest({ target: 'write', reason: 'not yet', findings: [{ severity: 'should-fix', evidence: 'finding from check 1' }] })
+              : undefined;
+          }),
+        }),
+      ],
+    });
+    const path = recordTo();
+    expect((await result(build(before), { recordTo: path })).outcome.status).toBe('pass');
+    expect({ builds: prompts.length, reviews, checks }).toEqual({ builds: 3, reviews: 3, checks: 2 });
+
+    // The worker dies once the send-back's build finished.
+    await cutAfter(path, nodeDone('write'), 2);
+    prompts.length = 0;
+    reviews = 0;
+    checks = 0;
+    const resumed = await result(build(after), { recordTo: path, resume: true });
+
+    // Nothing the stopped run saved stands for the changed stage: its first
+    // build reads no finding, and its review and the send-back each take
+    // their refinement again.
+    expect(resumed.outcome.status).toBe('pass');
+    expect(prompts).toHaveLength(3);
+    expect(prompts[0]).not.toContain('finding from');
+    expect(prompts[1]).toContain('finding from review 1');
+    expect(prompts[2]).toContain('finding from check 1');
+    expect(await resumedRounds(path)).toEqual({ write: [1, 2], check: [1, 2] });
   });
 });
