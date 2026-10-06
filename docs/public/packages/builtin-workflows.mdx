@@ -85,6 +85,17 @@ Every configuration extends `TeamInput`. A seat is a `TeamSeat` from
   };
 ```
 
+## Improve a workflow
+
+`climbWorkflow(config)` scores a proposed change to a workflow file. It runs
+the workflow on tuning tasks and held-out tasks, with and without the
+change, and keeps the change only when the workflow scores better with it.
+A person approves a kept change. With `mode: 'auto'`, the numbers alone
+decide for a change that the `auto` option allows: the files, and the
+settings keys and values, it may change. Any other kept change goes to a
+person. `formatClimbReport(report)` prints the comparison. See
+[Workflows that improve themselves](/reviewing/workflows-that-improve-themselves).
+
 ## Read a review decision
 
 `outcomeFromAgentText(text, target?)` reads a reviewer's reply: the first
@@ -191,10 +202,15 @@ try {
 - **`writerReviewerPair(config)`**, **`thresholdPanel(config)`**,
   **`featureDelivery(config)`**: the three recipes.
   [Choose a recipe](#choose-a-recipe).
+- **`climbWorkflow(config)`**, **`formatClimbReport(report)`**: keep a
+  change to a workflow only when it scores better.
+  [Improve a workflow](#improve-a-workflow).
 - **`outcomeFromAgentText`**, **`INVALID_TEAM_DECISION`**: read a
   reviewer's reply. [Read a review decision](#read-a-review-decision).
 - **Types**: `PairConfig`, `PanelConfig`, `FeatureDeliveryConfig`,
-  `TeamInput`, `TestCommand`, `ReviewerSeat`.
+  `TeamInput`, `TestCommand`, `ReviewerSeat`, `ClimbAuto`, `ClimbConfig`,
+  `ClimbProtection`, `ClimbReport`, `ClimbRun`, `ClimbSettingRule`,
+  `ClimbTaskReport`, `ClimbTotals`.
 
 ## Next steps
 

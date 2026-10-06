@@ -114,14 +114,20 @@ export function approval(label: string, opts: ApprovalOptions): Job {
     const path = [...ctx.path];
     ctx.emit({ kind: 'job:start', ts: Date.now(), path, label, timeoutMs: ctx.timeoutMs });
     let outcome: Outcome;
+    let asked: CallbackRequest | undefined;
     try {
-      outcome = await decide(ctx, label, opts, NODE_JOBS.get(ctx) === job);
+      outcome = await decide(ctx, label, opts, NODE_JOBS.get(ctx) === job, (request) => { asked = request; });
     } catch (e) {
       const error = LoopError.from(e, { code: 'BODY', phase: 'body', path: ctx.path, iteration: ctx.iteration });
       outcome = { status: 'fail', summary: error.message, error };
       ctx.emit({ kind: 'error', ts: Date.now(), path, message: error.message, code: error.code });
     }
-    ctx.emit({ kind: 'job:end', ts: Date.now(), path, label, outcome });
+    // Two steps that ask the same question about the same input share one
+    // request and its answer, so each step names it in its own `job:end`.
+    ctx.emit({
+      kind: 'job:end', ts: Date.now(), path, label, outcome,
+      ...(asked === undefined ? {} : { asked: { requestId: asked.requestId, gateId: asked.gateId, question: asked.decisionText } }),
+    });
     return outcome;
   };
   return setMeta(job, {
@@ -132,7 +138,13 @@ export function approval(label: string, opts: ApprovalOptions): Job {
   });
 }
 
-async function decide(ctx: JobContext, label: string, opts: ApprovalOptions, ownsNode: boolean): Promise<Outcome> {
+async function decide(
+  ctx: JobContext,
+  label: string,
+  opts: ApprovalOptions,
+  ownsNode: boolean,
+  onAsk: (request: CallbackRequest) => void,
+): Promise<Outcome> {
   const client: RunCallbacks | undefined = ctx.callbacks;
   if (client === undefined) {
     throw new LoopError({
@@ -147,6 +159,7 @@ async function decide(ctx: JobContext, label: string, opts: ApprovalOptions, own
     responseSchema: RESPONSE_SCHEMA,
     input: opts.input ?? aboutOf(ctx),
   });
+  onAsk(request);
   let { state, answer } = stateOf(await client.history(request.requestId));
   if (answer === undefined) {
     // The newest post is the live question: it re-opens this request if an

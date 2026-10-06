@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { judge, run, stage, stopQuestions, workflow } from '../src/api.ts';
+import { dag, fnJob, judge, run, stage, stopQuestions, workflow } from '../src/api.ts';
 import type { AgentRequest, JudgeQuestions, LoopEvent, Outcome, TeamSeat } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 
@@ -117,6 +117,27 @@ function judgeEventsOf(events: readonly LoopEvent[]) {
 }
 
 describe('refine: judge()', () => {
+  it('names each node a judge decides about at the start of the graph, though no review fails and no judge is asked', async () => {
+    const events: LoopEvent[] = [];
+    const { job, judgeCalls } = scriptedTeam({ reviewerReplies: [PASS], judgeReplies: [{ stop_reason: { choice: 'holds' } }] });
+    expect((await runTeam(job, events)).outcome.status).toBe('pass');
+    expect(judgeCalls).toHaveLength(0);
+    expect(judgeEventsOf(events)).toHaveLength(0);
+    expect(events.find((e) => e.kind === 'dag:start')).toMatchObject({ path: ['refine-test'], judged: ['write'] });
+
+    const graph: LoopEvent[] = [];
+    const sendsBack = dag({
+      name: 'judged-send-back',
+      maxKickbacks: { draft: judge(seat(new MockEngine(() => JSON.stringify({ stop_reason: { choice: 'holds' } })), 'judge-mock')) },
+      nodes: {
+        draft: fnJob('draft', () => 'drafted'),
+        check: { needs: 'draft', acceptsKickbackTo: ['draft'], job: fnJob('check', () => 'checked') },
+      },
+    });
+    expect((await run(sendsBack, { cwd: workDir(), onEvent: (event) => graph.push(event) })).outcome.status).toBe('pass');
+    expect(graph.find((e) => e.kind === 'dag:start')).toMatchObject({ judged: ['draft'] });
+  });
+
   it('stops on holds at round two', async () => {
     const events: LoopEvent[] = [];
     const { job, judgeCalls } = scriptedTeam({

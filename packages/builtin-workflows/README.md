@@ -1,6 +1,7 @@
 # @obversa/builtin-workflows
 
-`@obversa/builtin-workflows` supplies three ready-made workflows.
+`@obversa/builtin-workflows` supplies three ready-made workflows, and a
+workflow that scores a change to a workflow before you keep it.
 Use `workflow`, `stage`, `person`, and `briefFromFile` from
 `@obversa/runtime` to write your own.
 
@@ -18,6 +19,12 @@ npm install @obversa/runtime @obversa/builtin-workflows
   them.
 - **Seats** come from the engine plugins: `claude(model)`, `codex(model)`,
   `opencode(model, { executable })`.
+- **`climbWorkflow`.** Runs a workflow on tuning tasks and held-out tasks,
+  with and without a proposed change, and keeps the change only when the
+  workflow scores better with it. A person approves a kept change. In
+  `auto` mode the numbers alone decide for a change that the `auto` option
+  allows: the files, and the settings keys and values, it may change.
+  `formatClimbReport` prints the comparison.
 
 Every stage carries a `desc` and a `gate` sentence that reach the reviewers
 and the record. A stage that promises a file fails by name when the file

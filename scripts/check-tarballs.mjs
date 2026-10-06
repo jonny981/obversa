@@ -506,6 +506,7 @@ export const EXPECTED_FILES = {
   '@obversa/builtin-workflows': [
     'package/LICENSE',
     'package/README.md',
+    'package/dist/climb-workflow.d.ts',
     'package/dist/feature-delivery.d.ts',
     'package/dist/index.d.ts',
     'package/dist/index.js',

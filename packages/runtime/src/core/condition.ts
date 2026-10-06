@@ -12,6 +12,7 @@
  */
 
 import type {
+  CheckRequirement,
   CommandRun,
   Condition,
   ConditionInput,
@@ -77,6 +78,16 @@ type ConditionPreparation = (
 
 const conditionPreparations = new WeakMap<Function, ConditionPreparation>();
 
+// How a check requires the commands it was built from, so a combined check
+// can say how it requires every command it holds, also the ones a round
+// does not reach.
+const REQUIRES = new WeakMap<Function, CheckRequirement>();
+
+function requiring<T extends Function>(condition: T, requirement: CheckRequirement | undefined): T {
+  if (requirement !== undefined) REQUIRES.set(condition, requirement);
+  return condition;
+}
+
 /** Internal lifecycle hook for conditions that need state from loop entry. */
 export function withConditionPreparation(
   condition: Condition,
@@ -109,7 +120,7 @@ export async function prepareCondition(
  * full condition result.
  */
 function coerceOne(fn: Condition | RawPredicate): Condition {
-  return async (ctx, last) => {
+  return requiring(async (ctx, last) => {
     const r = await (fn as (c: JobContext, l: Outcome | undefined) => unknown)(
       ctx,
       last,
@@ -128,7 +139,7 @@ function coerceOne(fn: Condition | RawPredicate): Condition {
       return r as ConditionResult;
     }
     return { met: Boolean(r), reason: `coerced: ${String(r)}` };
-  };
+  }, REQUIRES.get(fn));
 }
 
 /** Deterministic predicate over context + last outcome. */
@@ -191,7 +202,7 @@ export function commandSucceeds(
     captureOutput?: boolean;
   } = {},
 ): Condition {
-  return setLabel(async (ctx) => {
+  return requiring(setLabel(async (ctx) => {
     const startedAt = Date.now();
     const ran = (exitCode: number | null, timedOut = false): CommandRun => ({
       command,
@@ -244,7 +255,7 @@ export function commandSucceeds(
         command: ran(null),
       };
     }
-  }, `${command}${args.length ? ` ${args.join(' ')}` : ''}`);
+  }, `${command}${args.length ? ` ${args.join(' ')}` : ''}`), { command, args: [...args] });
 }
 
 export const always: Condition = async () => ({ met: true, reason: 'always' });
@@ -252,18 +263,43 @@ export const never: Condition = async () => ({ met: false, reason: 'never' });
 
 // ── Combinators ───────────────────────────────────────────────────────────
 
+/** The commands the checks inside a combined check ran, in the order they ran. */
+function commandsOf(results: readonly ConditionResult[]): { commands?: CommandRun[] } {
+  const commands = results.flatMap((r) => r.commands ?? (r.command === undefined ? [] : [r.command]));
+  return commands.length === 0 ? {} : { commands };
+}
+
+/** How a combined check requires its parts, when one of them holds a command. */
+function combined(
+  conds: readonly Condition[],
+  make: (parts: CheckRequirement[]) => CheckRequirement,
+): CheckRequirement | undefined {
+  const parts = conds.map((c) => REQUIRES.get(c));
+  return parts.some((part) => part !== undefined)
+    ? make(parts.map((part) => part ?? { other: true }))
+    : undefined;
+}
+
+/** The `requires` field of a combined check's result, when it holds a command. */
+function requiresOf(condition: Condition): { requires?: CheckRequirement } {
+  const requirement = REQUIRES.get(condition);
+  return requirement === undefined ? {} : { requires: requirement };
+}
+
 /** Inverts a condition. The inner result's `output` is carried through unchanged. */
 export function not(c: ConditionInput): Condition {
   const cond = toCondition(c);
-  const condition: Condition = async (ctx, last) => {
+  const condition: Condition = requiring(async (ctx, last) => {
     const r = await cond(ctx, last);
     return {
       met: !r.met,
       confidence: r.confidence,
       reason: `not(${r.reason})`,
       output: r.output,
+      ...commandsOf([r]),
+      ...requiresOf(condition),
     };
-  };
+  }, combined([cond], ([part]) => ({ not: part! })));
   setMeta(condition, { kind: 'condition', name: 'not', inputs: [c] });
   return withConditionPreparation(condition, async (ctx) =>
     not(await prepareCondition(c, ctx)),
@@ -276,7 +312,7 @@ export function not(c: ConditionInput): Condition {
  */
 export function all(...inputs: ConditionInput[]): Condition {
   const conds = inputs.map((i) => toCondition(i));
-  const condition: Condition = async (ctx, last) => {
+  const condition: Condition = requiring(async (ctx, last) => {
     const results: ConditionResult[] = [];
     for (const c of conds) {
       const r = await c(ctx, last);
@@ -286,13 +322,17 @@ export function all(...inputs: ConditionInput[]): Condition {
           met: false,
           reason: `all -> failed: ${r.reason}`,
           output: r.output,
+          ...commandsOf(results),
+          ...requiresOf(condition),
         };
     }
     return {
       met: true,
       reason: `all(${results.map((r) => r.reason).join(' & ')})`,
+      ...commandsOf(results),
+      ...requiresOf(condition),
     };
-  };
+  }, combined(conds, (parts) => ({ all: parts })));
   setMeta(condition, { kind: 'condition', name: 'all', inputs });
   return withConditionPreparation(condition, async (ctx) =>
     all(...(await Promise.all(inputs.map((input) => prepareCondition(input, ctx))))),
@@ -306,23 +346,31 @@ export function all(...inputs: ConditionInput[]): Condition {
  */
 export function any(...inputs: ConditionInput[]): Condition {
   const conds = inputs.map((i) => toCondition(i));
-  const condition: Condition = async (ctx, last) => {
-    const reasons: string[] = [];
+  const condition: Condition = requiring(async (ctx, last) => {
+    const results: ConditionResult[] = [];
     let output: string | undefined;
     for (const c of conds) {
       const r = await c(ctx, last);
-      reasons.push(r.reason);
+      results.push(r);
       if (r.met)
         return {
           met: true,
           confidence: r.confidence,
           reason: `any -> ${r.reason}`,
           output: r.output,
+          ...commandsOf(results),
+          ...requiresOf(condition),
         };
       output ??= r.output;
     }
-    return { met: false, reason: `any(${reasons.join(' | ')})`, output };
-  };
+    return {
+      met: false,
+      reason: `any(${results.map((r) => r.reason).join(' | ')})`,
+      output,
+      ...commandsOf(results),
+      ...requiresOf(condition),
+    };
+  }, combined(conds, (parts) => ({ any: parts })));
   setMeta(condition, { kind: 'condition', name: 'any', inputs });
   return withConditionPreparation(condition, async (ctx) =>
     any(...(await Promise.all(inputs.map((input) => prepareCondition(input, ctx))))),
@@ -345,7 +393,7 @@ export function quorum(k: number, ...inputs: ConditionInput[]): Condition {
       message: `quorum requires 1 <= k <= inputs (got k=${k}, n=${inputs.length})`,
     });
   const conds = inputs.map((i) => toCondition(i));
-  const condition: Condition = setLabel(async (ctx, last) => {
+  const condition: Condition = requiring(setLabel(async (ctx, last) => {
     const settled = await Promise.allSettled(conds.map((c) => c(ctx, last)));
     const engineErrors = settled
       .filter(
@@ -389,8 +437,10 @@ export function quorum(k: number, ...inputs: ConditionInput[]): Condition {
       confidence,
       reason: `quorum ${held.length}/${inputs.length} held (need ${k})`,
       output: met ? undefined : output,
+      ...commandsOf(results),
+      ...requiresOf(condition),
     };
-  }, `quorum ${k}/${inputs.length}`);
+  }, `quorum ${k}/${inputs.length}`), combined(conds, (parts) => ({ quorum: k, of: parts })));
   setMeta(condition, { kind: 'condition', name: 'quorum', inputs });
   return withConditionPreparation(condition, async (ctx) =>
     quorum(

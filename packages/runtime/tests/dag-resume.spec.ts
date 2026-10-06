@@ -281,6 +281,47 @@ describe('dag resume', () => {
     expect(counts).toEqual({ one: 1, two: 2, three: 3 });
   });
 
+  it('asks the recovery question again when the worker dies while it waits for the answer', async () => {
+    const { counts, node } = counters();
+    const build = () => dag({
+      name: 'trio',
+      nodes: {
+        one: node('one'),
+        two: { ...node('two'), needs: 'one' },
+        three: { ...node('three'), needs: 'two' },
+      },
+    });
+    const path = recordTo();
+    expect((await result(build(), { recordTo: path })).outcome.status).toBe('pass');
+    await writeFile(path, await cutAfterStart(path, 'two'));
+
+    // The worker waits for the answer; it dies once the record shows the pause.
+    const callbacks = createCallbackClient();
+    const controller = new AbortController();
+    await result(build(), {
+      recordTo: path, resume: true, callbacks, onCallback: 'wait', signal: controller.signal,
+      onEvent: (event) => {
+        if (event.kind === 'dag:node' && event.node === 'two' && event.outcome?.status === 'paused') controller.abort();
+      },
+    });
+    const lines = (await readFile(path, 'utf8')).trim().split('\n');
+    const cut = lines.findIndex((line) => {
+      const event = JSON.parse(line) as LoopEvent;
+      return event.kind === 'dag:node' && event.node === 'two' && event.outcome?.status === 'paused';
+    });
+    expect(cut).toBeGreaterThanOrEqual(0);
+    await writeFile(path, `${lines.slice(0, cut + 1).join('\n')}\n`);
+
+    const again = await result(build(), { recordTo: path, resume: true, callbacks });
+    expect(again.outcome.status).toBe('paused');
+    expect(again.outcome.summary).toMatch(/Did stage "two" finish/);
+    expect(counts.two).toBe(1);
+    const [request] = await callbacks.listPending();
+    await answer(callbacks, request!);
+    expect((await result(build(), { recordTo: path, resume: true, callbacks })).outcome.status).toBe('pass');
+    expect(counts).toEqual({ one: 1, two: 1, three: 2 });
+  });
+
   it('never lands the leftover fork of an interrupted isolated node', async () => {
     cwd = await tmpRepo();
     const { stdout: preSha } = await execa('git', ['rev-parse', 'HEAD'], { cwd });

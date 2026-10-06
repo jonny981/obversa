@@ -45,6 +45,9 @@ the outcomes of the steps this one depends on, so a changed attempt upstream
 is a new question, and the same question about the same thing is the same
 request. Give `input` to say otherwise, or bind the approval to the exact
 files it approved with [proof acceptance](/reviewing/proof-acceptance).
+Two steps that ask the same question about the same thing share the
+request and its answer. Each step's `job:end` in the run's record names the
+request under `asked`, so the record shows every step that asked.
 
 A no needs a home and a budget. With `target`, the refusal goes to that
 step as a revision request with the note as its one finding. The approval

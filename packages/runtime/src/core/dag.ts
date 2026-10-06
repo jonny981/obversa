@@ -66,9 +66,10 @@ import { roundRule } from './rounds.js';
 export const TARGET_ROUNDS = Symbol('obversa:target-rounds');
 
 /**
- * Internal config key: some node runs its own judge (a `workflow()` stage
- * with `refine: judge(...)`), so the graph keeps the workspace as it was
- * when the work began, as it does for a judge in `maxKickbacks`.
+ * Internal config key: the nodes that run their own judge (a `workflow()`
+ * stage with `refine: judge(...)`). The graph keeps the workspace as it was
+ * when the work began for them, as it does for a judge in `maxKickbacks`,
+ * and names them in `dag:start`.
  */
 export const JUDGED_NODES = Symbol('obversa:judged-nodes');
 
@@ -340,8 +341,11 @@ export function dag(config: DagConfig): Job {
     // The git workspace as it was when the work began, which a judge compares
     // the work with. It is saved as soon as it is taken, so a resume compares
     // with it too, even after a pause before any round.
-    const judges = (typeof maxKickbacks !== 'number' && Object.values(maxKickbacks).some(isJudge))
-      || (config as DagConfig & { [JUDGED_NODES]?: boolean })[JUDGED_NODES] === true;
+    const judgedNodes = [...new Set([
+      ...((config as DagConfig & { [JUDGED_NODES]?: readonly string[] })[JUDGED_NODES] ?? []),
+      ...(typeof maxKickbacks === 'number' ? [] : Object.keys(maxKickbacks).filter((target) => isJudge(maxKickbacks[target]))),
+    ])];
+    const judges = judgedNodes.length > 0;
     const basePath = [...path, '@judge-base'];
     const savedBase = prior === undefined ? undefined : savedInteraction(parent, basePath, identity)?.tree;
     const base = typeof savedBase === 'string' ? savedBase
@@ -392,7 +396,7 @@ export function dag(config: DagConfig): Job {
         ? prior.recordId ?? randomUUID()
         : randomUUID(),
     });
-    parent.emit({ kind: 'dag:start', ts: ts(), path, depth, nodes: names });
+    parent.emit({ kind: 'dag:start', ts: ts(), path, depth, nodes: names, ...(judges ? { judged: judgedNodes } : {}) });
     // After the start, which a record reader takes as the point to forget
     // an earlier run's checkpoints from.
     if (base !== undefined && base !== savedBase) checkpointInteraction(parent, basePath, identity, { tree: base }, true);

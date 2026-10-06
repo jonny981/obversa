@@ -111,6 +111,7 @@
         "group": "Evals and Gates",
         "pages": [
           "reviewing/evals",
+          "reviewing/workflows-that-improve-themselves",
           "reviewing/callback-gates",
           "reviewing/review-loop",
           "reviewing/proof-acceptance",
