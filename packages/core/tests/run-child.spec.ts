@@ -237,6 +237,63 @@ describe('runChild', () => {
     }
   });
 
+  it('does not reject when the child exits while the stop hook is still running', async () => {
+    let survivorPid: number | undefined;
+    let childOutput = '';
+    const controller = new AbortController();
+    let exited!: () => void;
+    const childExited = new Promise<void>((resolve) => {
+      exited = resolve;
+    });
+    try {
+      const result = await runChild({
+        executable: node,
+        args: ['--input-type=module', '-e', [
+          'import { spawn } from "node:child_process";',
+          // The survivor keeps the output open, so the run stays open after
+          // the child exits on SIGTERM.
+          'const survivor = spawn(process.execPath, ["-e", "setInterval(() => {}, 30_000)"], { detached: true, stdio: "inherit" });',
+          'process.stdout.write(`${survivor.pid}\\n`);',
+          'setInterval(() => {}, 30_000);',
+        ].join('')],
+        timeoutMs: 10_000,
+        killGraceMs: 200,
+        maxOutputBytes: 1_024,
+        signal: controller.signal,
+        hooks: {
+          onSpawn(child) {
+            child.once('exit', () => exited());
+          },
+          onStdout(chunk) {
+            childOutput += new TextDecoder().decode(chunk);
+            const pid = Number(childOutput.match(/^(\d+)\n/u)?.[1]);
+            if (survivorPid === undefined && Number.isSafeInteger(pid)) {
+              survivorPid = exactPid(pid);
+              controller.abort();
+            }
+          },
+          // The stop hook ends only after the child has exited.
+          async onStop() {
+            await childExited;
+          },
+          // The output stays open longer than two kill graces after the exit.
+          async onExit() {
+            await new Promise<void>((resolve) => setTimeout(resolve, 1_000));
+          },
+        },
+      });
+      expect(result).toMatchObject({ exitCode: null, timedOut: false, aborted: true });
+    } finally {
+      if (survivorPid !== undefined) {
+        try {
+          process.kill(exactPid(survivorPid), 'SIGKILL');
+        } catch {
+          // The fixture may have ended during cleanup.
+        }
+      }
+    }
+  });
+
   it.runIf(process.platform !== 'win32')('stops a running detached child and its helper by their own process ids', async () => {
     let childPid: number | undefined;
     let helperPid: number | undefined;

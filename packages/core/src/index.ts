@@ -383,7 +383,9 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
         } catch (error) {
           stopError = error;
         }
-        if (closed) return;
+        // A child that exited during the wait needs no SIGKILL; the close
+        // path signals its recorded members.
+        if (closed || stoppedAt !== undefined) return;
         forceKillTimer = setTimeout(() => {
           if (closed) return;
           signalProcess(live, 'SIGKILL');
