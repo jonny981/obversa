@@ -1,5 +1,17 @@
 # @obversa/core
 
+## 0.2.14
+
+### Patch Changes
+
+- @obversa/api@0.2.14
+
+## 0.2.13
+
+### Patch Changes
+
+- @obversa/api@0.2.13
+
 ## 0.2.12
 
 ### Patch Changes

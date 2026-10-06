@@ -83,7 +83,7 @@ only these flags:
 | `-p` | Run once and exit. |
 | `--prompt-file` | The prompt goes in a temporary file, so a long prompt fits. |
 | `--export` | Devin writes the conversation to a temporary file, and the plugin reads the answer from it. |
-| `--permission-mode` | Set from the step's workspace mode. See [Workspace modes](#workspace-modes). |
+| `--permission-mode` | Set from the step's workspace mode and the `permissionMode` option. See [Workspace modes](#workspace-modes). |
 | `--respect-workspace-trust false` | Print mode cannot show Devin's folder trust prompt. Without this flag, Devin refuses every folder you have not opened in Devin before. |
 | `--model` | Only when the seat or the request names a model. |
 | `--config` | Only in [clean mode](#options), the default: an empty config file in place of yours. |
@@ -107,11 +107,26 @@ them. If Devin reports none, usage is `unknown`.
 | Workspace mode | Devin permission mode | What Devin does without asking |
 | --- | --- | --- |
 | `read` | `auto` | Runs the tools Devin treats as read-only. |
-| `write` | `accept-edits` | Runs those tools and edits files in the workspace. |
+| `write` | `accept-edits`, or the `permissionMode` option | With `accept-edits`, runs those tools and edits files in the workspace. |
 | `none` | refused | Devin has no mode without a folder. |
 
-A step that names no workspace mode runs as `read`. The plugin never passes
-`smart` or `dangerous`.
+A step that names no workspace mode runs as `read`. A read step runs only
+with `auto`. When `permissionMode` names any other mode, a read step fails
+with `invalid-config` before Devin starts, so read-only holds.
+
+### A builder that runs commands
+
+A write step under `accept-edits` can edit files, but it cannot run a
+command such as a test or a build. Devin refuses the command and ends the
+run without an answer. A builder that runs commands needs `dangerous`:
+`devin('swe-2-max', { permissionMode: 'dangerous' })`.
+
+`dangerous` auto-approves tool calls. A deny or ask rule from your
+organisation or your own Devin setup can still refuse one, and the run
+then ends without an answer. Run it in a directory you're happy for a
+model to change. `smart`
+runs only the commands a fast model judges safe, so it can still refuse a
+command and end the run.
 
 In print mode Devin cannot ask you. When Devin wants a tool that its
 permission mode does not approve, it refuses the tool and does not wait.
@@ -152,6 +167,7 @@ error instead.
 | `cliBinary` | `string` | `devin` on `PATH` | The executable to run. |
 | `effort` | `string` | none | Not supported: the Devin CLI has no effort switch, so setting it throws. A step that sets `effort` fails the same way. Also a `DevinSeatOptions` field. |
 | `clean` | `boolean` | [See the default](/packages/engines#the-default) | On by default: your own Devin settings stay out. `false` uses them. Also an option of `devin(model, options)`. |
+| `permissionMode` | `'auto'`, `'accept-edits'`, `'smart'` or `'dangerous'` | `accept-edits` | Devin's permission mode for a write step. A builder that runs commands needs `dangerous`; see [A builder that runs commands](#a-builder-that-runs-commands). A read step refuses any mode but `auto`. Also an option of `devin(model, options)`. |
 
 By default Devin runs with `--config` pointed at an empty config file
 for each attempt, so your own Devin settings file
@@ -167,8 +183,9 @@ to leave them out.
 
 - **`EngineError` of kind `missing-cli`** when the executable can't run.
 - **`EngineError` of kind `invalid-config`** for a step without a folder, a
-  step with `tools: []`, a step that sets `effort`, or a `devin --version`
-  output the plugin cannot read.
+  step with `tools: []`, a step that sets `effort`, a read step with a
+  `permissionMode` other than `auto`, or a `devin --version` output the
+  plugin cannot read.
 - **`EngineIncompleteResultError`** when Devin exits 0 and writes its
   conversation export, but has no final answer, for example after it
   refuses a write in a read step.
