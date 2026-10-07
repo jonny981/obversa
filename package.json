@@ -33,7 +33,7 @@
     "check:readme-examples": "node --test scripts/check-readme-examples.spec.mjs && node scripts/check-readme-examples.mjs",
     "example:feature-team": "pnpm --filter @obversa/runtime exec tsx ../../examples/feature-team.ts",
     "example:api-polish": "pnpm exec tsx examples/builtin-workflows.ts && pnpm exec tsx examples/surface-diff.ts",
-    "example:feature": "node scripts/check-example-output.mjs pnpm --filter @obversa/runtime exec tsx ../../examples/feature-delivery.proof.ts",
+    "example:feature": "node --test scripts/stand-in-cli.spec.mjs && node scripts/check-example-output.mjs pnpm --filter @obversa/runtime exec tsx ../../examples/feature-delivery.proof.ts",
     "example:team-pair": "node scripts/check-example-output.mjs pnpm --filter @obversa/runtime exec tsx ../../examples/teams/writer-reviewer-pair.proof.ts",
     "example:judge-stops-the-loop": "node scripts/check-example-output.mjs pnpm --filter @obversa/runtime exec tsx ../../examples/judge-stops-the-loop.proof.ts",
     "example:engine-mastra": "node scripts/check-example-output.mjs pnpm --filter @obversa/runtime exec tsx ../../examples/engine-mastra.proof.ts",
