@@ -350,7 +350,17 @@ try {
 
   // Unattended. The same team, and the change lands without asking.
   const unattended = await seed('unattended', featureFiles, featureScript);
-  assert.equal(printed(runExample(unattended, 'feature-delivery', ['--unattended']).stdout).status, 'pass');
+  const unattendedOutcome = printed(runExample(unattended, 'feature-delivery', ['--unattended']).stdout);
+  if (unattendedOutcome.status !== 'pass') {
+    console.error(JSON.stringify({
+      scenario: 'unattended',
+      outcome: unattendedOutcome,
+      events: readRecord(unattended.dir, 'feature-delivery').filter((event) =>
+        event.kind === 'error' || event.kind === 'run:end'
+        || (event.kind === 'dag:node' && event.phase === 'done' && event.outcome?.status !== 'pass')),
+    }));
+  }
+  assert.equal(unattendedOutcome.status, 'pass');
   await assertSevenSteps(unattended, false);
 
   // The backlog. Two tickets, each delivered in its own worktree; each
