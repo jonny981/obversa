@@ -5,12 +5,14 @@ import { join } from 'node:path';
 
 import {
   commandCleanupCapability,
+  inspectAttemptMarkedProcesses,
   OwnedCommandError,
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
   type OwnedCommandRequest,
 } from '../src/command/run.ts';
+import { readProcessIdentities } from '../src/command/process-tree.ts';
 import {
   cleanupFixture,
   directDetachedFixture,
@@ -56,18 +58,39 @@ function request(
   };
 }
 
-function expectFixtureStopped(directory: string): void {
+async function expectFixtureStopped(directory: string, commandError?: unknown): Promise<void> {
   const alive = fixturePids(directory).filter(isProcessAlive);
   if (alive.length > 0 && process.platform === 'linux') {
-    console.error('Fixture processes after cleanup:', alive.map((pid) => {
-      try {
-        const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-        return { pid, state: fields[0], parentPid: fields[1], group: fields[2], startTime: fields[19] };
-      } catch (error) {
-        return { pid, error: (error as NodeJS.ErrnoException).code };
-      }
-    }));
+    const read = (operation: () => unknown): unknown => {
+      try { return operation(); }
+      catch (error) { return { error: (error as NodeJS.ErrnoException).code ?? String(error) }; }
+    };
+    const marked = await inspectAttemptMarkedProcesses(ATTEMPT_ID).catch((error: unknown) => ({ error: String(error) }));
+    const table = read(readProcessIdentities);
+    console.error('Fixture processes after cleanup:', {
+      runnerError: commandError instanceof OwnedCommandError
+        ? { code: commandError.code, remainingProcesses: commandError.remainingProcesses }
+        : commandError === undefined ? undefined : String(commandError),
+      processes: alive.map((pid) => {
+        const markerIdentity = Array.isArray(marked) ? marked.find((entry) => entry.pid === pid) ?? null : marked;
+        const tableIdentity = Array.isArray(table) ? table.find((entry) => entry.pid === pid) ?? null : table;
+        return {
+          pid,
+          stat: read(() => {
+            const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+            const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+            return { state: fields[0], parentPid: fields[1], group: fields[2], startTime: fields[19] };
+          }),
+          hasAttemptMarker: read(() => readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(`OBVERSA_ATTEMPT_ID=${ATTEMPT_ID}`)),
+          cmdline: read(() => readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean)),
+          markerIdentity,
+          tableIdentity,
+          identityKeysEqual: markerIdentity && tableIdentity && 'startedAt' in markerIdentity && 'startedAt' in tableIdentity
+            ? `${markerIdentity.pid}:${markerIdentity.startedAt}` === `${tableIdentity.pid}:${tableIdentity.startedAt}`
+            : null,
+        };
+      }),
+    });
   }
   expect(alive.length).toBe(0);
 }
@@ -165,7 +188,7 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
         headless: '1',
       });
     }
-    expectFixtureStopped(directory);
+    await expectFixtureStopped(directory);
   });
 
   it('cleans a helper that detaches immediately and keeps stdout open', async () => {
@@ -178,7 +201,7 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
     const result = await runOwnedCommand(command, new AbortController().signal);
 
     expect(decoder.decode(result.stdout)).toBe('PONG');
-    expectFixtureStopped(directory);
+    await expectFixtureStopped(directory);
   });
 
   it('returns an aborted result only after the whole tree stops', async () => {
@@ -197,7 +220,7 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
       timedOut: false,
       remainingProcesses: [],
     });
-    expectFixtureStopped(directory);
+    await expectFixtureStopped(directory);
   });
 
   it('force-stops a SIGTERM-ignoring tree at one timeout deadline', async () => {
@@ -217,7 +240,7 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
       remainingProcesses: [],
     });
     expect(Date.now() - startedAt).toBeLessThan(3_000);
-    expectFixtureStopped(directory);
+    await expectFixtureStopped(directory);
   });
 
   it('still cleans the process tree when the first cleanup attempt fails', async () => {
@@ -256,7 +279,7 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
     expect(caught).toBeInstanceOf(OwnedCommandError);
     expect(caught).toMatchObject({ code: 'TEARDOWN_INCOMPLETE' });
     expect(getEventListeners(controller.signal, 'abort')).toEqual([]);
-    expectFixtureStopped(directory);
+    await expectFixtureStopped(directory);
   });
 
   it('fails typed before retaining output beyond its cap', async () => {
@@ -269,22 +292,23 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
     )).rejects.toMatchObject({
       code: 'OUTPUT_LIMIT',
     } satisfies Partial<OwnedCommandError>);
-    expectFixtureStopped(directory);
+    await expectFixtureStopped(directory);
   });
 
   it('fails typed and cleans the tree when its memory cap is crossed', async () => {
     const directory = fixtureDirectory();
     directories.push(directory);
 
+    let commandError: unknown;
     await expect(runOwnedCommand(
       request('memory', directory, {
         maxMemoryBytes: 96 * 1_024 * 1_024,
       }),
       new AbortController().signal,
-    )).rejects.toMatchObject({
+    ).catch((error: unknown) => { commandError = error; throw error; })).rejects.toMatchObject({
       code: 'MEMORY_LIMIT',
     } satisfies Partial<OwnedCommandError>);
-    expectFixtureStopped(directory);
+    await expectFixtureStopped(directory, commandError);
   });
 
   it('rejects a relative executable before spawning', async () => {
