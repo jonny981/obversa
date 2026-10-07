@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { closeSync, openSync } from 'node:fs';
+import { appendFileSync, closeSync, openSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -521,12 +521,28 @@ function validateRequest(request: OwnedProcessTreeRequest): void {
   }
 }
 
+// Temporary failure diagnostic on this branch; remove before landing.
+function traceStop(
+  phase: string,
+  request: OwnedProcessTreeRequest,
+  details: Record<string, unknown>,
+): void {
+  const path = process.env.OBVERSA_STOP_TRACE;
+  if (path === undefined) return;
+  appendFileSync(path, `${JSON.stringify({
+    time: Date.now(), phase, rootPid: request.rootPid,
+    rootStartedAt: request.rootStartedAt, ...details,
+  })}\n`);
+}
+
 export async function inspectOwnedProcessTree(
   request: OwnedProcessTreeRequest,
 ): Promise<readonly ProcessIdentity[]> {
   validateRequest(request);
   const owned = ownedFromTable(await processTable(), request);
-  return Object.freeze(owned.map(({ identity }) => identity));
+  const result = Object.freeze(owned.map(({ identity }) => identity));
+  traceStop('inspect', request, { observed: request.observed ?? [], result });
+  return result;
 }
 
 export async function measureOwnedProcessMemory(
@@ -550,11 +566,17 @@ async function signalMatching(
   const owned = await inspectOwnedProcessTree(request);
   for (const identity of owned) {
     if (identity.pid === process.pid) continue;
+    let result: boolean;
     try {
-      process.kill(positivePid(identity.pid, 'owned process id'), signal);
+      result = process.kill(positivePid(identity.pid, 'owned process id'), signal);
     } catch (error) {
+      traceStop('signal-error', request, {
+        identity, signal, error: (error as NodeJS.ErrnoException).code ?? String(error),
+      });
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      continue;
     }
+    traceStop('signal', request, { identity, signal, result });
   }
   return owned;
 }
@@ -577,6 +599,11 @@ export async function stopOwnedProcessTree(
   const graceMs = nonNegativeDuration(request.graceMs, 'graceMs');
   const ownerId = process.platform === 'linux' ? request.ownerId : undefined;
   let observed = request.observed ?? [];
+  traceStop('entry', request, { ownerId, observed });
+  const finish = (phase: string, result: readonly ProcessIdentity[]): readonly ProcessIdentity[] => {
+    traceStop(phase, request, { observed, result });
+    return result;
+  };
   const discoverOwner = async (): Promise<void> => {
     if (ownerId !== undefined) {
       observed = mergeObserved(observed, await inspectOwnerMarkedProcesses(ownerId));
@@ -600,7 +627,7 @@ export async function stopOwnedProcessTree(
   while (Date.now() < gracefulDeadline) {
     await discoverOwner();
     const remaining = await inspectOwnedProcessTree({ ...request, observed });
-    if (remaining.length === 0 && ownerId === undefined) return Object.freeze([]);
+    if (remaining.length === 0 && ownerId === undefined) return finish('return-grace', Object.freeze([]));
     observed = mergeObserved(observed, remaining);
     await delay(Math.min(POLL_MS, Math.max(1, gracefulDeadline - Date.now())));
   }
@@ -615,7 +642,7 @@ export async function stopOwnedProcessTree(
   while (Date.now() < forceDeadline) {
     await discoverOwner();
     const remaining = await inspectOwnedProcessTree({ ...request, observed });
-    if (remaining.length === 0) return Object.freeze([]);
+    if (remaining.length === 0) return finish('return-force', Object.freeze([]));
     observed = mergeObserved(observed, remaining);
     if (ownerId !== undefined) {
       await signalMatching({ ...request, observed }, 'SIGKILL');
@@ -624,5 +651,5 @@ export async function stopOwnedProcessTree(
   }
 
   await discoverOwner();
-  return await inspectOwnedProcessTree({ ...request, observed });
+  return finish('return-deadline', await inspectOwnedProcessTree({ ...request, observed }));
 }

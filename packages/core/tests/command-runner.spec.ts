@@ -70,6 +70,7 @@ async function expectFixtureStopped(
   directory: string,
   commandError?: unknown,
   startTimeSamples?: readonly StartTimeSample[],
+  stopTrace?: readonly Record<string, unknown>[],
 ): Promise<void> {
   const alive = fixturePids(directory).filter(isProcessAlive);
   if (alive.length > 0 && process.platform === 'linux') {
@@ -81,6 +82,7 @@ async function expectFixtureStopped(
     const table = read(readProcessIdentities);
     console.error('Fixture processes after cleanup:', JSON.stringify({
       startTimeSamples,
+      stopTrace,
       distinctStartedAt: startTimeSamples === undefined ? undefined
         : [...new Set(startTimeSamples.flatMap(({ startedAt }) => typeof startedAt === 'string' ? [startedAt] : []))],
       runnerError: commandError instanceof OwnedCommandError
@@ -314,6 +316,10 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
     const directory = fixtureDirectory();
     directories.push(directory);
 
+    const tracePath = join(directory, 'stop-trace.jsonl');
+    writeFileSync(tracePath, '');
+    const previousTrace = process.env.OBVERSA_STOP_TRACE;
+    process.env.OBVERSA_STOP_TRACE = tracePath;
     const startTimeSamples: StartTimeSample[] = [];
     const samplingStarted = Date.now();
     // These independent reads observe the helper; they are not the runner's own ps calls.
@@ -345,8 +351,15 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
       } satisfies Partial<OwnedCommandError>);
     } finally {
       clearInterval(sampler);
+      if (previousTrace === undefined) delete process.env.OBVERSA_STOP_TRACE;
+      else process.env.OBVERSA_STOP_TRACE = previousTrace;
     }
-    await expectFixtureStopped(directory, commandError, startTimeSamples);
+    const stopTrace = readFileSync(tracePath, 'utf8').trim().split('\n')
+      .filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    await expectFixtureStopped(directory, commandError, startTimeSamples, stopTrace);
+    expect(stopTrace.some(({ phase }) => phase === 'entry')).toBe(true);
+    expect(stopTrace.some(({ phase }) => phase === 'inspect')).toBe(true);
+    expect(stopTrace.some(({ phase }) => typeof phase === 'string' && phase.startsWith('return-'))).toBe(true);
   });
 
   it('rejects a relative executable before spawning', async () => {
