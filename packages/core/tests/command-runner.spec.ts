@@ -67,7 +67,7 @@ async function expectFixtureStopped(directory: string, commandError?: unknown): 
     };
     const marked = await inspectAttemptMarkedProcesses(ATTEMPT_ID).catch((error: unknown) => ({ error: String(error) }));
     const table = read(readProcessIdentities);
-    console.error('Fixture processes after cleanup:', {
+    console.error('Fixture processes after cleanup:', JSON.stringify({
       runnerError: commandError instanceof OwnedCommandError
         ? { code: commandError.code, remainingProcesses: commandError.remainingProcesses }
         : commandError === undefined ? undefined : String(commandError),
@@ -90,7 +90,7 @@ async function expectFixtureStopped(directory: string, commandError?: unknown): 
             : null,
         };
       }),
-    });
+    }, null, 2));
   }
   expect(alive.length).toBe(0);
 }
