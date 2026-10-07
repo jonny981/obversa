@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,6 +12,7 @@ import {
   parseWindowsProcessRows,
   readAttemptMarkerProcessIds,
   readProcessIdentity,
+  readProcessIdentities,
   stopOwnedProcessTree,
 } from '../src/command/process-tree.ts';
 import {
@@ -76,6 +79,37 @@ describe('attempt process markers', () => {
         residentBytes: 4_096,
       },
     ]);
+  });
+});
+
+describe.runIf(process.platform === 'linux')('Linux process start time', () => {
+  it('keeps one start time across forty reads of a sleeping child', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    const closed = once(child, 'close');
+    const samples: { startedAt: string | null; startTicks: string | undefined }[] = [];
+    try {
+      await once(child, 'spawn');
+      for (let index = 0; index < 40; index += 1) {
+        const identity = readProcessIdentities().find(({ pid }) => pid === child.pid);
+        const stat = readFileSync(`/proc/${child.pid}/stat`, 'utf8');
+        samples.push({
+          startedAt: identity?.startedAt ?? null,
+          startTicks: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19],
+        });
+        await delay(50);
+      }
+      const distinct = [...new Set(samples.map(({ startedAt }) => startedAt))];
+      if (distinct.length !== 1 || distinct[0] === null) {
+        console.error('Sleeping child start times:', JSON.stringify({ pid: child.pid, samples }, null, 2));
+      }
+      expect(samples).toHaveLength(40);
+      expect(distinct).toHaveLength(1);
+      expect(distinct[0]).not.toBeNull();
+      expect(new Set(samples.map(({ startTicks }) => startTicks)).size).toBe(1);
+    } finally {
+      child.kill('SIGKILL');
+      await closed;
+    }
   });
 });
 

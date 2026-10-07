@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getEventListeners } from 'node:events';
-import { chmodSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -58,7 +58,19 @@ function request(
   };
 }
 
-async function expectFixtureStopped(directory: string, commandError?: unknown): Promise<void> {
+interface StartTimeSample {
+  readonly elapsedMs: number;
+  readonly pid?: number;
+  readonly startedAt?: string | null;
+  readonly startTicks?: string;
+  readonly error?: string;
+}
+
+async function expectFixtureStopped(
+  directory: string,
+  commandError?: unknown,
+  startTimeSamples?: readonly StartTimeSample[],
+): Promise<void> {
   const alive = fixturePids(directory).filter(isProcessAlive);
   if (alive.length > 0 && process.platform === 'linux') {
     const read = (operation: () => unknown): unknown => {
@@ -68,6 +80,9 @@ async function expectFixtureStopped(directory: string, commandError?: unknown): 
     const marked = await inspectAttemptMarkedProcesses(ATTEMPT_ID).catch((error: unknown) => ({ error: String(error) }));
     const table = read(readProcessIdentities);
     console.error('Fixture processes after cleanup:', JSON.stringify({
+      startTimeSamples,
+      distinctStartedAt: startTimeSamples === undefined ? undefined
+        : [...new Set(startTimeSamples.flatMap(({ startedAt }) => typeof startedAt === 'string' ? [startedAt] : []))],
       runnerError: commandError instanceof OwnedCommandError
         ? { code: commandError.code, remainingProcesses: commandError.remainingProcesses }
         : commandError === undefined ? undefined : String(commandError),
@@ -299,16 +314,39 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
     const directory = fixtureDirectory();
     directories.push(directory);
 
+    const startTimeSamples: StartTimeSample[] = [];
+    const samplingStarted = Date.now();
+    // These independent reads observe the helper; they are not the runner's own ps calls.
+    const sampler = process.platform === 'linux' ? setInterval(() => {
+      const path = join(directory, 'grandchild.json');
+      if (!existsSync(path)) return;
+      const elapsedMs = Date.now() - samplingStarted;
+      try {
+        const { pid } = JSON.parse(readFileSync(path, 'utf8')) as { pid: number };
+        const identity = readProcessIdentities().find((entry) => entry.pid === pid);
+        const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+        startTimeSamples.push({
+          elapsedMs, pid, startedAt: identity?.startedAt ?? null,
+          startTicks: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19],
+        });
+      } catch (error) {
+        startTimeSamples.push({ elapsedMs, error: String(error) });
+      }
+    }, 50) : undefined;
     let commandError: unknown;
-    await expect(runOwnedCommand(
-      request('memory', directory, {
-        maxMemoryBytes: 96 * 1_024 * 1_024,
-      }),
-      new AbortController().signal,
-    ).catch((error: unknown) => { commandError = error; throw error; })).rejects.toMatchObject({
-      code: 'MEMORY_LIMIT',
-    } satisfies Partial<OwnedCommandError>);
-    await expectFixtureStopped(directory, commandError);
+    try {
+      await expect(runOwnedCommand(
+        request('memory', directory, {
+          maxMemoryBytes: 96 * 1_024 * 1_024,
+        }),
+        new AbortController().signal,
+      ).catch((error: unknown) => { commandError = error; throw error; })).rejects.toMatchObject({
+        code: 'MEMORY_LIMIT',
+      } satisfies Partial<OwnedCommandError>);
+    } finally {
+      clearInterval(sampler);
+    }
+    await expectFixtureStopped(directory, commandError, startTimeSamples);
   });
 
   it('rejects a relative executable before spawning', async () => {
