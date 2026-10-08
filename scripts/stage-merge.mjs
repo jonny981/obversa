@@ -161,6 +161,7 @@ export const stageBranches = {
   F198: 'feat/climb-workflow',
   F206: 'feat/devin-read-commands',
   F214: 'fix/stop-finds-marked-survivors',
+  F215: 'feat/opencode-openrouter-models',
   F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',

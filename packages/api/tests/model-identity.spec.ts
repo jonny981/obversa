@@ -10,6 +10,19 @@ describe('modelIdentity', () => {
     });
   });
 
+  it.each([
+    ['openrouter/anthropic/claude-sonnet-4-5', 'claude'],
+    ['openrouter/anthropic/claude-sonnet-4.5', 'claude'],
+    ['  OpenRouter/OpenAI/GPT-5.6-luna ', 'gpt'],
+  ])('reads the gateway provider and underlying family from %j', (model, family) => {
+    expect(modelIdentity(model)).toEqual({ provider: 'openrouter', modelFamily: family });
+  });
+
+  it('refuses an OpenRouter router because it chooses the model family', () => {
+    expect(() => modelIdentity('openrouter/openrouter/auto'))
+      .toThrow(/OpenRouter chooses.*family/);
+  });
+
   it('reads the family alone from a bare model string', () => {
     expect(modelIdentity('gpt-5.6-luna')).toEqual({ modelFamily: 'gpt' });
     expect(modelIdentity('grok-4')).toEqual({ modelFamily: 'grok' });
@@ -37,6 +50,14 @@ describe('modelIdentity', () => {
     ['anthropic//', 'a second separator with nothing after it'],
     ['anthropic//unknown', 'the unknown placeholder behind a second separator'],
     ['anthropic/claude/extra', 'two separators'],
+    ['openrouter//claude-sonnet-4.5', 'an empty vendor'],
+    ['openrouter/anthropic/', 'an empty gateway model'],
+    ['openrouter/anthropic/claude/extra', 'three separators'],
+    ['openrouter/anth ropic/claude-sonnet-4.5', 'a vendor with whitespace'],
+    ['openrouter/anthropic/unknown-2', 'an unknown gateway family'],
+    ['openrouter/anthropic/-sonnet', 'an empty gateway family'],
+    ['openrouter/openrouter/auto', 'automatic model selection'],
+    ['OPENROUTER/OpenRouter/free', 'automatic selection with mixed case'],
   ])('refuses %j (%s) with an invalid-config engine error', (model) => {
     let caught: unknown;
     try {

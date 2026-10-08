@@ -20,8 +20,9 @@ export interface ModelIdentity {
  * recorded models back, derives the identity through this one function.
  *
  * `provider/model` yields both parts; a bare `model` yields the family alone.
- * A second separator, or whitespace anywhere inside, is refused rather than
- * read as part of a name.
+ * `openrouter/vendor/model` keeps OpenRouter as the provider and reads the
+ * family from the final model name. Other extra separators and whitespace
+ * inside an identifier are refused.
  * The family is the model name up to its first hyphen, lowercased, so
  * `claude-sonnet-4-5` and `claude-opus-4-1` are one family and `gpt-5.6-luna`
  * another. A string that names no readable family, including the `unknown`
@@ -35,20 +36,21 @@ export function modelIdentity(model: string): ModelIdentity {
   const trimmed = model.trim();
   const slash = trimmed.indexOf('/');
   const provider = slash === -1 ? undefined : trimmed.slice(0, slash).trim().toLowerCase();
-  const name = slash === -1 ? trimmed : trimmed.slice(slash + 1).trim();
+  let name = slash === -1 ? trimmed : trimmed.slice(slash + 1).trim();
   if (slash !== -1 && (provider === '' || name === '')) {
     throw invalid(`model ${JSON.stringify(model)} must name both a provider and a model`);
   }
-  // One provider and one model, with nothing hidden inside either part. A
-  // second separator let `anthropic//unknown` read as the family `/unknown`,
-  // which walks straight past the refusal the `unknown` placeholder exists to
-  // trigger, and `anthropic//` read as the family `/`. Whitespace anywhere
-  // inside is the same kind of hiding place, so it is refused across the whole
-  // identifier rather than in the model half alone.
   if (name.includes('/')) {
-    throw invalid(
-      `model ${JSON.stringify(model)} must name one provider and one model, separated once`,
-    );
+    const parts = name.split('/');
+    if (provider !== 'openrouter' || parts.length !== 2 || !parts[0] || !parts[1]) {
+      throw invalid(
+        `model ${JSON.stringify(model)} must use provider/model or openrouter/vendor/model`,
+      );
+    }
+    if (parts[0].toLowerCase() === 'openrouter') {
+      throw invalid(`model ${JSON.stringify(model)} names a router: OpenRouter chooses the model, so it names no fixed family`);
+    }
+    name = parts[1];
   }
   if (/\s/u.test(trimmed)) {
     throw invalid(`model ${JSON.stringify(model)} must not contain whitespace`);
