@@ -632,8 +632,10 @@ export async function stopOwnedProcessTree(
     const remaining = await inspectRemaining();
     if (remaining.length === 0) return Object.freeze([]);
     observed = mergeObserved(observed, remaining);
-    // A process found only now has had no signal yet.
-    await signalMatching({ ...request, observed }, 'SIGKILL');
+    // On Linux a process found only now, by a marker, has had no signal yet.
+    if (process.platform === 'linux') {
+      await signalMatching({ ...request, observed }, 'SIGKILL');
+    }
     await delay(POLL_MS);
   }
 
