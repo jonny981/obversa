@@ -56,7 +56,7 @@ below say what else each one needs.
 | `openGitMemory`, `openReasoningRecord` | `@obversa/memory-git` | Memory in Git, reasoning in commits | [Git Memory](/packages/memory-git) |
 | `createSimpleMemory` | `@obversa/memory-simple` | Memory in one process | [Simple Memory](/packages/memory-simple) |
 | `openMarkdownCorpus` | `@obversa/memory-markdown` | Search your Markdown files | [Markdown Memory](/packages/memory-markdown) |
-| `webhookNotifier` | `@obversa/notify-webhook` | A message per run event | [Webhook Notifications](/packages/notify-webhook) |
+| `webhookNotifier` | `@obversa/notify-webhook` | A run's progress, posted to your team's channel | [Webhook Notifications](/packages/notify-webhook) |
 
 Import from the package named in the row:
 
@@ -120,10 +120,10 @@ is.
   from a local folder of Markdown files and gives `ground` the selected
   files through a read-only memory view. You need nothing else. Home:
   [Markdown Memory](/packages/memory-markdown).
-- **Webhook notifications.** `@obversa/notify-webhook` posts one message per
-  interesting run event to a URL you supply; the body carries a `text`
-  field, so a Slack, Discord or Teams incoming webhook shows it with no code
-  of its own. You need a URL to post to. Home:
+- **Webhook notifications.** `@obversa/notify-webhook` posts a run's
+  progress and its questions to your team's channel, one message per
+  moment. Slack and Mattermost incoming webhooks show it with no code of
+  your own. You need an incoming webhook URL. Home:
   [Webhook Notifications](/packages/notify-webhook).
 - **The review command.** `@obversa/surface-diff` ships `obversa-review`,
   which opens a diff for inline review. You need Git. See
