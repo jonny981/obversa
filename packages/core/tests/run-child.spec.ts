@@ -4,16 +4,17 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RunChildError, runChild } from '../src/index.ts';
+import { exactPid } from './process-fixture.ts';
 
 const node = process.execPath;
 const require = createRequire(import.meta.url);
 
 function isProcessAlive(pid: number): boolean {
   try {
-    process.kill(pid, 0);
+    process.kill(exactPid(pid), 0);
     return true;
   } catch {
     return false;
@@ -107,7 +108,7 @@ describe('runChild', () => {
     } finally {
       if (survivorPid !== undefined && Number.isSafeInteger(survivorPid)) {
         try {
-          process.kill(survivorPid, 'SIGKILL');
+          process.kill(exactPid(survivorPid), 'SIGKILL');
         } catch {
           // The fixture may have ended during cleanup.
         }
@@ -223,7 +224,7 @@ describe('runChild', () => {
     } finally {
       if (survivorPid !== undefined && Number.isSafeInteger(survivorPid)) {
         try {
-          process.kill(survivorPid, 'SIGKILL');
+          process.kill(exactPid(survivorPid), 'SIGKILL');
         } catch {
           // The fixture may have ended during cleanup.
         }
@@ -232,6 +233,218 @@ describe('runChild', () => {
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
         expect(isProcessAlive(survivorPid)).toBe(false);
+      }
+    }
+  });
+
+  it('does not reject when the child exits while the stop hook is still running', async () => {
+    let survivorPid: number | undefined;
+    let childOutput = '';
+    const controller = new AbortController();
+    let exited!: () => void;
+    const childExited = new Promise<void>((resolve) => {
+      exited = resolve;
+    });
+    try {
+      const result = await runChild({
+        executable: node,
+        args: ['--input-type=module', '-e', [
+          'import { spawn } from "node:child_process";',
+          // The survivor keeps the output open, so the run stays open after
+          // the child exits on SIGTERM.
+          'const survivor = spawn(process.execPath, ["-e", "setInterval(() => {}, 30_000)"], { detached: true, stdio: "inherit" });',
+          'process.stdout.write(`${survivor.pid}\\n`);',
+          'setInterval(() => {}, 30_000);',
+        ].join('')],
+        timeoutMs: 10_000,
+        killGraceMs: 200,
+        maxOutputBytes: 1_024,
+        signal: controller.signal,
+        hooks: {
+          onSpawn(child) {
+            child.once('exit', () => exited());
+          },
+          onStdout(chunk) {
+            childOutput += new TextDecoder().decode(chunk);
+            const pid = Number(childOutput.match(/^(\d+)\n/u)?.[1]);
+            if (survivorPid === undefined && Number.isSafeInteger(pid)) {
+              survivorPid = exactPid(pid);
+              controller.abort();
+            }
+          },
+          // The stop hook ends only after the child has exited.
+          async onStop() {
+            await childExited;
+          },
+          // The output stays open longer than two kill graces after the exit.
+          async onExit() {
+            await new Promise<void>((resolve) => setTimeout(resolve, 1_000));
+          },
+        },
+      });
+      expect(result).toMatchObject({ exitCode: null, timedOut: false, aborted: true });
+    } finally {
+      if (survivorPid !== undefined) {
+        try {
+          process.kill(exactPid(survivorPid), 'SIGKILL');
+        } catch {
+          // The fixture may have ended during cleanup.
+        }
+      }
+    }
+  });
+
+  it.runIf(process.platform !== 'win32')('stops a running detached child and its helper by their own process ids', async () => {
+    let childPid: number | undefined;
+    let helperPid: number | undefined;
+    let childOutput = '';
+    const controller = new AbortController();
+    const realKill = process.kill.bind(process);
+    // A group signal is recorded and never sent; a signal to one process goes through.
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => pid < 1 || realKill(pid, signal));
+    try {
+      const result = await runChild({
+        executable: node,
+        args: ['--input-type=module', '-e', [
+          'import { spawn } from "node:child_process";',
+          // The helper stays in the child's group and outlives a stopped child.
+          'const helper = spawn(process.execPath, ["-e", "setInterval(() => {}, 30_000)"], { stdio: "ignore" });',
+          'process.stdout.write(`${helper.pid}\\n`);',
+          'setInterval(() => {}, 30_000);',
+        ].join('')],
+        timeoutMs: 10_000,
+        killGraceMs: 500,
+        maxOutputBytes: 1_024,
+        detached: true,
+        signal: controller.signal,
+        hooks: {
+          onSpawn(child) {
+            childPid = exactPid(child.pid);
+          },
+          onStdout(chunk) {
+            childOutput += new TextDecoder().decode(chunk);
+            const pid = Number(childOutput.match(/^(\d+)\n/u)?.[1]);
+            if (Number.isSafeInteger(pid)) {
+              helperPid = exactPid(pid);
+              controller.abort();
+            }
+          },
+        },
+      });
+
+      expect(result.aborted).toBe(true);
+      expect(kill.mock.calls.filter(([pid]) => pid < 1)).toEqual([]);
+      expect(helperPid).toBeDefined();
+      await expect.poll(() => isProcessAlive(helperPid!), { timeout: 5_000 }).toBe(false);
+    } finally {
+      kill.mockRestore();
+      for (const pid of [helperPid, childPid]) {
+        if (pid === undefined) continue;
+        try {
+          process.kill(exactPid(pid), 'SIGKILL');
+        } catch {
+          // The run stopped it.
+        }
+      }
+    }
+  });
+
+  it.runIf(process.platform !== 'win32')('kills a helper that ignores SIGTERM after the detached child exits on it', async () => {
+    let helperPid: number | undefined;
+    let childOutput = '';
+    const controller = new AbortController();
+    const realKill = process.kill.bind(process);
+    // A group signal is recorded and never sent; a signal to one process goes through.
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => pid < 1 || realKill(pid, signal));
+    try {
+      const result = await runChild({
+        executable: node,
+        args: ['--input-type=module', '-e', [
+          'import { spawn } from "node:child_process";',
+          // The helper stays in the child's group and ignores SIGTERM; the
+          // child exits on it.
+          'const helper = spawn(process.execPath, ["-e", "process.on(\\"SIGTERM\\", () => {}); process.stdout.write(\\"ready\\"); setInterval(() => {}, 30_000)"], { stdio: ["ignore", "pipe", "ignore"] });',
+          'helper.stdout.once("data", () => { helper.stdout.destroy(); process.stdout.write(`${helper.pid}\\n`); });',
+          'setInterval(() => {}, 30_000);',
+        ].join('')],
+        timeoutMs: 10_000,
+        killGraceMs: 300,
+        maxOutputBytes: 1_024,
+        detached: true,
+        signal: controller.signal,
+        hooks: {
+          onStdout(chunk) {
+            childOutput += new TextDecoder().decode(chunk);
+            const pid = Number(childOutput.match(/^(\d+)\n/u)?.[1]);
+            if (Number.isSafeInteger(pid)) {
+              helperPid = exactPid(pid);
+              controller.abort();
+            }
+          },
+        },
+      });
+
+      expect(result.aborted).toBe(true);
+      expect(result.exitCode).toBeNull();
+      expect(kill.mock.calls.filter(([pid]) => pid < 1)).toEqual([]);
+      expect(helperPid).toBeDefined();
+      await expect.poll(() => isProcessAlive(helperPid!), { timeout: 3_000 }).toBe(false);
+    } finally {
+      kill.mockRestore();
+      if (helperPid !== undefined) {
+        try {
+          process.kill(exactPid(helperPid), 'SIGKILL');
+        } catch {
+          // The run stopped it.
+        }
+      }
+    }
+  });
+
+  it.runIf(process.platform !== 'win32')('sends no group signal after a detached child has exited', async () => {
+    let survivorPid: number | undefined;
+    let childOutput = '';
+    const controller = new AbortController();
+    const realKill = process.kill.bind(process);
+    // A group signal is recorded and never sent; a signal to one process goes through.
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => pid < 1 || realKill(pid, signal));
+    try {
+      const result = await runChild({
+        executable: node,
+        args: ['--input-type=module', '-e', [
+          'import { spawn } from "node:child_process";',
+          // The survivor leaves the group but keeps the output open, so the
+          // run is still open after the child exits.
+          'const survivor = spawn(process.execPath, ["-e", "setInterval(() => {}, 30_000)"], { detached: true, stdio: "inherit" });',
+          'survivor.unref();',
+          'process.stdout.write(`${survivor.pid}\\n`);',
+        ].join('')],
+        timeoutMs: 10_000,
+        killGraceMs: 1_000,
+        maxOutputBytes: 1_024,
+        detached: true,
+        signal: controller.signal,
+        hooks: {
+          onStdout(chunk) {
+            childOutput += new TextDecoder().decode(chunk);
+            survivorPid = Number(childOutput.match(/^\d+/u)?.[0]);
+          },
+          onExit() {
+            controller.abort();
+          },
+        },
+      });
+
+      expect(result.aborted).toBe(true);
+      expect(kill.mock.calls.filter(([pid]) => pid < 1)).toEqual([]);
+    } finally {
+      kill.mockRestore();
+      if (survivorPid !== undefined && Number.isSafeInteger(survivorPid)) {
+        try {
+          process.kill(exactPid(survivorPid), 'SIGKILL');
+        } catch {
+          // The fixture may have ended during cleanup.
+        }
       }
     }
   });

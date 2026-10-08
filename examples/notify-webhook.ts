@@ -1,12 +1,12 @@
 /**
- * Tell somebody what the run is doing, without watching it.
+ * Post a run's progress to the team's channel, so nobody has to watch it.
  *
  * `@obversa/notify-webhook` is an `onEvent` consumer: it turns a run's own
  * events into one message each and posts them to a URL you supply. The body
- * carries a `text` field, which is the field a Slack, Discord or Teams
- * incoming webhook renders, so those three need no code of their own.
+ * carries a `text` field, which Slack and Mattermost incoming webhooks show
+ * with no code of their own.
  *
- * This example runs a small graph offline whose review returns the work once,
+ * This example runs a small graph whose review returns the work once,
  * so the interesting messages all appear: the run started, a stage finished,
  * a reviewer returned work with the reason, and the run finished. The URL is
  * not written down here either: the example starts its own receiver on a port

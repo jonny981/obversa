@@ -20,6 +20,7 @@ const expected = new Map([
   ['@obversa/engine-devin-cli', 'plugins/engine-devin-cli'],
   ['@obversa/engine-grok-cli', 'plugins/engine-grok-cli'],
   ['@obversa/engine-jev-api', 'plugins/engine-jev-api'],
+  ['@obversa/engine-openai-decisions', 'plugins/engine-openai-decisions'],
   ['@obversa/engine-mastra', 'plugins/engine-mastra'],
   ['@obversa/engine-openai-agents', 'plugins/engine-openai-agents'],
   ['@obversa/engine-opencode-cli', 'plugins/engine-opencode-cli'],
@@ -118,7 +119,7 @@ test('release builds use the recorded root build and the manual sequence stops o
 
 test('@obversa/obversa installs every other published package', () => {
   const dependencies = manifestAt('packages/obversa').dependencies;
-  const notYetPublished = new Set(['@obversa/engine-jev-api', '@obversa/engine-devin-cli', '@obversa/engine-mastra', '@obversa/engine-openai-agents']);
+  const notYetPublished = new Set(['@obversa/engine-jev-api', '@obversa/engine-devin-cli', '@obversa/engine-mastra', '@obversa/engine-openai-agents', '@obversa/engine-openai-decisions']);
   assert.deepEqual(Object.keys(dependencies).sort(), [...expected.keys()].filter((name) => name !== '@obversa/obversa' && !notYetPublished.has(name)).sort());
 });
 

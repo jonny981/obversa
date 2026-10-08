@@ -100,7 +100,7 @@ export async function readSupervisedRunStatus(options: ReadSupervisedRunStatusOp
     const root = observed[0];
     if (root !== undefined) {
       const inspected = await inspectOwnedProcessTree({
-        rootPid: root.pid, rootProcessGroupId: root.processGroupId, observed,
+        rootPid: root.pid, rootProcessGroupId: root.processGroupId, rootStartedAt: root.startedAt, observed,
         attemptId: (launch.payload as JsonObject).attemptId as Sha256Digest,
       });
       processes = inspected.filter((item) => observed.some((saved) => saved.pid === item.pid && saved.startedAt === item.startedAt));
@@ -111,7 +111,7 @@ export async function readSupervisedRunStatus(options: ReadSupervisedRunStatusOp
     && worker.revision > launch.revision && worker.revision > (exited?.revision ?? 0)) {
     const recorded = (worker.payload as JsonObject).process as ProcessIdentity;
     const inspected = await inspectOwnedProcessTree({
-      rootPid: recorded.pid, rootProcessGroupId: recorded.processGroupId,
+      rootPid: recorded.pid, rootProcessGroupId: recorded.processGroupId, rootStartedAt: recorded.startedAt,
       attemptId: (launch.payload as JsonObject).attemptId as Sha256Digest,
     });
     workerAlive = inspected.some((item) => item.pid === recorded.pid && item.startedAt === recorded.startedAt);

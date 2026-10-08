@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
@@ -27,6 +27,15 @@ export interface OwnedProcessTreeRequest {
   readonly attemptId: Sha256Digest;
   readonly rootPid: number;
   readonly rootProcessGroupId: number;
+  /**
+   * The root's start time, read while it was alive. The root's pid counts
+   * only while a process with this pid and start time is alive. Its process
+   * group counts while the root is alive and, when the group id is the root's
+   * pid, after the root exits until a different process holds that pid.
+   * Without it, neither counts on Linux or macOS, and only processes already
+   * observed, matched by pid and start time, count.
+   */
+  readonly rootStartedAt?: string;
   readonly observed?: readonly ProcessIdentity[];
 }
 
@@ -215,6 +224,42 @@ async function processTable(): Promise<readonly ProcessSnapshot[]> {
     .filter((entry): entry is ProcessSnapshot => entry !== undefined);
 }
 
+/**
+ * Read one live process's identity before this call returns, to pass its
+ * start time as `rootStartedAt`. Node cannot reap its own child while this
+ * call blocks, so a child read right after it starts is still that child,
+ * even if it has already exited. Windows has no process groups here and
+ * returns nothing.
+ */
+export function readProcessIdentity(pid: number): ProcessIdentity | undefined {
+  if (process.platform === 'win32') return undefined;
+  positivePid(pid, 'pid');
+  const stdout = execFileSync(
+    '/bin/ps',
+    ['-o', 'pid=,ppid=,pgid=,rss=,lstart=', '-p', String(pid)],
+    { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } },
+  );
+  const identity = parseProcessLine(stdout.split('\n')[0] ?? '')?.identity;
+  if (identity?.pid !== pid) throw new Error(`process ${pid} could not be read`);
+  return identity;
+}
+
+/**
+ * Read every live process's identity before this call returns, so a stop can
+ * run inside an exit or signal handler.
+ */
+export function readProcessIdentities(): readonly ProcessIdentity[] {
+  const stdout = execFileSync(
+    '/bin/ps',
+    ['-axo', 'pid=,ppid=,pgid=,rss=,lstart='],
+    { encoding: 'utf8', maxBuffer: 16 * 1_024 * 1_024, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } },
+  );
+  return stdout
+    .split('\n')
+    .map((line) => parseProcessLine(line)?.identity)
+    .filter((identity): identity is ProcessIdentity => identity !== undefined);
+}
+
 function unixSocketPeer(line: string): string | undefined {
   return /\sunix\s+0x[0-9a-f]+\s+.*\s+->(0x[0-9a-f]+)\s*$/iu.exec(
     line,
@@ -248,25 +293,28 @@ export async function inspectPipeHoldingProcesses(
     nonNegativeDuration(descriptor, 'pipe file descriptor');
   }
 
-  const own = await execFileAsync(
-    '/usr/sbin/lsof',
-    [
-      '-n',
-      '-P',
-      '-a',
-      '-p',
-      String(process.pid),
-      '-d',
-      fileDescriptors.join(','),
-    ],
-    { encoding: 'utf8', maxBuffer: 4 * 1_024 * 1_024 },
-  );
-  const peers = new Set(
-    own.stdout
-      .split('\n')
-      .map(unixSocketPeer)
-      .filter((peer): peer is string => peer !== undefined),
-  );
+  const ownPeers = async (): Promise<Set<string>> => {
+    const own = await execFileAsync(
+      '/usr/sbin/lsof',
+      [
+        '-n',
+        '-P',
+        '-a',
+        '-p',
+        String(process.pid),
+        '-d',
+        fileDescriptors.join(','),
+      ],
+      { encoding: 'utf8', maxBuffer: 4 * 1_024 * 1_024 },
+    );
+    return new Set(
+      own.stdout
+        .split('\n')
+        .map(unixSocketPeer)
+        .filter((peer): peer is string => peer !== undefined),
+    );
+  };
+  const peers = await ownPeers();
   if (peers.size === 0) return Object.freeze([]);
 
   const allSockets = await execFileAsync(
@@ -274,10 +322,19 @@ export async function inspectPipeHoldingProcesses(
     ['-n', '-P', '-U'],
     { encoding: 'utf8', maxBuffer: 32 * 1_024 * 1_024 },
   );
+  // A peer that closes during the scan frees its address, and macOS can give
+  // that address to a socket in an unrelated process at once. A second look
+  // after the scan drops every address that is already gone by then.
+  const connected = await ownPeers();
   const holderPids = new Set<number>();
   for (const line of allSockets.stdout.split('\n')) {
     const owner = unixSocketOwner(line);
-    if (owner && peers.has(owner.device) && owner.pid !== process.pid) {
+    if (
+      owner &&
+      peers.has(owner.device) &&
+      connected.has(owner.device) &&
+      owner.pid !== process.pid
+    ) {
       holderPids.add(owner.pid);
     }
   }
@@ -393,10 +450,24 @@ function ownedFromTable(
 ): readonly ProcessSnapshot[] {
   const ownedPids = currentObserved(table, request.observed ?? []);
   if (process.platform === 'win32') ownedPids.add(request.rootPid);
+  // Once the root is gone, the system can give its pid to a new process, which
+  // can lead a group with that same id. A recorded start time tells the two
+  // apart. The system never gives a group's id to a new process while any
+  // process is left in that group, so the root's own group stays this
+  // command's after the root exits, until a different process holds its id.
+  // While one does, its group is left alone. If it exits too while others
+  // remain in its group, those others match.
+  const holder = table.find(({ identity }) => identity.pid === request.rootPid)?.identity;
+  const rootAlive = request.rootStartedAt !== undefined && holder?.startedAt === request.rootStartedAt;
+  const groupOwned = rootAlive || (
+    request.rootStartedAt !== undefined &&
+    holder === undefined &&
+    request.rootProcessGroupId === request.rootPid
+  );
   for (const { identity } of table) {
     if (
-      identity.pid === request.rootPid ||
-      identity.processGroupId === request.rootProcessGroupId
+      (rootAlive && identity.pid === request.rootPid) ||
+      (groupOwned && identity.processGroupId === request.rootProcessGroupId)
     ) {
       ownedPids.add(identity.pid);
     }
@@ -442,6 +513,12 @@ function validateRequest(request: OwnedProcessTreeRequest): void {
   validateAttemptId(request.attemptId);
   positivePid(request.rootPid, 'rootPid');
   positivePid(request.rootProcessGroupId, 'rootProcessGroupId');
+  if (
+    request.rootStartedAt !== undefined &&
+    (typeof request.rootStartedAt !== 'string' || request.rootStartedAt.length === 0)
+  ) {
+    throw new TypeError('rootStartedAt must be a non-empty string');
+  }
 }
 
 export async function inspectOwnedProcessTree(
@@ -474,7 +551,7 @@ async function signalMatching(
   for (const identity of owned) {
     if (identity.pid === process.pid) continue;
     try {
-      process.kill(identity.pid, signal);
+      process.kill(positivePid(identity.pid, 'owned process id'), signal);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
     }
@@ -500,12 +577,29 @@ export async function stopOwnedProcessTree(
   const graceMs = nonNegativeDuration(request.graceMs, 'graceMs');
   const ownerId = process.platform === 'linux' ? request.ownerId : undefined;
   let observed = request.observed ?? [];
-  const discoverOwner = async (): Promise<void> => {
+  // On Linux every process of this attempt carries the attempt's exact
+  // marker, so a detached helper whose parent has already exited is still
+  // found, though no parent, group or earlier sample leads to it.
+  const discover = async (): Promise<void> => {
     if (ownerId !== undefined) {
       observed = mergeObserved(observed, await inspectOwnerMarkedProcesses(ownerId));
     }
+    if (process.platform === 'linux') {
+      observed = mergeObserved(observed, await inspectAttemptMarkedProcesses(request.attemptId));
+    }
   };
-  await discoverOwner();
+  // A table can show nothing owned and still miss a helper forked just
+  // before its parent exited, after the discovery that came before the
+  // table. A second discovery after that table finds it, so nothing is
+  // reported stopped on one look.
+  const inspectRemaining = async (): Promise<readonly ProcessIdentity[]> => {
+    await discover();
+    const remaining = await inspectOwnedProcessTree({ ...request, observed });
+    if (remaining.length > 0 || process.platform !== 'linux') return remaining;
+    await discover();
+    return await inspectOwnedProcessTree({ ...request, observed });
+  };
+  await discover();
   if (process.platform === 'win32') {
     await terminateWindowsTree(request.rootPid, false);
     observed = mergeObserved(
@@ -521,31 +615,30 @@ export async function stopOwnedProcessTree(
 
   const gracefulDeadline = Date.now() + graceMs;
   while (Date.now() < gracefulDeadline) {
-    await discoverOwner();
-    const remaining = await inspectOwnedProcessTree({ ...request, observed });
+    const remaining = await inspectRemaining();
     if (remaining.length === 0 && ownerId === undefined) return Object.freeze([]);
     observed = mergeObserved(observed, remaining);
     await delay(Math.min(POLL_MS, Math.max(1, gracefulDeadline - Date.now())));
   }
 
   await terminateWindowsTree(request.rootPid, true);
-  await discoverOwner();
+  await discover();
   observed = mergeObserved(
     observed,
     await signalMatching({ ...request, observed }, 'SIGKILL'),
   );
   const forceDeadline = Date.now() + FORCE_KILL_WAIT_MS;
   while (Date.now() < forceDeadline) {
-    await discoverOwner();
-    const remaining = await inspectOwnedProcessTree({ ...request, observed });
+    const remaining = await inspectRemaining();
     if (remaining.length === 0) return Object.freeze([]);
     observed = mergeObserved(observed, remaining);
-    if (ownerId !== undefined) {
+    // On Linux a process found only now, by a marker, has had no signal yet.
+    if (process.platform === 'linux') {
       await signalMatching({ ...request, observed }, 'SIGKILL');
     }
     await delay(POLL_MS);
   }
 
-  await discoverOwner();
+  await discover();
   return await inspectOwnedProcessTree({ ...request, observed });
 }

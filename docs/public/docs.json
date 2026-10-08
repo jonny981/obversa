@@ -223,6 +223,7 @@
               "packages/engine-claude-agent-sdk",
               "packages/engine-anthropic-api",
               "packages/engine-jev-api",
+              "packages/engine-openai-decisions",
               "packages/engine-mastra",
               "packages/engine-openai-agents",
               "packages/engine-eve",

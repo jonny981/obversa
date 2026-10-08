@@ -12,6 +12,7 @@
 // end of the list it repeats the last entry.
 import { appendFileSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { text } from 'node:stream/consumers';
 
 const args = process.argv.slice(2);
 const role = process.argv[1].split('/').pop();
@@ -62,7 +63,7 @@ if (args.length === 1 && args[0] === '--version') {
 }
 
 // Every adapter writes the prompt to stdin and closes it.
-const prompt = process.stdin.isTTY ? '' : readFileSync(0, 'utf8');
+const prompt = process.stdin.isTTY ? '' : await text(process.stdin);
 const entry = withCallsLock(() => {
   const chosen = call();
   appendFileSync(callsLog, `${JSON.stringify({

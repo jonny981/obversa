@@ -1,0 +1,174 @@
+---
+title: "OpenAI Decisions Engine"
+description: "@obversa/engine-openai-decisions: typed questions about state your run already recorded, answered by OpenAI's Decisions API."
+---
+
+`@obversa/engine-openai-decisions` asks OpenAI's
+[Decisions API](https://developers.openai.com/api/docs/guides/decisions)
+typed questions about state your run already recorded: does the draft hold,
+which way should the work go, how ready is it to ship. Each attempt is one
+call to `/v1/decisions`, and the answers come back as the structured result.
+It runs with workspace mode `none`; it never reads or edits files.
+
+It takes the questions of the [Jev API engine](/packages/engine-jev-api)'s
+prompt document (`noul`, `choice` and `score`), so the runtime's `judge` runs
+on it unchanged. It loads none of your own setup, so it always runs clean and
+has no `clean` option.
+
+## Install
+
+<CodeGroup>
+
+```bash npm
+npm install @obversa/engine-openai-decisions
+```
+
+```bash pnpm
+pnpm add @obversa/engine-openai-decisions
+```
+
+</CodeGroup>
+
+Not in `@obversa/obversa`; install it on its own.
+
+## Requirements
+
+- An OpenAI API key with access to the Decisions API, passed as the `apiKey`
+  option. `openaiDecisions()` also reads it from `OPENAI_API_KEY`.
+
+## Use it as the judge
+
+`openaiDecisions()` makes a seat. It reads the key from `OPENAI_API_KEY` and
+defaults the model to `gpt-6-luna`. Pass the seat wherever a Jev seat goes,
+for example `judge(openaiDecisions())` in a stage's `refine`. The judge reads
+each answer the same way it reads Jev's.
+
+The seat wraps `OpenAIDecisionsEngine`. This example makes the engine with a
+placeholder key and checks a request without sending anything:
+
+```ts examples/engine-openai-decisions-binding.ts {4,6}
+import { OpenAIDecisionsEngine } from '@obversa/engine-openai-decisions';
+
+// The key is a placeholder. `admit` checks the request and sends nothing.
+const engine = new OpenAIDecisionsEngine({ apiKey: 'example-key' });
+
+const identity = await engine.admit({ workspaceMode: 'none' }, new AbortController().signal);
+console.log(JSON.stringify(identity, null, 2));
+```
+
+Run it with `npx tsx engine-openai-decisions-binding.ts`:
+
+```json Output
+{
+  "adapter": "openai-decisions",
+  "adapterVersion": null,
+  "provider": "openai",
+  "modelFamily": "gpt",
+  "model": "gpt-6-luna",
+  "executable": null,
+  "capabilities": []
+}
+```
+
+## The document
+
+A request's `prompt` is a JSON document carrying the evidence and the
+questions, keyed by name:
+
+```json
+{
+  "state": { "findings": ["The export button has no label."], "rounds": 2 },
+  "questions": {
+    "holds": {
+      "type": "noul",
+      "instructions": "Does the draft hold as it stands?",
+      "criteria": { "true": "Only nits remain", "false": "A block remains" }
+    },
+    "stop_reason": {
+      "type": "choice",
+      "instructions": "Why stop, if at all?",
+      "criteria": { "holds": "It holds", "continue": "Another round is worth it" }
+    },
+    "readiness": {
+      "type": "score",
+      "instructions": "How ready is this to ship?",
+      "criteria": ["Unsafe to ship", "Needs another round", "Ships clean"]
+    }
+  }
+}
+```
+
+The engine sends `state` as the evidence: a string as it is, anything else as
+indented JSON. It sends each question in the API's own shape:
+
+| Question | Sent as | Rule |
+| --- | --- | --- |
+| `noul` | `predicate` | The true and false criteria are added to the instructions. |
+| `choice` | `choice` | Each criterion is a value and its description. At least two. |
+| `score` | `score` | The criteria are ordered levels, each a label or a `{label, description}` object. At least two. |
+
+## The answers
+
+The result is one `structured` part: the answers keyed by question name, with
+the fields the API returned.
+
+- **A predicate** carries `probability`, also given as `noul`, the field a Jev
+  answer carries. Its `type` is `predicate`, where a Jev answer's is `noul`.
+- **A choice** carries `choice`, `confidence` and `probabilities`.
+- **A score** carries `score`, `confidence` and `probabilities`. The score is
+  the probability-weighted average of the level indices, which start at 0.
+- **A refused question** comes back as `{ "type": "refusal" }`.
+
+A response that leaves a question unanswered, or answers one nobody asked,
+fails the attempt as `unknown`. `openaiDecisions()` returns the answers as
+assistant text, the JSON of the answers object, so a job reads them as it
+reads any seat's reply.
+
+## Cost
+
+The Decisions API bills input tokens only, at $0.10 per million for
+`gpt-6-luna`. A response that reports no output count is read as zero output
+tokens. The runtime's shipped price table keys prices by model, and
+`gpt-6-luna` is priced differently on OpenAI's other endpoints, so the table
+has no entry for it. Price your decision calls with the `prices` run option,
+for example `{ 'gpt-6-luna': { inputPerMTokUsd: 0.1, outputPerMTokUsd: 0 } }`.
+
+## Options
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `apiKey` | `string` | `OPENAI_API_KEY` in `openaiDecisions()` | The bearer key. Required by the class. |
+| `endpoint` | `string` | `https://api.openai.com/v1/decisions` | The POST target, for a regional endpoint. |
+| `model` | `string` | `gpt-6-luna` | The model sent when the request names none. |
+| `fetch` | `typeof fetch` | global `fetch` | The HTTP client, injectable for tests. |
+| `effort` | none | | Not supported: the API has no effort setting, so setting it throws. |
+
+## Errors
+
+- **HTTP status** maps to a failure kind: 400 is `invalid-config`, 401 and 403
+  are `auth`, 402 is `billing`, 429 is `rate-limit` with its `Retry-After`,
+  and 5xx is `transient`.
+- **The engine never retries and never invents an answer.** An unreachable
+  endpoint fails the attempt.
+- **Limits apply to the whole call.** `timeoutMs`, plus `timeoutGraceMs`
+  when set, bounds it, and `maxOutputBytes` caps the response body.
+- **Some request fields are refused before any call:** a system prompt,
+  `env`, `maxTokens`, a `jsonSchema` result, a workspace mode other than
+  `none`, tools and `effort`.
+
+## Identity
+
+The plugin reports `provider: 'openai'`, with the model family read from the
+model name, so `gpt-6-luna` reports family `gpt`. If the API doesn't echo a
+model, the recorded effective model and family are `null`. A review panel
+that requires different model families counts this seat as `gpt`, the same
+family as a Codex seat.
+
+## Limits
+
+- The Decisions API is in public beta. `gpt-6-luna` is the only model it
+  serves.
+- The engine sends the evidence as text. Images are not sent.
+- A preflight live check can't run on this engine. The check sends a
+  plain-text turn with `maxTokens`, which the engine refuses. Set
+  `live: 'skip'` for its lane in a run's preflight policy.

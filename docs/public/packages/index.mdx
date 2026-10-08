@@ -51,12 +51,13 @@ below say what else each one needs.
 | `AgentSdkEngine` | `@obversa/engine-claude-agent-sdk` | The Claude Agent SDK as an engine | [Claude Agent SDK Engine](/packages/engine-claude-agent-sdk) |
 | `AnthropicApiEngine` | `@obversa/engine-anthropic-api` | The Anthropic API as an engine | [Anthropic API Engine](/packages/engine-anthropic-api) |
 | `JevApiEngine` | `@obversa/engine-jev-api` | Typed questions about a run | [Jev API Engine](/packages/engine-jev-api) |
+| `openaiDecisions` | `@obversa/engine-openai-decisions` | Typed questions about a run, answered by OpenAI | [OpenAI Decisions Engine](/packages/engine-openai-decisions) |
 | `mastra`, `MastraEngine` | `@obversa/engine-mastra` | A Mastra agent as a seat | [Mastra Engine](/packages/engine-mastra) |
 | `openaiAgent`, `OpenAIAgentsEngine` | `@obversa/engine-openai-agents` | An OpenAI Agents SDK agent as a seat | [OpenAI Agents Engine](/packages/engine-openai-agents) |
 | `openGitMemory`, `openReasoningRecord` | `@obversa/memory-git` | Memory in Git, reasoning in commits | [Git Memory](/packages/memory-git) |
 | `createSimpleMemory` | `@obversa/memory-simple` | Memory in one process | [Simple Memory](/packages/memory-simple) |
 | `openMarkdownCorpus` | `@obversa/memory-markdown` | Search your Markdown files | [Markdown Memory](/packages/memory-markdown) |
-| `webhookNotifier` | `@obversa/notify-webhook` | A message per run event | [Webhook Notifications](/packages/notify-webhook) |
+| `webhookNotifier` | `@obversa/notify-webhook` | A run's progress, posted to your team's channel | [Webhook Notifications](/packages/notify-webhook) |
 
 Import from the package named in the row:
 
@@ -100,6 +101,10 @@ is.
 - **Jev API.** `@obversa/engine-jev-api` answers structured questions about a
   run's recorded state. It never reads or edits files. You need a Jev
   endpoint and an API key. See [Jev API Engine](/packages/engine-jev-api).
+- **OpenAI Decisions.** `@obversa/engine-openai-decisions` answers the same
+  kind of questions through OpenAI's Decisions API, from the same document
+  as Jev. It never reads or edits files. You need an OpenAI API key. See
+  [OpenAI Decisions Engine](/packages/engine-openai-decisions).
 - **Mastra.** `@obversa/engine-mastra` runs an agent you built with Mastra,
   one call to the agent's own `generate` per request. You need
   `@mastra/core` and whatever your agent needs, such as its model
@@ -120,10 +125,10 @@ is.
   from a local folder of Markdown files and gives `ground` the selected
   files through a read-only memory view. You need nothing else. Home:
   [Markdown Memory](/packages/memory-markdown).
-- **Webhook notifications.** `@obversa/notify-webhook` posts one message per
-  interesting run event to a URL you supply; the body carries a `text`
-  field, so a Slack, Discord or Teams incoming webhook shows it with no code
-  of its own. You need a URL to post to. Home:
+- **Webhook notifications.** `@obversa/notify-webhook` posts a run's
+  progress and its questions to your team's channel, one message per
+  moment. Slack and Mattermost incoming webhooks show it with no code of
+  your own. You need an incoming webhook URL. Home:
   [Webhook Notifications](/packages/notify-webhook).
 - **The review command.** `@obversa/surface-diff` ships `obversa-review`,
   which opens a diff for inline review. You need Git. See
@@ -160,6 +165,7 @@ is.
 | `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.8` |
 | `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.7` |
 | `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.5` |
+| `@obversa/engine-openai-decisions` | Answers decision questions over recorded run state through OpenAI's Decisions API | `0.1.0` |
 | `@obversa/engine-mastra` | Runs one engine attempt through a Mastra agent you built | `0.1.2` |
 | `@obversa/engine-openai-agents` | Runs one engine attempt through an OpenAI Agents SDK agent you built | `0.1.2` |
 
@@ -180,7 +186,8 @@ you run.
 [OpenCode CLI](/packages/engine-opencode-cli),
 [Claude Agent SDK](/packages/engine-claude-agent-sdk),
 [Anthropic API](/packages/engine-anthropic-api),
-[Jev API](/packages/engine-jev-api), [Mastra](/packages/engine-mastra),
+[Jev API](/packages/engine-jev-api),
+[OpenAI Decisions](/packages/engine-openai-decisions), [Mastra](/packages/engine-mastra),
 [OpenAI Agents](/packages/engine-openai-agents).
 Coming soon: [eve](/packages/engine-eve),
 [LangGraph](/packages/engine-langgraph).

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getEventListeners } from 'node:events';
-import { chmodSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -57,7 +57,19 @@ function request(
 }
 
 function expectFixtureStopped(directory: string): void {
-  expect(fixturePids(directory).some(isProcessAlive)).toBe(false);
+  const alive = fixturePids(directory).filter(isProcessAlive);
+  if (alive.length > 0 && process.platform === 'linux') {
+    console.error('Fixture processes after cleanup:', alive.map((pid) => {
+      try {
+        const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        return { pid, state: fields[0], parentPid: fields[1], group: fields[2], startTime: fields[19] };
+      } catch (error) {
+        return { pid, error: (error as NodeJS.ErrnoException).code };
+      }
+    }));
+  }
+  expect(alive.length).toBe(0);
 }
 
 describe('command cleanup capability', () => {

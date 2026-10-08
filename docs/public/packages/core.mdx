@@ -93,7 +93,22 @@ deadline with output and memory bounds and returns a typed result, and
 `sha256:` digest the command passes to its children as `OBVERSA_RUN_OWNER`.
 Nested commands keep an inherited marker, and it wins over a supplied
 `ownerId`; only the outer command that supplied the id sweeps that owner's
-marked processes during cleanup.
+marked processes during cleanup. On Linux the stop also finds every process
+that carries the request's `attemptId` as `OBVERSA_ATTEMPT_ID`, the marker
+`runOwnedCommand` gives each process it starts. It looks again on each pass
+and once more before it reports that nothing is left, so a helper whose
+parent has already exited is still stopped.
+
+When you call `stopOwnedProcessTree` yourself, pass `rootStartedAt`, the
+start time `readProcessIdentity(pid)` reads while the root is alive. On
+Linux and macOS, the root's process id counts only while that same process
+is alive. When the root leads its own group, that group counts until a new
+process gets the root's id. Any other group stops counting once the root
+exits. A new process that gets the id later is not stopped, nor is its group
+while it runs. Without `rootStartedAt`, the stop finds nothing by the root's
+process id or group. It then stops only the processes in `observed`, on Linux
+the processes that carry `ownerId` or `attemptId`, and their children. If it finds none, it
+sends no signal and returns an empty list, even if the root is still running.
 
 `commandCleanupCapability()` says how the platform cleans up: on Linux
 `inherited-owner`, processes carrying the marker are found through `/proc`;
@@ -129,7 +144,13 @@ still doesn't stop makes the call throw `TEARDOWN_INCOMPLETE`.
 By default only the child is signalled, so a process the child started and
 left behind isn't stopped, and the child sits in your process group so a
 terminal interrupt reaches it. `detached: true` gives the child its own
-group and stops the whole group at the deadline.
+group. While the child runs, each signal goes to every process in that
+group that `ps` shows starting no earlier than the child, each by its own
+process id. If the child's start time can't be read, only the child is
+signalled. If the child exits on SIGTERM, a process signalled this way
+that `ps` still shows once the child's output has closed gets SIGKILL
+when `killGraceMs` has passed since the stop began. A process that joins
+the group after the last signal is not stopped.
 
 ### The rest
 
@@ -163,6 +184,7 @@ group and stops the whole group at the deadline.
   `inspectOwnedProcessTree`, `inspectAttemptMarkedProcesses`,
   `inspectPipeHoldingProcesses`, `capturePipeOwnerProbe`,
   `measureOwnedProcessMemory`, `readAttemptMarkerProcessIds`,
+  `readProcessIdentity`,
   `parseWindowsProcessRows`, `DEFAULT_OWNED_COMMAND_LIMITS`,
   `OwnedCommandError`. [Run an owned command](#run-an-owned-command).
 - **`@obversa/core/claude-stream-json`**: `mapMessage`, `newAccumulator`.

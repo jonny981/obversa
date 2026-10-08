@@ -397,6 +397,7 @@ type RunChildCallable = typeof runChild extends (...args: never[]) => unknown ? 
 const _f22ProcessSurface: RunChildCallable = true;
 import { GrokCliEngine } from '@obversa/engine-grok-cli';
 import { JevApiEngine } from '@obversa/engine-jev-api';
+import { OpenAIDecisionsEngine } from '@obversa/engine-openai-decisions';
 import { OpenCodeCliEngine } from '@obversa/engine-opencode-cli';
 import { runChild } from '@obversa/core';
 import {
@@ -551,6 +552,7 @@ const engines = {
   codex: new CodexEngine({ defaultModel: 'gpt-test', cliBinary: '/usr/bin/false', permissionMode: 'plan' }),
   'grok-cli': new GrokCliEngine({ executable: '/usr/bin/false', version: '1.0.44', identity: { provider: 'xai', modelFamily: 'grok-4' }, permissionMode: 'dontAsk' }),
   'jev-api': new JevApiEngine({ endpoint: 'http://127.0.0.1:9', apiKey: 'test-key' }),
+  'openai-decisions': new OpenAIDecisionsEngine({ endpoint: 'http://127.0.0.1:9', apiKey: 'test-key' }),
   'opencode-cli': new OpenCodeCliEngine({ executable: '/usr/bin/false', version: '1.18.23', identity: { provider: 'opencode', modelFamily: null } }),
 };
 assert.deepEqual(Object.values(engines).map(({ name }) => name).sort(), [
@@ -561,6 +563,7 @@ assert.deepEqual(Object.values(engines).map(({ name }) => name).sort(), [
   'grok-cli',
   'jev-api',
   'mock',
+  'openai-decisions',
   'opencode-cli',
 ]);
 await assert.rejects(
@@ -847,6 +850,7 @@ async function main() {
     await copyFile(join(root, 'examples', 'reasoning-record.ts'), join(consumerDirectory, 'reasoning-record.ts'));
     await copyFile(join(root, 'examples', 'engine-anthropic-api-binding.ts'), join(consumerDirectory, 'engine-anthropic-api-binding.ts'));
     await copyFile(join(root, 'examples', 'engine-jev-api-binding.ts'), join(consumerDirectory, 'engine-jev-api-binding.ts'));
+    await copyFile(join(root, 'examples', 'engine-openai-decisions-binding.ts'), join(consumerDirectory, 'engine-openai-decisions-binding.ts'));
     await copyFile(join(root, 'examples', 'engine-claude-agent-sdk-binding.ts'), join(consumerDirectory, 'engine-claude-agent-sdk-binding.ts'));
     await copyFile(join(root, 'examples', 'engine-devin-cli-seat.ts'), join(consumerDirectory, 'engine-devin-cli-seat.ts'));
     await copyFile(searchMarkdownExamplePath, join(consumerDirectory, 'memory-markdown.ts'));

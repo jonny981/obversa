@@ -138,6 +138,14 @@ if (recordPath) {
   const config = process.env.OPENCODE_CONFIG_CONTENT ?? '';
   const auth = process.env.OPENCODE_AUTH_CONTENT ?? '';
   writeFileSync(recordPath, JSON.stringify({
+    // Only the synthetic-auth scenario inspects its test-owned login folder.
+    ...(scenario === 'openrouter-auth' ? {
+      openrouterAuth: {
+        environmentKey: process.env.OPENROUTER_API_KEY === 'fixture-openrouter-key',
+        storedKey: existsSync(join(process.env.XDG_DATA_HOME, 'opencode', 'auth.json'))
+          && JSON.parse(readFileSync(join(process.env.XDG_DATA_HOME, 'opencode', 'auth.json'), 'utf8')).openrouter.key === 'fixture-stored-key',
+      },
+    } : {}),
     args,
     cwd: process.cwd(),
     prompt,

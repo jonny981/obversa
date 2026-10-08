@@ -55,6 +55,9 @@ importers:
       '@obversa/engine-openai-agents':
         specifier: workspace:^
         version: link:plugins/engine-openai-agents
+      '@obversa/engine-openai-decisions':
+        specifier: workspace:^
+        version: link:plugins/engine-openai-decisions
       '@obversa/engine-opencode-cli':
         specifier: workspace:^
         version: link:plugins/engine-opencode-cli
@@ -387,6 +390,12 @@ importers:
       zod:
         specifier: 4.4.3
         version: 4.4.3
+
+  plugins/engine-openai-decisions:
+    dependencies:
+      '@obversa/api':
+        specifier: workspace:^
+        version: link:../../packages/api
 
   plugins/engine-opencode-cli:
     dependencies:

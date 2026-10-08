@@ -208,7 +208,7 @@ module.exports = {
       name: 'engine-plugin-reaches-engine-only',
       comment: 'an engine plugin reaches API contracts and core execution only',
       severity: 'error',
-      from: { path: '^plugins/(engine-(?:anthropic-api|claude-cli|codex-cli|devin-cli|grok-cli|jev-api|mastra|openai-agents|opencode-cli))/' },
+      from: { path: '^plugins/(engine-(?:anthropic-api|claude-cli|codex-cli|devin-cli|grok-cli|jev-api|mastra|openai-agents|openai-decisions|opencode-cli))/' },
       to: { path: '^(packages|plugins)/', pathNot: '^(plugins/$1/|packages/(api|core)/)' },
     },
     {
