@@ -38,8 +38,9 @@ npm install @obversa/obversa
 ```
 
 Node.js 22.12 or later. `@obversa/obversa` installs the runtime and every
-plugin but four engines, which you install on their own:
+plugin but five engines, which you install on their own:
 `npm install @obversa/engine-jev-api` for Jev,
+`npm install @obversa/engine-openai-decisions` for OpenAI's Decisions API,
 `npm install @obversa/engine-devin-cli` for Devin,
 `npm install @obversa/engine-mastra @mastra/core` for a Mastra agent and
 `npm install @obversa/engine-openai-agents @openai/agents zod` for an
@@ -282,14 +283,14 @@ CrewAI, Temporal, Claude Code subagents and eve.
 
 ## Working on Obversa
 
-22 publishable packages. `packages/` holds the eight that define the
+23 publishable packages. `packages/` holds the eight that define the
 product: `@obversa/runtime` runs a workflow, `@obversa/api` holds the
 engine and memory contracts, `@obversa/core` runs bounded child processes,
 `@obversa/runner` supervises stored runs, `@obversa/builtin-workflows`
 ships three ready-made teams and a workflow that proposes changes to a
 workflow from its record, `@obversa/obversa` is the install above,
 and `@obversa/surface` with `@obversa/surface-diff` is the local review
-page. `plugins/` holds the fourteen adapters: the ten engines above, three
+page. `plugins/` holds the fifteen adapters: the eleven engines above, three
 memories, and a notifier that posts run events to a URL.
 
 [AGENTS.md](AGENTS.md) is the guide for anyone who changes this

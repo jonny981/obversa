@@ -63,6 +63,7 @@ create a file, and no file in the repository changed.
 | [Grok CLI](/packages/engine-grok-cli#clean) | Yes | No | Yes | No clean mode |
 | [Anthropic API](/packages/engine-anthropic-api) | No setup to load | Always clean | Refuses a read step | Refuses a read step |
 | [Jev API](/packages/engine-jev-api) | No setup to load | Always clean | Refuses a read step | Refuses a read step |
+| [OpenAI Decisions](/packages/engine-openai-decisions) | No setup to load | Always clean | Refuses a read step | Refuses a read step |
 | [Mastra](/packages/engine-mastra) | No setup to load | Always clean | Not enforced: your agent's tools decide | Not enforced: your agent's tools decide |
 | [OpenAI Agents SDK](/packages/engine-openai-agents) | No setup to load | Always clean | Not enforced: your agent's tools decide | Not enforced: your agent's tools decide |
 
@@ -163,6 +164,7 @@ identity:
 | [Anthropic API](/packages/engine-anthropic-api#options) | Yes | The Messages API's `output_config.effort` |
 | [Devin CLI](/packages/engine-devin-cli#options) | No | The Devin CLI has no effort switch. |
 | [Jev API](/packages/engine-jev-api#options) | No | The Jev service decides how hard it works. |
+| [OpenAI Decisions](/packages/engine-openai-decisions#options) | No | The Decisions API has no effort setting. |
 | [Mastra](/packages/engine-mastra#what-stays-mastras) | No | The Mastra agent you pass decides. Set it on the agent. |
 | [OpenAI Agents SDK](/packages/engine-openai-agents#what-stays-the-sdks) | No | The agent you pass decides. Set it in the agent's `modelSettings`. |
 

@@ -47,6 +47,7 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'engine-claude-agent-sdk-binding.ts',
   'engine-devin-cli-seat.ts',
   'engine-jev-api-binding.ts',
+  'engine-openai-decisions-binding.ts',
   'approval.ts',
   'monitor.ts',
   'tournament.ts',

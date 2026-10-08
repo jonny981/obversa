@@ -411,6 +411,15 @@ export const EXPECTED_FILES = {
     'package/dist/jev-api.d.ts',
     'package/package.json',
   ],
+  '@obversa/engine-openai-decisions': [
+    'package/LICENSE',
+    'package/README.md',
+    'package/dist/index.d.ts',
+    'package/dist/index.js',
+    'package/dist/index.js.map',
+    'package/dist/openai-decisions.d.ts',
+    'package/package.json',
+  ],
   '@obversa/engine-mastra': [
     'package/LICENSE',
     'package/README.md',

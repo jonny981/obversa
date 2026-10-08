@@ -1,0 +1,56 @@
+{
+  "name": "@obversa/engine-openai-decisions",
+  "version": "0.1.0",
+  "description": "Run one isolated engine attempt as a single call to OpenAI's Decisions API.",
+  "author": "Jonny Neill <jonnyneill@hotmail.com>",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:ts6": "tsc6 --noEmit -p tsconfig.json",
+    "prepack": "node ../../scripts/check-publish-allowlist.mjs --build-proof",
+    "prepublishOnly": "node ../../scripts/check-publish-allowlist.mjs"
+  },
+  "dependencies": {
+    "@obversa/api": "workspace:^"
+  },
+  "keywords": [
+    "agent",
+    "graph",
+    "workflow",
+    "runtime",
+    "obversa",
+    "openai",
+    "decisions"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonny981/obversa.git"
+  },
+  "homepage": "https://obversa.ai/docs",
+  "bugs": {
+    "url": "https://github.com/jonny981/obversa/issues"
+  }
+}
