@@ -57,6 +57,7 @@ const CLEAN_BY_DEFAULT = true;
 const VERSION_TIMEOUT_MS = 10_000;
 const VERSION_TEARDOWN_MS = 1_000;
 const VERSION_OUTPUT_BYTES = 4_096;
+const LOAD_SPAWN_CODES = new Set(['EAGAIN', 'EMFILE', 'ENOMEM']);
 const OPENCODE_VERSION = /^\d+\.\d+\.\d+$/u;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 const STRUCTURED_RESULT_MARKER = 'OBVERSA_STRUCTURED_RESULT_V1\n';
@@ -1317,6 +1318,9 @@ export class OpenCodeCliEngine implements Engine {
           throw loopError('missing-cli', 'OpenCode configured executable could not start');
         }
         if (error.code === 'SPAWN_FAILED') {
+          if (LOAD_SPAWN_CODES.has(error.spawnCode ?? '')) {
+            throw loopError('transient', `the system refused to start the OpenCode process (${error.spawnCode})`);
+          }
           try { resolveCommandExecutable(this.#executable); }
           catch { throw loopError('missing-cli', 'OpenCode configured executable is missing or not runnable'); }
           throw loopError('unknown', 'OpenCode version process could not start');
@@ -1616,6 +1620,9 @@ export class OpenCodeCliEngine implements Engine {
         throw loopError('missing-cli', 'OpenCode configured executable could not start');
       }
       if (error instanceof OwnedCommandError && error.code === 'SPAWN_FAILED') {
+        if (LOAD_SPAWN_CODES.has(error.spawnCode ?? '')) {
+          throw loopError('transient', `the system refused to start the OpenCode process (${error.spawnCode})`);
+        }
         try { resolveCommandExecutable(this.#executable); }
         catch { throw loopError('missing-cli', 'OpenCode configured executable is missing or not runnable'); }
         throw loopError('unknown', 'OpenCode model process could not start');

@@ -620,6 +620,8 @@ export function dag(config: DagConfig): Job {
         stageGate: nodes.get(name)!.gate ?? null,
         timeoutMs: nodes.get(name)!.timeoutMs,
         timeoutGraceMs: nodes.get(name)!.timeoutGraceMs,
+        maxMemoryBytes: nodes.get(name)!.maxMemoryBytes,
+        maxOutputBytes: nodes.get(name)!.maxOutputBytes,
       }), job), {
         [TARGET_ROUNDS]: targetRounds(name),
         // Set or clear: a nested node with no `file` never checks an ancestor's.

@@ -60,16 +60,19 @@ export type OwnedCommandErrorCode =
 
 export class OwnedCommandError extends Error {
   readonly code: OwnedCommandErrorCode;
+  readonly spawnCode?: string;
   readonly remainingProcesses: readonly ProcessIdentity[];
 
   constructor(
     code: OwnedCommandErrorCode,
     message: string,
     remainingProcesses: readonly ProcessIdentity[] = [],
+    spawnCode?: string,
   ) {
     super(message);
     this.name = 'OwnedCommandError';
     this.code = code;
+    this.spawnCode = spawnCode;
     this.remainingProcesses = Object.freeze([...remainingProcesses]);
   }
 }
@@ -558,7 +561,7 @@ export async function runOwnedCommand(
       );
     }
     if (childError instanceof RunChildError && childError.code === 'SPAWN_FAILED') {
-      throw new OwnedCommandError('SPAWN_FAILED', childError.message);
+      throw new OwnedCommandError('SPAWN_FAILED', childError.message, [], childError.spawnCode);
     }
     if (childError instanceof RunChildError && childError.code === 'TEARDOWN_INCOMPLETE') {
       if (inspectionFailure !== undefined) {

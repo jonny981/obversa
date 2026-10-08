@@ -49,6 +49,7 @@ export type RunChildErrorCode =
 
 export class RunChildError extends Error {
   readonly code: RunChildErrorCode;
+  readonly spawnCode?: string;
   readonly stdout: Uint8Array;
   readonly stderr: Uint8Array;
 
@@ -56,10 +57,12 @@ export class RunChildError extends Error {
     code: RunChildErrorCode,
     message: string,
     output: { readonly stdout?: Uint8Array; readonly stderr?: Uint8Array } = {},
+    spawnCode?: string,
   ) {
     super(message);
     this.name = 'RunChildError';
     this.code = code;
+    this.spawnCode = spawnCode;
     this.stdout = output.stdout ?? new Uint8Array();
     this.stderr = output.stderr ?? new Uint8Array();
   }
@@ -168,6 +171,11 @@ function registerLiveChild(child: ChildProcess, detached: boolean): () => void {
   return () => liveChildren.delete(entry);
 }
 
+function errorCode(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
 function bytes(value: string | Uint8Array): Uint8Array {
   return typeof value === 'string' ? Buffer.from(value) : Uint8Array.from(value);
 }
@@ -207,6 +215,8 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
     throw new RunChildError(
       'SPAWN_FAILED',
       error instanceof Error ? error.message : 'child process could not start',
+      {},
+      errorCode(error),
     );
   }
 
@@ -353,7 +363,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
     child.stderr?.on('data', (chunk: Uint8Array) => retain(stderrChunks, chunk));
     child.once('error', (error) => {
       options.signal?.removeEventListener('abort', onAbort);
-      fail(new RunChildError('SPAWN_FAILED', error.message, output()));
+      fail(new RunChildError('SPAWN_FAILED', error.message, output(), errorCode(error)));
     });
     child.once('exit', (code, signal) => {
       stoppedAt = performance.now();

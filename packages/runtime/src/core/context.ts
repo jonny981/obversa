@@ -100,6 +100,10 @@ export interface ContextOverride {
   timeoutMs?: number;
   /** Override the inherited timeout grace for jobs in this scope. */
   timeoutGraceMs?: number;
+  /** Override the inherited memory cap, in bytes, for jobs in this scope. */
+  maxMemoryBytes?: number;
+  /** Override the inherited output cap, in bytes, for jobs in this scope. */
+  maxOutputBytes?: number;
 }
 
 /** Resolve the criterion for the reviewer context currently being evaluated. */
@@ -160,6 +164,8 @@ export function childContext(
     stageGate: over.stageGate !== undefined ? over.stageGate : parent.stageGate,
     timeoutMs: over.timeoutMs ?? parent.timeoutMs,
     timeoutGraceMs: over.timeoutGraceMs ?? parent.timeoutGraceMs,
+    maxMemoryBytes: over.maxMemoryBytes ?? parent.maxMemoryBytes,
+    maxOutputBytes: over.maxOutputBytes ?? parent.maxOutputBytes,
     // Inherit the enclosing iteration by default. A `loop` always passes one
     // explicitly; a `dag`/`sequence` does not, so without this a node nested in a
     // loop would reset to 0, the "Attempt 0" confound where a retry body could not

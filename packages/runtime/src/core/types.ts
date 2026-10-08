@@ -338,6 +338,10 @@ export interface JobContext {
   readonly timeoutMs?: number;
   /** Extra hard-timeout window after `timeoutMs` for accepting a completed turn. */
   readonly timeoutGraceMs?: number;
+  /** Memory cap, in bytes, inherited by an agent job that sets none of its own. */
+  readonly maxMemoryBytes?: number;
+  /** Output cap, in bytes, inherited by an agent job that sets none of its own. */
+  readonly maxOutputBytes?: number;
   /**
    * Inside a `dag` node: the outcomes of the nodes this node `needs`, by the
    * same names its config uses (`needs: ['test']` gives `ctx.needs.test`). A
@@ -586,6 +590,10 @@ export interface DagNode {
   timeoutMs?: number;
   /** Extra hard-timeout window after `timeoutMs` for completed-but-late leaves. */
   timeoutGraceMs?: number;
+  /** Memory cap, in bytes, for an agent job in this node that sets none of its own. */
+  maxMemoryBytes?: number;
+  /** Output cap, in bytes, for an agent job in this node that sets none of its own. */
+  maxOutputBytes?: number;
   /**
    * The nodes this node may send work back to, declared when the graph is
    * built; each must be one of the nodes it depends on. A send-back to a

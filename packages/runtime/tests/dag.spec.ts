@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  agentJob,
   commandSucceeds,
   dag,
   fnJob,
@@ -9,7 +10,7 @@ import {
   run,
   sequence,
 } from '../src/api.ts';
-import type { LoopEvent, Outcome, RunOptions } from '../src/api.ts';
+import type { AgentRequest, LoopEvent, Outcome, RunOptions } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 
 const runOptions: RunOptions = {
@@ -273,5 +274,29 @@ describe('dag', () => {
     );
 
     expect(result.outcome.status).toBe('pass');
+  });
+
+  it('gives a node the same owned-command limits an agent job takes', async () => {
+    let seen: AgentRequest | undefined;
+    const engine = new MockEngine((request) => {
+      seen = request;
+      return 'done';
+    });
+    const result = await run(dag({
+      name: 'memory-limit',
+      nodes: {
+        build: {
+          maxMemoryBytes: 8 * 1_024 * 1_024 * 1_024,
+          maxOutputBytes: 2_000_000,
+          job: agentJob({ prompt: 'build', engine: 'builder' }),
+        },
+      },
+    }), { engine: 'builder', engines: { builder: engine }, cwd: process.cwd() });
+
+    expect(result.outcome.status).toBe('pass');
+    expect(seen).toMatchObject({
+      maxMemoryBytes: 8 * 1_024 * 1_024 * 1_024,
+      maxOutputBytes: 2_000_000,
+    });
   });
 });

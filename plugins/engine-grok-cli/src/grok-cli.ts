@@ -53,6 +53,7 @@ const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 const VERSION_TIMEOUT_MS = 5_000;
 const VERSION_TEARDOWN_MS = 1_000;
 const VERSION_OUTPUT_BYTES = 4_096;
+const LOAD_SPAWN_CODES = new Set(['EAGAIN', 'EMFILE', 'ENOMEM']);
 const GROK_VERSION = /^grok ([0-9]+\.[0-9]+\.[0-9]+)(?: \([0-9a-f]+\))?(?: \[[A-Za-z0-9._-]+\])?$/u;
 const BASE_SYSTEM_PROMPT =
   'Execute one Obversa node attempt. Use only the declared tools and permissions.';
@@ -941,9 +942,13 @@ export class GrokCliEngine implements Engine {
       } else if (error instanceof OwnedCommandError && error.code === 'INVALID_EXECUTABLE') {
         primary = loopError('missing-cli', 'Grok configured executable could not start');
       } else if (error instanceof OwnedCommandError && error.code === 'SPAWN_FAILED') {
-        try { resolveCommandExecutable(this.#executable); }
-        catch { primary = loopError('missing-cli', 'Grok configured executable is missing or not runnable'); }
-        if (primary === undefined) primary = loopError('unknown', 'Grok version process could not start');
+        if (LOAD_SPAWN_CODES.has(error.spawnCode ?? '')) {
+          primary = loopError('transient', `the system refused to start the Grok process (${error.spawnCode})`);
+        } else {
+          try { resolveCommandExecutable(this.#executable); }
+          catch { primary = loopError('missing-cli', 'Grok configured executable is missing or not runnable'); }
+          if (primary === undefined) primary = loopError('unknown', 'Grok version process could not start');
+        }
       } else if (error instanceof OwnedCommandError
         && (error.code === 'OUTPUT_LIMIT' || error.code === 'INVALID_COMMAND')) {
         primary = loopError('invalid-config', 'Grok version command exceeded or rejected its limits');
@@ -1182,6 +1187,9 @@ export class GrokCliEngine implements Engine {
         throw loopError('missing-cli', 'Grok configured executable could not start');
       }
       if (error instanceof OwnedCommandError && error.code === 'SPAWN_FAILED') {
+        if (LOAD_SPAWN_CODES.has(error.spawnCode ?? '')) {
+          throw loopError('transient', `the system refused to start the Grok process (${error.spawnCode})`);
+        }
         try { resolveCommandExecutable(this.#executable); }
         catch { throw loopError('missing-cli', 'Grok configured executable is missing or not runnable'); }
         throw loopError('unknown', 'Grok model process could not start');

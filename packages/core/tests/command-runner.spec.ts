@@ -288,6 +288,20 @@ describe.runIf(process.platform !== 'win32')('owned command runner', () => {
     expect(fixturePids(directory)).toEqual([]);
   });
 
+  it('keeps the system error code of a process that could not start', async () => {
+    const directory = fixtureDirectory();
+    directories.push(directory);
+
+    await expect(runOwnedCommand(
+      request('complete', directory, { cwd: join(directory, 'missing') }),
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      code: 'SPAWN_FAILED',
+      spawnCode: 'ENOENT',
+    } satisfies Partial<OwnedCommandError>);
+    expect(fixturePids(directory)).toEqual([]);
+  });
+
   it('rejects time policies that Node timers would shorten', async () => {
     const directory = fixtureDirectory();
     directories.push(directory);

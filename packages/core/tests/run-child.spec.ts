@@ -295,4 +295,16 @@ describe('runChild', () => {
       code: 'OUTPUT_LIMIT',
     } satisfies Partial<RunChildError>);
   });
+
+  it('keeps the system error code of a process that could not start', async () => {
+    await expect(runChild({
+      executable: join(tmpdir(), 'obversa-no-such-executable'),
+      timeoutMs: 1_000,
+      maxOutputBytes: 1_024,
+    })).rejects.toMatchObject({
+      name: 'RunChildError',
+      code: 'SPAWN_FAILED',
+      spawnCode: 'ENOENT',
+    } satisfies Partial<RunChildError>);
+  });
 });

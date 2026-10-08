@@ -317,6 +317,8 @@ describe('AgentDef', () => {
         maxTokens: 50,
         timeoutMs: 1000,
         timeoutGraceMs: 200,
+        maxMemoryBytes: 8 * 1_024 * 1_024 * 1_024,
+        maxOutputBytes: 2_000_000,
         advisor: { engine: 'advisor', model: 'fable', maxCalls: 1 },
       }),
       {
@@ -337,9 +339,77 @@ describe('AgentDef', () => {
       maxTokens: 50,
       timeoutMs: 1000,
       timeoutGraceMs: 200,
+      maxMemoryBytes: 8 * 1_024 * 1_024 * 1_024,
+      maxOutputBytes: 2_000_000,
       leaf: true,
     });
   });
+
+  it('passes a raised owned-command limit to the engine request', async () => {
+    const repo = await tmpRepo();
+    const seen = capturing();
+    await run(agentJob({
+      prompt: 'build',
+      engine: 'builder',
+      maxMemoryBytes: 8 * 1_024 * 1_024 * 1_024,
+      maxOutputBytes: 2_000_000,
+    }), {
+      engine: 'builder',
+      engines: { builder: seen.engine },
+      cwd: repo,
+    });
+
+    expect(seen.req()).toMatchObject({
+      maxMemoryBytes: 8 * 1_024 * 1_024 * 1_024,
+      maxOutputBytes: 2_000_000,
+    });
+  });
+
+  it('leaves the owned-command limits unset when a job gives none', async () => {
+    const repo = await tmpRepo();
+    const seen = capturing();
+    await run(agentJob({ prompt: 'build', engine: 'builder' }), {
+      engine: 'builder',
+      engines: { builder: seen.engine },
+      cwd: repo,
+    });
+
+    expect(seen.req().maxMemoryBytes).toBeUndefined();
+    expect(seen.req().maxOutputBytes).toBeUndefined();
+  });
+
+  it.each([
+    ['maxMemoryBytes', 0],
+    ['maxMemoryBytes', -1],
+    ['maxMemoryBytes', 1.5],
+    ['maxMemoryBytes', Number.NaN],
+    ['maxOutputBytes', 0],
+  ] as const)(
+    'refuses %s %s before calling the engine',
+    async (name, limit) => {
+      const repo = await tmpRepo();
+      let calls = 0;
+      const engine = new MockEngine(() => {
+        calls += 1;
+        return 'must not run';
+      });
+
+      const result = await run(agentJob({
+        prompt: 'build',
+        engine: 'builder',
+        [name]: limit,
+      }), {
+        engine: 'builder',
+        engines: { builder: engine },
+        cwd: repo,
+      });
+      expect(result.outcome).toMatchObject({
+        status: 'fail',
+        summary: `${name} must be a positive whole number`,
+      });
+      expect(calls).toBe(0);
+    },
+  );
 
   it('records advisor usage without inheriting the writer role or stage', async () => {
     const repo = await tmpRepo();

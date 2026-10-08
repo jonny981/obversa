@@ -159,6 +159,16 @@ export interface AgentJobConfig {
   timeoutMs?: number;
   /** Extra hard-timeout window after `timeoutMs` for completed final results. */
   timeoutGraceMs?: number;
+  /**
+   * Memory cap, in bytes, for the owned process tree of each worker, fallback
+   * or advisor invocation.
+   */
+  maxMemoryBytes?: number;
+  /**
+   * Cap, in bytes, for the captured output of each worker, fallback or advisor
+   * invocation.
+   */
+  maxOutputBytes?: number;
   /** Fallback route(s) used when the primary engine hits a configured error. */
   fallback?: AgentRoute | AgentRoute[];
   /** Error codes that may spill to `fallback`. Default: RATE_LIMIT and QUOTA. */
@@ -197,6 +207,14 @@ export type ProofDescriptor = ProofArtifact;
 export type ProofProducer = (
   ctx: JobContext,
 ) => ProofDescriptor | Promise<ProofDescriptor>;
+
+function positiveLimit(value: number | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`${name} must be a positive whole number`);
+  }
+  return value;
+}
 
 const TERMINAL = (text: string): Outcome => ({
   status: 'pass',
@@ -273,7 +291,13 @@ async function runAdvisorConsult(
   config: AdvisorConfig,
   call: number,
   request: AdvisorRequest,
-  inherited: { maxTokens?: number; timeoutMs?: number; timeoutGraceMs?: number },
+  inherited: {
+    maxTokens?: number;
+    timeoutMs?: number;
+    timeoutGraceMs?: number;
+    maxMemoryBytes?: number;
+    maxOutputBytes?: number;
+  },
   redactionEnv: Record<string, string> | undefined,
 ): Promise<{ reply: string; model?: string }> {
   assertBudget(ctx);
@@ -288,6 +312,8 @@ async function runAdvisorConsult(
       maxTokens: config.maxTokens ?? inherited.maxTokens,
       timeoutMs: config.timeoutMs ?? inherited.timeoutMs,
       timeoutGraceMs: config.timeoutGraceMs ?? inherited.timeoutGraceMs,
+      maxMemoryBytes: inherited.maxMemoryBytes,
+      maxOutputBytes: inherited.maxOutputBytes,
       cwd: ctx.workspace.dir,
       leaf: true,
       attempt: attemptRequestMeta(ctx, `${label}:advisor`),
@@ -397,6 +423,8 @@ export function agentJob(config: AgentJobConfig): Job {
       },
       ...fallbacks,
     ];
+    const maxMemoryBytes = positiveLimit(config.maxMemoryBytes ?? ctx.maxMemoryBytes, 'maxMemoryBytes');
+    const maxOutputBytes = positiveLimit(config.maxOutputBytes ?? ctx.maxOutputBytes, 'maxOutputBytes');
     const fallbackOn = new Set<LoopErrorCode>(
       config.fallbackOn ?? ['RATE_LIMIT', 'QUOTA'],
     );
@@ -454,6 +482,8 @@ export function agentJob(config: AgentJobConfig): Job {
               cwd: config.cwd ?? ctx.workspace.dir,
               timeoutMs,
               timeoutGraceMs,
+              maxMemoryBytes,
+              maxOutputBytes,
               env,
               attempt: attemptRequestMeta(ctx, label),
             },
@@ -533,7 +563,7 @@ export function agentJob(config: AgentJobConfig): Job {
             advisor,
             call,
             consult,
-            { maxTokens: config.maxTokens, timeoutMs, timeoutGraceMs },
+            { maxTokens: config.maxTokens, timeoutMs, timeoutGraceMs, maxMemoryBytes, maxOutputBytes },
             env,
           );
           advisorReplies.push(advisorFollowup(call, consult, reply));

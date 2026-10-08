@@ -59,6 +59,11 @@ with the engines you pass and returns the outcome. Run it with
 pass
 ```
 
+The `timeoutMs` option of `agentJob` sets a time limit for each engine call.
+The `maxMemoryBytes` and `maxOutputBytes` options go to the engine
+unchanged. A CLI engine uses them as the memory cap for the processes it
+starts (4 GiB by default) and the cap on their output.
+
 ## Declare a team
 
 `workflow(name, { brief, roles, stages })` is the team, in a file: the

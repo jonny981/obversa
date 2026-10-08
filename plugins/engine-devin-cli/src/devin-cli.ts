@@ -337,6 +337,8 @@ function assertDevinConfiguration(req: AgentRequest, opts: DevinCliEngineOptions
   }
 }
 
+const LOAD_SPAWN_CODES = new Set(['EAGAIN', 'EMFILE', 'ENOMEM']);
+
 function devinCommandError(error: unknown, executable?: string): unknown {
   if (!(error instanceof OwnedCommandError)) return error;
   if (error.code === 'INVALID_EXECUTABLE') {
@@ -346,6 +348,12 @@ function devinCommandError(error: unknown, executable?: string): unknown {
     return new EngineError({ kind: 'invalid-config', message: 'invalid Devin command request' });
   }
   if (error.code === 'SPAWN_FAILED') {
+    if (LOAD_SPAWN_CODES.has(error.spawnCode ?? '')) {
+      return new EngineError({
+        kind: 'transient',
+        message: `the system refused to start the Devin process (${error.spawnCode})`,
+      });
+    }
     if (executable !== undefined) {
       try { resolveCommandExecutable(executable); }
       catch { return new EngineError({ kind: 'missing-cli', message: 'Devin executable is not runnable' }); }
