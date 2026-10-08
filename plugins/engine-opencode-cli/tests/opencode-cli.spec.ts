@@ -94,6 +94,49 @@ describe('OpenCode static admission', () => {
     expect(selected).toMatchObject({ provider: 'anthropic', modelFamily: 'claude' });
   });
 
+  it.each(['environment', 'stored-login'] as const)('keeps OpenRouter %s available in clean mode and preserves the complete model', async (authSource) => {
+    const personHome = temporaryDirectory('opencode-router-home-');
+    const dataHome = join(personHome, 'data');
+    mkdirSync(join(dataHome, 'opencode'), { recursive: true });
+    const loginPath = join(dataHome, 'opencode', 'auth.json');
+    const login = JSON.stringify({ openrouter: { type: 'api', key: 'fixture-stored-key' } });
+    if (authSource === 'stored-login') writeFileSync(loginPath, login);
+    vi.stubEnv('HOME', personHome);
+    vi.stubEnv('XDG_DATA_HOME', dataHome);
+    vi.stubEnv('OPENROUTER_API_KEY', authSource === 'environment' ? 'fixture-openrouter-key' : undefined);
+    const recordPath = join(temporaryDirectory('opencode-router-record-'), 'call.json');
+    const selectedModel = 'openrouter/anthropic/claude-sonnet-4.5';
+    const engine = new OpenCodeCliEngine({
+      ...options(),
+      identity: { provider: 'openrouter', modelFamily: 'claude' },
+      environment: {
+        OBVERSA_TEST_OPENCODE_RECORD: recordPath,
+        OBVERSA_TEST_OPENCODE_SCENARIO: 'openrouter-auth',
+      },
+    });
+
+    const result = await engine.run(request({ model: selectedModel }), () => {}, new AbortController().signal);
+    for (const identity of [result.requested, result.effective]) {
+      expect(identity).toMatchObject({ provider: 'openrouter', modelFamily: 'claude', model: selectedModel });
+    }
+    const call = JSON.parse(readFileSync(recordPath, 'utf8'));
+    expect(call.args[call.args.indexOf('--model') + 1]).toBe(selectedModel);
+    const config = JSON.parse(call.environment.config);
+    expect(config.model).toBe(selectedModel);
+    expect(config.small_model).toBe(selectedModel);
+    expect(config.agent['obversa-step'].model).toBe(selectedModel);
+    expect(call.environment.home).toBe(personHome);
+    expect(call.environment.dataHome).toBe(dataHome);
+    expect(call.environment.auth).toBe('');
+    expect(call.openrouterAuth).toEqual({
+      environmentKey: authSource === 'environment',
+      storedKey: authSource === 'stored-login',
+    });
+    expect(basename(call.environment.configHome)).toMatch(/^obversa-opencode-config-/);
+    expect(existsSync(call.environment.configHome)).toBe(false);
+    if (authSource === 'stored-login') expect(readFileSync(loginPath, 'utf8')).toBe(login);
+  });
+
   it('refuses a built family that disagrees with the model the request names', async () => {
     const engine = new OpenCodeCliEngine({
       ...options(executable()),
@@ -1818,40 +1861,43 @@ describe('OpenCode CLI adapter', () => {
     expect(error).toMatchObject({ kind: 'rate-limit', resetAt: 1_777_777_999_000 });
   });
 
-  it('passes the public engine conformance kit', async () => {
+  it.each([
+    ['fixture-provider/fixture-model', 'fixture-provider', 'fixture'],
+    ['openrouter/anthropic/claude-sonnet-4.5', 'openrouter', 'claude'],
+  ])('passes the public engine conformance kit for %s', async (selectedModel, provider, modelFamily) => {
     const bin = executable();
     const calls = join(temporaryDirectory('opencode-workspace-'), 'calls.jsonl');
     const selected = (capabilities: string[]) => engineSelection({
-      adapter: 'opencode-cli', adapterVersion: '1.18.23', provider: 'fixture-provider', modelFamily: 'fixture',
-      model: 'fixture-provider/fixture-model', executable: bin, capabilities,
+      adapter: 'opencode-cli', adapterVersion: '1.18.23', provider, modelFamily,
+      model: selectedModel, executable: bin, capabilities,
     });
     const report = await runEngineConformance({
       identityFromModel: true,
-      request: request({ tools: ['read'], allowedTools: ['Read'] }),
+      request: request({ model: selectedModel, tools: ['read'], allowedTools: ['Read'] }),
       requested: {
         adapter: 'opencode-cli',
         adapterVersion: '1.18.23',
-        provider: 'fixture-provider',
-        modelFamily: 'fixture',
-        model: 'fixture-provider/fixture-model',
+        provider,
+        modelFamily,
+        model: selectedModel,
         executable: bin,
         capabilities: ['read'],
       },
       effective: {
         adapter: 'opencode-cli',
         adapterVersion: '1.18.23',
-        provider: 'fixture-provider',
-        modelFamily: 'fixture',
-        model: 'fixture-provider/fixture-model',
+        provider,
+        modelFamily,
+        model: selectedModel,
         executable: bin,
         capabilities: ['read'],
       },
       parseStructuredResult,
       workspace: {
         modes: {
-          none: { request: request({ tools: [], allowedTools: [] }), outcome: 'supported', requested: selected([]), effective: selected([]) },
-          read: { request: request({ tools: ['read'], allowedTools: ['Read'] }), outcome: 'supported' },
-          write: { request: request({ tools: ['read', 'edit'], allowedTools: ['Read', 'Edit'] }), outcome: 'supported', requested: selected(['read', 'edit']), effective: selected(['read', 'edit']) },
+          none: { request: request({ model: selectedModel, tools: [], allowedTools: [] }), outcome: 'supported', requested: selected([]), effective: selected([]) },
+          read: { request: request({ model: selectedModel, tools: ['read'], allowedTools: ['Read'] }), outcome: 'supported' },
+          write: { request: request({ model: selectedModel, tools: ['read', 'edit'], allowedTools: ['Read', 'Edit'] }), outcome: 'supported', requested: selected(['read', 'edit']), effective: selected(['read', 'edit']) },
         },
         observe() {
           const models = readFileSync(calls, 'utf8').split('\n').filter(Boolean)
@@ -1879,7 +1925,7 @@ describe('OpenCode CLI adapter', () => {
           : bin;
         // The engine under test reports the identity the shared derivation reads
         // from the model it was given, which is what the kit's identity case checks.
-        const derived = modelIdentity('fixture-provider/fixture-model');
+        const derived = modelIdentity(selectedModel);
         return new OpenCodeCliEngine({
           ...options(binForScenario),
           identity: { provider: derived.provider ?? null, modelFamily: derived.modelFamily },

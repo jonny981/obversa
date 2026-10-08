@@ -1,11 +1,15 @@
 # @obversa/notify-webhook
 
-`@obversa/notify-webhook` tells somebody what a run is doing. It turns the
-run's own events into one message each and posts them to a URL you supply.
+`@obversa/notify-webhook` posts a run's progress to your team's channel. It
+turns the run's own events into one message each and posts them to the
+incoming webhook URL you supply.
 
-The body carries a `text` field, which is the field a Slack, Discord or Teams
-incoming webhook renders, so those three need no code of their own. Everything
-else in the body is structured, for a relay that wants the parts.
+The body carries a `text` field, which Slack and Mattermost incoming
+webhooks show with no code of their own. Discord shows it on the channel's
+webhook URL with `/slack` at the end. For Microsoft Teams, use a workflow from
+Teams' Workflows app that posts the body's `text` to the channel. For Google
+Chat, use a relay that posts the `text` to the space's incoming webhook.
+Everything else in the body is structured, for a relay that wants the parts.
 
 ## Install
 
@@ -115,8 +119,8 @@ than letting them overtake it.
 ## Example
 
 [`examples/notify-webhook.ts`](../../examples/notify-webhook.ts) runs a small
-graph offline whose review fails the draft once, and prints what a channel
-would have shown:
+graph whose review fails the draft once, and prints what a channel would have
+shown:
 
 ```bash
 pnpm example:notify-webhook

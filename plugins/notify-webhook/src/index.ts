@@ -5,8 +5,8 @@
  * finished, that a review sent work back and why, that it is waiting for a
  * person, and how it ended.
  *
- * The body carries a `text` field, which is what a Slack, Discord or Teams
- * incoming webhook renders, so those three work with no code of their own.
+ * The body carries a `text` field, which Slack and Mattermost incoming
+ * webhooks show with no code of their own.
  * Everything else in the body is structured, for a relay that wants the parts.
  *
  * Two messages carry the information rather than a pointer to it: the paused
@@ -82,8 +82,8 @@ export type MessageEvent =
 /** One posted message. */
 export interface WebhookMessage {
   /**
-   * The one-line summary. Slack, Discord and Teams incoming webhooks all
-   * render this field, so a message reads correctly in any of them.
+   * The one-line summary. Slack and Mattermost incoming webhooks show this
+   * field as the message.
    */
   text: string;
   /** Which moment this is, for a relay that routes on it. */

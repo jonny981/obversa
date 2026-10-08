@@ -55,7 +55,7 @@ describe('@obversa/engine-opencode-cli', () => {
   });
 
   it('derives the seat identity through the one function every multi-model harness shares', () => {
-    for (const model of ['anthropic/claude-sonnet-4-5', 'openai/GPT-5.6-luna', 'opencode/big-pickle']) {
+    for (const model of ['anthropic/claude-sonnet-4-5', 'openai/GPT-5.6-luna', 'opencode/big-pickle', 'openrouter/anthropic/claude-sonnet-4.5']) {
       const seat = opencode(model, { executable: '/usr/bin/false' });
       expect(seat.identity).toMatchObject(modelIdentity(model));
     }
@@ -69,6 +69,16 @@ describe('@obversa/engine-opencode-cli', () => {
     expect(seat.identity).toMatchObject({ provider: 'openai', modelFamily: 'gpt' });
     expect(seat.identity).toMatchObject(modelIdentity('OpenAI/GPT-5.6-luna'));
     expect(seat.identity.model).toBe('OpenAI/GPT-5.6-luna');
+  });
+
+  it.each([
+    'openrouter/openrouter/auto',
+    'openrouter//claude-sonnet-4.5',
+    'openrouter/anthropic/',
+    'openrouter/anthropic/claude/extra',
+  ])('refuses malformed or automatic gateway model %j', (model) => {
+    expect(() => opencode(model, { executable: '/usr/bin/false' }))
+      .toThrow(EngineError);
   });
 
   it('refuses a model with an empty first family segment with the shared invalid-config error', () => {

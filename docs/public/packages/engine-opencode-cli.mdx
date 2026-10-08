@@ -44,6 +44,24 @@ Included in `@obversa/obversa`.
 - Any model OpenCode runs, free models such as `opencode/big-pickle`
   included. [Free models](#free-models) says what they cost.
 
+## OpenRouter
+
+Use `openrouter/<vendor>/<model>` for a model served through OpenRouter.
+For example, pass `openrouter/anthropic/claude-sonnet-4.5` to
+`opencode(model, { executable })` in [Quickstart](#quickstart).
+Keep the model name exactly as [OpenRouter lists it](https://openrouter.ai/models).
+
+Run `opencode auth login` and select OpenRouter, or set
+`OPENROUTER_API_KEY` in the environment where you run the workflow.
+Clean mode keeps the data folder that holds your OpenCode login.
+It also passes your API key to the child process.
+
+The record names provider `openrouter` and family `claude` for that example.
+A Claude model through OpenRouter still counts as Claude when a review
+requires different model families.
+The plugin refuses routers such as `openrouter/openrouter/auto` because
+OpenRouter chooses the model, so the seat cannot declare its family.
+
 ## Free models
 
 OpenCode's free models refuse any run whose config turns a tool off or

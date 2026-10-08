@@ -1,13 +1,17 @@
 ---
 title: "Webhook Notifications"
-description: "@obversa/notify-webhook: one message per interesting run event, posted to a URL you supply."
+description: "@obversa/notify-webhook: a run's progress and its questions, posted to your team's channel through an incoming webhook."
 ---
 
-`@obversa/notify-webhook` tells somebody what a run is doing without them
-watching it: it turns the run's own events into one message each and posts
-them to a URL you supply. Each body has a `text` field, so a Slack, Discord
-or Teams incoming webhook shows it with no code of your own; the rest of
-the body is structured, for a relay that wants the parts.
+`@obversa/notify-webhook` posts a run's progress to your team's channel, so
+nobody has to watch the run. It turns the run's own events into one message
+each and posts them to the incoming webhook URL you supply. The channel sees
+the run start, each step finish, work go back with the reviewer's reason, a
+question wait for a person, and the run end.
+
+Each body has a `text` field. Slack and Mattermost incoming webhooks show
+it with no code of your own. The rest of the body is
+structured, for a relay that wants the parts.
 
 ## Install
 
@@ -51,8 +55,9 @@ const result = await run(brief, { onEvent });
 await notifier.done();
 ```
 
-The example starts its own receiver in place of a channel and runs
-offline; in your own run, pass your incoming webhook's address as `url`.
+The example starts its own receiver in place of a channel and prints the
+messages it received. In your own run, pass your incoming webhook's address
+as `url`.
 Run it with `npx tsx notify-webhook.ts`:
 
 ```json Output
@@ -71,6 +76,30 @@ Run it with `npx tsx notify-webhook.ts`:
 }
 ```
 
+## Post to your team's Slack channel
+
+1. In Slack, create an app for your workspace, turn on **Incoming
+   Webhooks**, and select **Add New Webhook to Workspace**.
+2. Select the channel your team watches, for example `#releases`, and allow
+   the app to post there.
+3. Copy the webhook URL. Anyone who has the URL can post to that channel, so
+   keep it in your secret store, not in the workflow file.
+4. Pass the URL as `url` when the run starts, for example from
+   `process.env.SLACK_WEBHOOK_URL`.
+
+Slack's guide has the same steps with screenshots:
+[Sending messages using incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/).
+
+## Other channels
+
+| Channel | What to pass as `url` |
+| --- | --- |
+| Google Chat | A relay that posts the body's `text` to the space's incoming webhook URL. Google's webhook guide sends a body with `text` alone. |
+| Mattermost | The channel's incoming webhook URL. |
+| Discord | The channel's webhook URL with `/slack` at the end. Discord reads `text` only on that address. |
+| Microsoft Teams | The URL of a workflow made in Teams' Workflows app. Start it with the **When a Teams webhook request is received** trigger, and post the body's `text` to the channel. |
+| Email, tickets, on-call | The webhook trigger of your automation service. It reads the structured fields and sends them on. |
+
 ## Read what it sends
 
 Six moments, one message each:
@@ -86,7 +115,9 @@ Six moments, one message each:
 
 The paused message names [the run's page](/driving/monitor) when the run
 serves one, so the person can open it and answer, and asks the person's own
-question when an `approval()` gate carries one. The sent-back message
+question when an `approval()` gate carries one. The page is served on the
+machine that runs the workflow, at `127.0.0.1`, so a colleague on another
+computer sees the question in the channel but can't open the link. The sent-back message
 carries what the reviewer said; in a graph it names the stage the work went
 to, and a loop names no stage because it sends work to its own body. A
 stage that's waiting for a person hasn't finished, so it's reported as
@@ -122,14 +153,14 @@ message.
 
 ```ts examples/notify-webhook.ts
 /**
- * Tell somebody what the run is doing, without watching it.
+ * Post a run's progress to the team's channel, so nobody has to watch it.
  *
  * `@obversa/notify-webhook` is an `onEvent` consumer: it turns a run's own
  * events into one message each and posts them to a URL you supply. The body
- * carries a `text` field, which is the field a Slack, Discord or Teams
- * incoming webhook renders, so those three need no code of their own.
+ * carries a `text` field, which Slack and Mattermost incoming webhooks show
+ * with no code of their own.
  *
- * This example runs a small graph offline whose review returns the work once,
+ * This example runs a small graph whose review returns the work once,
  * so the interesting messages all appear: the run started, a stage finished,
  * a reviewer returned work with the reason, and the run finished. The URL is
  * not written down here either: the example starts its own receiver on a port
