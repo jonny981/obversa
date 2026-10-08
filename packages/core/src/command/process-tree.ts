@@ -577,12 +577,29 @@ export async function stopOwnedProcessTree(
   const graceMs = nonNegativeDuration(request.graceMs, 'graceMs');
   const ownerId = process.platform === 'linux' ? request.ownerId : undefined;
   let observed = request.observed ?? [];
-  const discoverOwner = async (): Promise<void> => {
+  // On Linux every process of this attempt carries the attempt's exact
+  // marker, so a detached helper whose parent has already exited is still
+  // found, though no parent, group or earlier sample leads to it.
+  const discover = async (): Promise<void> => {
     if (ownerId !== undefined) {
       observed = mergeObserved(observed, await inspectOwnerMarkedProcesses(ownerId));
     }
+    if (process.platform === 'linux') {
+      observed = mergeObserved(observed, await inspectAttemptMarkedProcesses(request.attemptId));
+    }
   };
-  await discoverOwner();
+  // A table can show nothing owned and still miss a helper forked just
+  // before its parent exited, after the discovery that came before the
+  // table. A second discovery after that table finds it, so nothing is
+  // reported stopped on one look.
+  const inspectRemaining = async (): Promise<readonly ProcessIdentity[]> => {
+    await discover();
+    const remaining = await inspectOwnedProcessTree({ ...request, observed });
+    if (remaining.length > 0 || process.platform !== 'linux') return remaining;
+    await discover();
+    return await inspectOwnedProcessTree({ ...request, observed });
+  };
+  await discover();
   if (process.platform === 'win32') {
     await terminateWindowsTree(request.rootPid, false);
     observed = mergeObserved(
@@ -598,31 +615,28 @@ export async function stopOwnedProcessTree(
 
   const gracefulDeadline = Date.now() + graceMs;
   while (Date.now() < gracefulDeadline) {
-    await discoverOwner();
-    const remaining = await inspectOwnedProcessTree({ ...request, observed });
+    const remaining = await inspectRemaining();
     if (remaining.length === 0 && ownerId === undefined) return Object.freeze([]);
     observed = mergeObserved(observed, remaining);
     await delay(Math.min(POLL_MS, Math.max(1, gracefulDeadline - Date.now())));
   }
 
   await terminateWindowsTree(request.rootPid, true);
-  await discoverOwner();
+  await discover();
   observed = mergeObserved(
     observed,
     await signalMatching({ ...request, observed }, 'SIGKILL'),
   );
   const forceDeadline = Date.now() + FORCE_KILL_WAIT_MS;
   while (Date.now() < forceDeadline) {
-    await discoverOwner();
-    const remaining = await inspectOwnedProcessTree({ ...request, observed });
+    const remaining = await inspectRemaining();
     if (remaining.length === 0) return Object.freeze([]);
     observed = mergeObserved(observed, remaining);
-    if (ownerId !== undefined) {
-      await signalMatching({ ...request, observed }, 'SIGKILL');
-    }
+    // A process found only now has had no signal yet.
+    await signalMatching({ ...request, observed }, 'SIGKILL');
     await delay(POLL_MS);
   }
 
-  await discoverOwner();
+  await discover();
   return await inspectOwnedProcessTree({ ...request, observed });
 }
