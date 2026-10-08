@@ -19,6 +19,18 @@ to `ask`, so OpenCode turns down each call to it and the tool doesn't run.
 - Any model OpenCode runs, free models such as `opencode/big-pickle`
   included. [Free models](#free-models) says what they cost.
 
+## OpenRouter
+
+Pass a named OpenRouter model to the seat helper, for example
+`opencode('openrouter/anthropic/claude-sonnet-4.5', { executable })`.
+Run `opencode auth login` and select OpenRouter, or set
+`OPENROUTER_API_KEY` in your environment.
+Clean mode preserves access to your login and API key.
+
+That model has provider `openrouter` and family `claude`.
+The plugin refuses `openrouter/openrouter/auto` because OpenRouter
+chooses the model, so the seat cannot declare its family.
+
 ## Free models
 
 OpenCode's free models refuse any run whose config turns a tool off or
