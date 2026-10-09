@@ -315,7 +315,16 @@ try {
     'src/legacy.mjs': 'export const legacy = true;\n',
     'approve.json': `${JSON.stringify({ approved: true, note: 'approved from approve.json' })}\n`,
   }, { ...featureScript, claude: [{ ...featureScript.claude[0], deletes: ['src/legacy.mjs'] }, ...featureScript.claude.slice(1)] });
-  assert.equal(printed(runExample(recorded, 'feature-delivery').stdout).status, 'pass');
+  const recordedOutcome = printed(runExample(recorded, 'feature-delivery').stdout);
+  if (recordedOutcome.status !== 'pass') {
+    console.error(JSON.stringify({
+      scenario: 'approve-json',
+      outcome: recordedOutcome,
+      events: readRecord(recorded.dir, 'feature-delivery').slice(-16),
+      approvalFile: readFileSync(join(recorded.dir, 'approve.json'), 'utf8'),
+    }, null, 2));
+  }
+  assert.equal(recordedOutcome.status, 'pass');
   const recordedSteps = await assertSevenSteps(recorded, true);
   assert.deepEqual(recordedSteps.approval, { approved: true, note: 'approved from approve.json' });
   assert.ok(!existsSync(join(recorded.dir, 'src/legacy.mjs')), 'the deletion landed');
