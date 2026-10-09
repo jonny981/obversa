@@ -12,6 +12,18 @@ import {
 import { startSupervisedRun, type SupervisedRunHandle } from '../src/index.js';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import { cleanupRepos, tmpRepo } from './git-helpers.js';
+import { teardownEvidence, type CommandFailure } from './teardown-evidence.js';
+
+const commandEvidence = vi.hoisted(() => ({ failures: [] as CommandFailure[] }));
+vi.mock('@obversa/core/command', async (importOriginal) => {
+  const command = await importOriginal<typeof import('@obversa/core/command')>();
+  const { captureCommandFailure } = await import('./teardown-evidence.js');
+  return {
+    ...command,
+    runOwnedCommand: (...args: Parameters<typeof command.runOwnedCommand>) =>
+      captureCommandFailure(command.runOwnedCommand, args, commandEvidence.failures),
+  };
+});
 
 // Real work: these tests create temporary Git repositories and write files
 // to disk, so this file declares its own time limit; the suite default is a
@@ -29,6 +41,7 @@ const policy = {
 
 afterEach(async () => {
   await Promise.allSettled(handles.splice(0).map((handle) => handle.stop()));
+  commandEvidence.failures.length = 0;
   cleanupRepos();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -83,7 +96,8 @@ describe.each(['dag', 'convergence'] as const)('supervised %s crash recovery', (
     });
     handles.push(handle);
     const result = await handle.done;
-    expect(result, JSON.stringify(result)).toMatchObject({ kind: boundary === 3 ? 'pause' : 'complete' });
+    expect(result, await teardownEvidence(result, { storage, definition: { runId: 'crash' } }, commandEvidence.failures)
+      || JSON.stringify(result)).toMatchObject({ kind: boundary === 3 ? 'pause' : 'complete' });
     const status = await handle.status();
     expect(status.restartCount).toBe(1);
     expect(status.workerAlive).toBe(false);

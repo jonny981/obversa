@@ -15,10 +15,18 @@ import * as runner from '../src/index.js';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
 import { hostModuleDigest, readSupervision, supervisionWriter, type SupervisedHostRecord } from '../src/supervised-record.js';
 import { tmpRepo, cleanupRepos } from './git-helpers.js';
+import { teardownEvidence, type CommandFailure } from './teardown-evidence.js';
+
+const commandEvidence = vi.hoisted(() => ({ failures: [] as CommandFailure[] }));
 
 vi.mock('@obversa/core/command', async (importOriginal) => {
   const command = await importOriginal<typeof import('@obversa/core/command')>();
-  return { ...command, runOwnedCommand: vi.fn(command.runOwnedCommand) };
+  const { captureCommandFailure } = await import('./teardown-evidence.js');
+  return {
+    ...command,
+    runOwnedCommand: vi.fn((...args: Parameters<typeof command.runOwnedCommand>) =>
+      captureCommandFailure(command.runOwnedCommand, args, commandEvidence.failures)),
+  };
 });
 
 vi.mock('@obversa/runtime', async (importOriginal) => {
@@ -273,6 +281,7 @@ async function assertProbePauseOwnership(options: runner.SupervisedRunOptions, h
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.allSettled(handles.splice(0).map((handle) => handle.stop()));
+  commandEvidence.failures.length = 0;
   cleanupRepos();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -376,7 +385,8 @@ describe('supervised local runs', () => {
       `node-${index}`, { node: `node-${index}`, value: 'x'.repeat(15_000) },
     ])) };
     expect(Buffer.byteLength(JSON.stringify(output))).toBeGreaterThan(128_000);
-    expect(result.kind, JSON.stringify(result.kind === 'fail' ? result : { kind: result.kind })).toBe('complete');
+    expect(result.kind, await teardownEvidence(result, options, commandEvidence.failures)
+      || JSON.stringify(result.kind === 'fail' ? result : { kind: result.kind })).toBe('complete');
     expect(result).toEqual({ kind: 'complete', output });
     expect((await handle.status()).phase).toBe('completed');
     const terminal = (await readSupervision(storage, 'fixture'))
@@ -434,7 +444,8 @@ describe('supervised local runs', () => {
       ...options, definition: { ...options.definition, resolvedInputs: { enginePartBytes: 200_000, resultBytes: 70_000 } },
     });
     const result = await handle.done;
-    expect(result.kind, JSON.stringify(result.kind === 'fail' ? result : { kind: result.kind })).toBe('complete');
+    expect(result.kind, await teardownEvidence(result, options, commandEvidence.failures)
+      || JSON.stringify(result.kind === 'fail' ? result : { kind: result.kind })).toBe('complete');
     expect(result).toEqual({ kind: 'complete', output: { nodes: {
       first: { node: 'first', value: 'z'.repeat(70_000) },
       last: { node: 'last', value: 'z'.repeat(70_000) },
@@ -1932,7 +1943,21 @@ process.stdout.write(JSON.stringify(await handle.done));
     const signals = vi.spyOn(process, 'kill').mockImplementation((pid, signal) =>
       pid === childPid && signal !== 0 ? true : kill(pid, signal));
     try {
-      await expect(handle.stop()).resolves.toMatchObject({ kind: 'fail', code: 'TEARDOWN_INCOMPLETE' });
+      const stopped = await handle.stop();
+      const diagnostic = await teardownEvidence(stopped, options, commandEvidence.failures);
+      expect(stopped, diagnostic).toMatchObject({ kind: 'fail', code: 'TEARDOWN_INCOMPLETE' });
+      const evidence = JSON.parse(diagnostic.slice(diagnostic.indexOf('\n') + 1));
+      expect(evidence.commandFailures.some((failure: CommandFailure) =>
+        failure.code === 'TEARDOWN_INCOMPLETE'
+        && failure.remainingProcesses.some((identity) => identity.pid === childPid))).toBe(true);
+      expect(evidence.processes).toContainEqual(expect.objectContaining({ pid: childPid }));
+      expect(evidence.processes).toContainEqual(expect.objectContaining({ pid: evidence.lastKnownWorker.pid }));
+      if (process.platform === 'linux') {
+        const child = evidence.processes.find((item: { pid: number }) => item.pid === childPid);
+        expect(child.command).toContain('setInterval');
+        expect(child.markers).toContain(`OBVERSA_ATTEMPT_ID=${evidence.commandFailures[0].attemptId}`);
+      }
+      expect(evidence.events.at(-1)).toMatchObject({ type: 'runner:failed' });
       const status = await handle.status();
       expect(status).toMatchObject({ phase: 'failed', cleanupVerified: false, leaseRetained: true, workerAlive: false });
       expect(status.processes.some((item) => item.pid === childPid)).toBe(true);
