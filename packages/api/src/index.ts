@@ -12,6 +12,7 @@ export * from './error.js';
 export type { Environment, EnvHandle, EnvironmentWorkspace } from './environment.js';
 export * from './result.js';
 export * from './memory-types.js';
+export * from './memory-pick.js';
 export * from './graph-contract.js';
 export * from './graph-commands.js';
 export * from './graph-type.js';
