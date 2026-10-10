@@ -164,6 +164,7 @@ export const stageBranches = {
   F214: 'fix/stop-finds-marked-survivors',
   F220: 'feat/engine-openai-decisions',
   F219: 'docs/notify-for-teams',
+  F222: 'test/threshold-panel-diagnostic',
   F215: 'feat/opencode-openrouter-models',
   F228: 'test/supervised-teardown-witness',
   F229: 'test/approval-file-witness',

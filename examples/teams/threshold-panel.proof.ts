@@ -79,16 +79,24 @@ try {
   assert.equal(printed.status, 'pass');
 
   const calls = (await readFile(callsLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string; writes: Record<string, string> });
+  const tail = (text: string) => text.split('\n').slice(-40).join('\n');
+  const diagnostic = () => `
+calls log (${calls.length} lines): ${JSON.stringify(calls.map((c) => c.role))}
+review: ${JSON.stringify(printed.data?.review)}
+stdout tail:
+${tail(run.stdout)}
+stderr tail:
+${tail(run.stderr)}`;
   const implementerCalls = calls.filter((call) => call.role === 'claude');
-  assert.equal(implementerCalls.length, 2, 'the implementer runs once and repairs once');
+  assert.equal(implementerCalls.length, 2, `the implementer runs once and repairs once${diagnostic()}`);
   assert.match(implementerCalls[0]!.writes['src/double.mjs'] ?? '', /result = 6/, 'the first draft fails the test');
   assert.match(implementerCalls[1]!.writes['src/double.mjs'] ?? '', /result = 7/, 'the repair passes the test');
-  assert.equal(calls.filter((call) => call.role === 'codex').length, 1, 'the first reviewer ran');
-  assert.equal(calls.filter((call) => call.role === 'opencode').length, 1, 'the second reviewer ran');
+  assert.equal(calls.filter((call) => call.role === 'codex').length, 1, `the first reviewer ran${diagnostic()}`);
+  assert.equal(calls.filter((call) => call.role === 'opencode').length, 1, `the second reviewer ran${diagnostic()}`);
   // Both seats must clear, not just enough of them: a reviewer that fails
   // before it answers (a stream the adapter cannot read) would otherwise
   // hide behind the threshold.
-  assert.equal(printed.data?.review?.data?.passed, 2, `both reviewers cleared: ${JSON.stringify(printed.data?.review)}`);
+  assert.equal(printed.data?.review?.data?.passed, 2, `both reviewers cleared: ${JSON.stringify(printed.data?.review)}${diagnostic()}`);
 
   assert.match(await readFile(join(workspace, 'src/double.mjs'), 'utf8'), /result = 7/);
   assert.ok((await readFile(join(workspace, 'reviews/review-1.json'), 'utf8')).includes('"pass"'));
