@@ -171,6 +171,7 @@ export const stageBranches = {
   F223: 'feat/memory-pick',
   F233: 'feat/rdc-sources-markdown',
   F226: 'feat/node-refine',
+  F232: 'fix/consumer-red-run',
   F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',
