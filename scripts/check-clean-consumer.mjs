@@ -1109,7 +1109,7 @@ async function main() {
       killSignal: 'SIGKILL',
     });
     assert.equal(redRun.status, 1, redRun.stdout + redRun.stderr);
-    assert.match(redRun.stderr, /"status": "fail"/, 'an unrepaired line must not pass');
+    assert.match(redRun.stderr, /"status": "fail"/, `an unrepaired line must not pass\n${(redRun.stdout + redRun.stderr).slice(-8000)}`);
 
     const compiledGraph = JSON.parse(
       run(process.execPath, ['dist/custom-graph.js'], { cwd: consumerDirectory }),
