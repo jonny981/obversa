@@ -157,12 +157,17 @@ async function until<T>(read: () => T | undefined | Promise<T | undefined>): Pro
  */
 function productDecisionReview(prompts: string[], interaction?: InteractionBinding) {
   let judged = 0;
-  const judgeEngine = new MockEngine(() => JSON.stringify({ stop_reason: { choice: judged++ === 0 ? 'product_decision' : 'holds' } }));
+  const judgeEngine = new MockEngine(() => JSON.stringify({
+    holds: { noul: 0.9 },
+    worth_doing: { noul: 0.9 },
+    worth_another_round: { noul: 0.9 },
+    stop_reason: { choice: judged++ === 0 ? 'product_decision' : 'holds' },
+  }));
   return dag({
     name: 'product-review',
     nodes: {
       write: {
-        refine: review({ judge: judge({ engine: judgeEngine, identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge-mock', model: 'judge-mock', tools: [] } }, interaction ? { interaction } : {}) }),
+        refine: review({ judge: judge({ engine: judgeEngine, identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge-mock', model: 'judge-mock', tools: [] } }, interaction ? { interaction, perFinding: false } : { perFinding: false }) }),
         job: agentJob({
           label: 'write', model: 'writer-mock', prompt: 'Write the page.', consumeFeedback: true,
           engine: new MockEngine((request) => { prompts.push(request.prompt); return 'wrote the page'; }),

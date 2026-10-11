@@ -47,6 +47,14 @@ const CANDIDATE = 'Reply with the number only.';
 const TUNING = ['2 + 3', '4 + 4'];
 const HELD_OUT = ['10 + 7'];
 
+/** A complete reply to the round questions: every probability a clear yes. */
+const round = (choice: string): Record<string, unknown> => ({
+  holds: { noul: 0.9 },
+  worth_doing: { noul: 0.9 },
+  worth_another_round: { noul: 0.9 },
+  stop_reason: { choice },
+});
+
 const repos: string[] = [];
 afterEach(async () => {
   for (const repo of repos.splice(0)) await rm(repo, { recursive: true, force: true });
@@ -948,7 +956,7 @@ describe('climbWorkflow', () => {
       stages: [stage('write', {
         agent: 'write', writes: 'note.md', desc, reviewedBy: 'review',
         ...(refine === undefined ? {} : {
-          refine: refine === 2 ? 2 : judge(seat('judge', [], () => ({ stop_reason: { choice: 'continue' } })), { cap: 2, perFinding: false }),
+          refine: refine === 2 ? 2 : judge(seat('judge', [], () => (round('continue'))), { cap: 2, perFinding: false }),
         }),
       })],
     });
@@ -1225,7 +1233,7 @@ describe('climbWorkflow', () => {
           execFileSync('sh', ['-c', `echo draft >> ${JSON.stringify(join(cwd, note))}`]);
           return { status: 'pass', summary: 'wrote' };
         });
-        const judged = (name: string) => judge(seat(name, [], () => ({ stop_reason: { choice: 'continue' } })), { cap: 2, perFinding: false });
+        const judged = (name: string) => judge(seat(name, [], () => (round('continue'))), { cap: 2, perFinding: false });
         // The baseline's first stage sends its first draft back; the candidate's second stage does.
         const { report } = await climbIn(file, change, versions(text('two'), (candidate) => workflow('note', {
           brief: 'Write one.md, then two.md.',
@@ -1476,7 +1484,7 @@ describe('climbWorkflow', () => {
         },
         stages: [stage('write', {
           agent: 'write', writes: 'note.md', desc: 'Write the note.', reviewedBy: 'review',
-          refine: judge(seat('judge', [], () => ({ stop_reason: { choice: 'stuck' } })), { cap: 2, perFinding: false }),
+          refine: judge(seat('judge', [], () => (round('not_converging'))), { cap: 2, perFinding: false }),
         })],
       });
     };
@@ -1508,7 +1516,7 @@ describe('climbWorkflow', () => {
         stages: [stage('write', {
           agent: 'write', writes: 'note.md', desc: 'Write the note.', reviewedBy: 'review',
           // The judge sends the first round back, then stops the second.
-          refine: judge(seat('judge', [], () => ({ stop_reason: { choice: (decisions += 1) === 1 ? 'continue' : 'stuck' } })), { cap: 3, perFinding: false }),
+          refine: judge(seat('judge', [], () => (round((decisions += 1) === 1 ? 'continue' : 'not_converging'))), { cap: 3, perFinding: false }),
         })],
       });
     };

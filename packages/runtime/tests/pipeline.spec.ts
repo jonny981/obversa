@@ -43,6 +43,14 @@ const pass = (rec: string[], name: string) =>
     rec.push(name);
     return { status: 'pass' as const };
   });
+
+/** A complete reply to the round questions: every probability a clear yes. */
+const round = (choice: string): Record<string, unknown> => ({
+  holds: { noul: 0.9 },
+  worth_doing: { noul: 0.9 },
+  worth_another_round: { noul: 0.9 },
+  stop_reason: { choice },
+});
 const fail = (rec: string[], name: string) =>
   fnJob(name, async () => {
     rec.push(name);
@@ -301,7 +309,7 @@ describe('pipeline', () => {
     }));
     const judgeEngine = new MockEngine((req) => {
       judgeCalls.push(req);
-      return JSON.stringify({ stop_reason: { choice: 'holds' } });
+      return JSON.stringify(round('holds'));
     });
 
     const { outcome } = await run(
@@ -313,7 +321,7 @@ describe('pipeline', () => {
           file: 'page.md',
           refine: review({
             reviewers: [seat(reviewer, 'reviewer-mock')],
-            judge: judge(seat(judgeEngine, 'judge-mock'), { cap: 2 }),
+            judge: judge(seat(judgeEngine, 'judge-mock'), { cap: 2, perFinding: false }),
           }),
         },
       ]),

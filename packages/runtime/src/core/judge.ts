@@ -13,8 +13,12 @@ import { join } from 'node:path';
 
 import { jobMeta } from './describe.js';
 import { treeChanges, treeDiff, workTree, type TreeChange } from './git.js';
+import { LoopError } from './errors.js';
+import { resolveEnv } from './env-overlay.js';
+import type { AgentResult } from '../engines/engine.js';
 import { agentJob } from './job.js';
-import { DEFAULT_INTERACTION, jsonSnapshot, requestInteraction, type InteractionBinding, type InteractionResponse } from './interaction.js';
+import { scrubbed } from './redact.js';
+import { DEFAULT_INTERACTION, interactionIdentity, jsonSnapshot, requestInteraction, type InteractionBinding, type InteractionResponse } from './interaction.js';
 import type { Outcome } from './types.js';
 import { normalizeFeedbackSeverity, revisionRequest } from './feedback.js';
 import type {
@@ -28,6 +32,7 @@ import type {
   JudgeCheck,
   JudgeQuestions,
   JobContext,
+  JudgePacket,
   JudgeQuestion,
   JudgeRound,
   JudgeWork,
@@ -39,6 +44,7 @@ export type {
   Judge,
   JudgeAnswer,
   JudgeCheck,
+  JudgePacket,
   JudgeQuestion,
   JudgeQuestions,
   JudgeRound,
@@ -335,48 +341,6 @@ export function checkResult(name: string, job: Job, outcome: Outcome): JudgeChec
 /** How many characters, as JSON, a judge reads when the run does not say. */
 export const DEFAULT_JUDGE_CONTEXT_LIMIT = 50_000;
 
-/** What a judge reads, in the order it reads it. */
-export interface JudgePacket {
-  /** What the work is for. */
-  readonly why: {
-    readonly brief?: string;
-    readonly useCase?: string;
-    readonly desc?: string;
-    readonly gate?: string;
-    /** A person's answers to the judge's earlier product decisions. */
-    readonly productFeedback?: readonly InteractionResponse[];
-  };
-  /** The change under review. */
-  readonly what: {
-    /** The files changed since the work began, in a git workspace. */
-    readonly changedFiles?: readonly TreeChange[];
-    /** The diff around each file and line a finding cites. */
-    readonly diffs?: readonly { readonly file: string; readonly line?: number; readonly diff: string }[];
-    readonly file?: string;
-    readonly draft?: string;
-  };
-  /** This round's evidence. */
-  readonly how: {
-    readonly checks?: readonly JudgeCheck[];
-    readonly goal?: readonly GoalRequirement[];
-    /** This round's findings, by the id each one's question uses. */
-    readonly findings: readonly (FeedbackFinding & { readonly id: string })[];
-  };
-  /** Where the rounds stand. */
-  readonly when: {
-    readonly round: number;
-    readonly cap?: number;
-    readonly lastRound?: true;
-    readonly limit?: string;
-    readonly rounds: readonly unknown[];
-    readonly skipped?: readonly SkippedFinding[];
-    /** The files changed since the judge last read the work, in a git workspace. */
-    readonly changedSinceLastRound?: readonly TreeChange[];
-  };
-  /** What the size limit cut, when it cut anything. */
-  readonly cut?: readonly string[];
-}
-
 /** A word of a finding as a path, with a line when one follows it (`src/app.ts:42`, `Dockerfile:12`). */
 const CITED = /^(.+?)(?::(\d+)\b.*)?$/;
 
@@ -620,8 +584,8 @@ export interface JudgeDecision {
  * flat, so it is the answer that discriminates. A chosen `continue` runs
  * another round whatever the probability answers say. A clear yes or no from
  * `holds`, `worth_doing` or `worth_another_round` decides only when there is
- * no choice: a question set without `stop_reason`, or a reply that did not
- * parse. The cap is not checked here: `askJudge` turns a decision after
+ * no choice: a question set without `stop_reason`, or a `stop_reason`
+ * answer that is not a choice. The cap is not checked here: `askJudge` turns a decision after
  * the last review the cap allows into a stop. A block finding is decided
  * here like any other.
  *
@@ -653,11 +617,15 @@ export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>, fi
  * the round answer gives it. Otherwise any finding the judge acts on runs
  * another round, and a round with none ships as a pass, whatever the round
  * answer says: a chosen `not_converging` does not drop acted findings, and
- * it does not fail a round whose findings are all skipped. A finding the
- * judge did not answer, or answered with neither choice, follows the round
- * answer: it goes back when that answer runs another round, and is skipped
- * when that answer ships. When the judge answered no finding at all, the
- * round answer routes alone, with the same reason and rule as before.
+ * it does not fail a round whose findings are all skipped.
+ *
+ * `askJudge` checks every asked question is answered before it decides, so
+ * a call through it never reaches the fallbacks here. They stand for a
+ * caller deciding on answers it did not check — one read back from a
+ * record, say: a finding with no usable answer follows the round answer
+ * (it goes back when that answer runs another round, and is skipped when
+ * it ships), and answers naming no finding at all let the round answer
+ * route alone, with the same reason and rule as before.
  */
 function decideEachFinding(answers: Readonly<Record<string, JudgeAnswer>>, findingIds: readonly string[], round: JudgeDecision, questions?: JudgeQuestions): JudgeDecision {
   const findings = findingIds.map((id): FindingDecision => {
@@ -721,16 +689,24 @@ function roundLimit(state: JudgeState): string | undefined {
 /**
  * Ask the judge, and record its answer. Runs `cfg.seat` as a workspace-mode-
  * none agent turn over the packet `judgePacket` builds from `state` and over
- * `cfg.questions`, parses the reply as the judge engine's own
+ * the complete question set (`cfg.questions` plus the generated per-finding
+ * ones), parses the reply as the judge engine's own
  * `{ [question]: JudgeAnswer }` shape, and emits `refine:judge` with the
  * `target` it decides about, the round and the packet's size and cuts, so a
  * person reading the record sees what it answered and why. The packet's
  * `when` carries `limit`, a line about the round limit, when there is no cap
  * or this is the last round. When the judge decides
  * each finding, the questions also carry one per finding in
- * `state.latestFindings`. A reply that fails to parse becomes an empty
- * answers object, and `judgeDecision` reads that as no clear answer, which
- * runs another round.
+ * `state.latestFindings`.
+ *
+ * What the judge was sent is recorded first (`refine:judge-request`,
+ * every string scrubbed), so a call that never comes back still leaves the
+ * request. A call that ends in any status but pass, a reply that does not
+ * parse as an answers object, and a reply that leaves an asked question
+ * without a usable answer each end the judge step with a visible failure
+ * kept in `paused`: the engine's own error for a failed call, a validation
+ * error for a bad reply — never empty answers routed as `no clear answer`,
+ * never another build bought by a judge that did not decide.
  *
  * After the last review the cap allows (`state.lastRound`), only a stop
  * that lets the work stand passes, and it records the open findings; a
@@ -743,10 +719,21 @@ export async function askJudge(
   ctx: JobContext,
   path: readonly string[],
   target: string,
-): Promise<{ answers: Readonly<Record<string, JudgeAnswer>>; decision: JudgeDecision }> {
+): Promise<{ answers: Readonly<Record<string, JudgeAnswer>>; decision: JudgeDecision } | { paused: Outcome }> {
   const perFinding = cfg.perFinding && state.latestFindings.length > 0;
   const eachFinding = perFinding ? findingQuestions(state.latestFindings) : undefined;
   const packet = await judgePacket(state, ctx.workspace.dir, ctx.judgeContextLimit ?? DEFAULT_JUDGE_CONTEXT_LIMIT);
+  const questions: JudgeQuestions = eachFinding ? { ...cfg.questions, ...eachFinding } : cfg.questions;
+  let effective: AgentResult['effective'] | undefined;
+  const env = resolveEnv(ctx);
+  const keptQuestions = scrubbed(questions, env);
+  ctx.emit({
+    kind: 'refine:judge-request', ts: Date.now(), path: [...path], target, round: state.round,
+    // What a replay groups requests by: the questions asked and the
+    // options that shape the decision, not the run that asked them.
+    identity: interactionIdentity({ questions: keptQuestions, cap: cfg.cap, perFinding: cfg.perFinding }),
+    packet: scrubbed(packet, env), questions: keptQuestions, seat: cfg.seat.identity,
+  });
   const judgeJob = agentJob({
     label: 'refine:judge',
     engine: cfg.seat.engine,
@@ -754,23 +741,79 @@ export async function askJudge(
     workspaceMode: 'none',
     tools: [],
     leaf: true,
-    prompt: JSON.stringify({
-      state: packet,
-      questions: eachFinding ? { ...cfg.questions, ...eachFinding } : cfg.questions,
-    }),
+    onResult: (result) => { effective = result.effective; },
+    prompt: JSON.stringify({ state: packet, questions }),
   });
   // The skipped findings ride in the packet; the prompt stays the JSON above.
   const outcome = await judgeJob({ ...ctx, depth: ctx.depth + 1, path: [...path, 'refine-judge'], skippedFindings: undefined });
-  let answers: Record<string, JudgeAnswer> = {};
-  if (outcome.status === 'pass') {
-    try {
-      const parsed: unknown = JSON.parse(String(outcome.data ?? ''));
-      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        answers = parsed as Record<string, JudgeAnswer>;
-      }
-    } catch {
-      // Left empty: an unreadable answer routes as no clear answer, not a crash.
+  // A stopped judge step: the event keeps the original failure, the paused
+  // outcome carries it to the node.
+  const stopped = (error: LoopError, rule: string): { paused: Outcome } => {
+    ctx.emit({
+      kind: 'refine:judge', ts: Date.now(), path: [...path], target, round: state.round,
+      answers: {}, reason: error.message, route: 'stop', status: 'paused', rule,
+      failure: { code: error.code, message: error.message },
+      packet: { size: JSON.stringify(packet).length, ...(packet.cut ? { cut: packet.cut } : {}) },
+      ...(effective === undefined ? {} : { effective }),
+    });
+    return { paused: { status: 'paused', summary: error.message, error } };
+  };
+  if (outcome.status !== 'pass') {
+    return stopped(outcome.error ?? new LoopError({
+      code: 'ENGINE', phase: 'review', path: [...path],
+      message: outcome.summary ?? 'the judge call produced no usable result',
+    }), 'call failed');
+  }
+  let answers: Record<string, JudgeAnswer>;
+  try {
+    const parsed: unknown = JSON.parse(String(outcome.data ?? ''));
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('not an answers object');
     }
+    answers = parsed as Record<string, JudgeAnswer>;
+  } catch {
+    return stopped(new LoopError({
+      code: 'VALIDATION', phase: 'review', path: [...path],
+      message: 'the judge\'s reply did not parse as a JSON object of answers',
+    }), 'unreadable reply');
+  }
+  // The required answers are the questions the judge was asked: the round
+  // questions and the generated per-finding ones. Each must hold a usable
+  // answer for its type — a probability in [0,1] for a `noul`, one of the
+  // question's named choices for a `choice`, and for a `score` either the
+  // rating the engine reports (a finite `score`) or a probability per
+  // named criterion. A reply that misses one, or fills it with something
+  // the question does not ask for, is a failure, not a decision.
+  const inRange = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+  const answered = (key: string): boolean => {
+    const question = questions[key];
+    const answer = answers[key];
+    if (question === undefined || answer === null || typeof answer !== 'object') return false;
+    if (question.type === 'noul') return inRange(answer.noul ?? answer.probability);
+    if (question.type === 'choice') {
+      return typeof answer.choice === 'string' && Object.hasOwn(question.criteria, answer.choice);
+    }
+    if (typeof answer.score === 'number' && Number.isFinite(answer.score)) return true;
+    const given: unknown = answer.probabilities;
+    // The Decisions API lists one {label, probability} per level, and Jev
+    // keys the same probabilities by criterion: either maps each named
+    // criterion to a probability in [0,1].
+    if (Array.isArray(given)) {
+      return question.criteria.every((criterion) => given.some((entry) =>
+        entry !== null && typeof entry === 'object'
+        && (entry as { label?: unknown }).label === criterion
+        && inRange((entry as { probability?: unknown }).probability)));
+    }
+    return given !== null && typeof given === 'object'
+      && question.criteria.every((criterion) => inRange((given as Record<string, unknown>)[criterion]));
+  };
+  const missing = Object.keys(questions).filter((key) => !answered(key));
+  if (missing.length > 0) {
+    return stopped(new LoopError({
+      code: 'VALIDATION', phase: 'review', path: [...path],
+      message: `the judge's reply held no usable answer for ${missing.length} of the ${Object.keys(questions).length} questions it was asked: ${missing.join(', ')}`,
+    }), 'missing answers');
   }
   const decided = judgeDecision(answers, eachFinding ? Object.keys(eachFinding) : undefined, eachFinding);
   const decision: JudgeDecision = state.lastRound && decided.stop !== 'ship' && decided.stop !== 'product_decision'
@@ -781,6 +824,7 @@ export async function askJudge(
     kind: 'refine:judge', ts: Date.now(), path: [...path], target, round: state.round, answers, reason: decision.reason,
     route: decision.again ? 'again' : 'stop', rule: decision.rule, ...(status ? { status } : {}),
     packet: { size: JSON.stringify(packet).length, ...(packet.cut ? { cut: packet.cut } : {}) },
+    ...(effective === undefined ? {} : { effective }),
     ...(decision.findings ? { findings: decision.findings } : {}),
     ...(state.lastRound && decision.stop === 'ship' ? { openFindings: state.latestFindings } : {}),
   });
@@ -800,11 +844,19 @@ export async function consultJudge(
   state: JudgeState,
   ctx: JobContext,
   path: readonly string[],
-  options: { readonly target: string; readonly identity: string; readonly pending: boolean; readonly save: (state: JudgeState) => void },
+  options: { readonly target: string; readonly identity: string; readonly pending: boolean; readonly save: (state: JudgeState, retry?: boolean) => void },
 ): Promise<{ state: JudgeState; decision: JudgeDecision } | { state: JudgeState; paused: Outcome } | { state: JudgeState; answer: InteractionResponse }> {
   let asked = state;
   if (!options.pending) {
-    const { decision } = await askJudge(cfg, state, ctx, path, options.target);
+    const judged = await askJudge(cfg, state, ctx, path, options.target);
+    if ('paused' in judged) {
+      // A failed judge is retried for the same round on resume: the saved
+      // state replays the completed panel and re-asks the judge; it does
+      // not wait on a person the way a product decision does.
+      options.save(state, true);
+      return { state, paused: judged.paused };
+    }
+    const { decision } = judged;
     if (decision.stop !== 'product_decision') return { state, decision };
     // Kept with the question, so a resumed run still knows which findings the judge would act on.
     if (decision.findings) asked = { ...state, decided: decision.findings };

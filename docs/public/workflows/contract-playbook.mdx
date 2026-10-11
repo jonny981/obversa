@@ -91,8 +91,8 @@ contract-playbook › redline › redline-review › review-panel   gpt-5.6-luna
 contract-playbook › redline › redline-review › review-panel • redline-1: fail  one redline could be tighter
 contract-playbook › redline › redline-review › review-panel • redline: fail  Review panel: 0/1 reviewer(s) cleared. - redline-1 [should-fix]: clause 3: the fallback sentence on the liability redline could go; the twelve-month term already meets the rule
 contract-playbook › redline › redline-review › refine-judge • refine:judge
-contract-playbook › redline › redline-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8}}
-contract-playbook › redline › redline-review ◆ redline round 2: stop as pass on stop_reason: holds: the judge chose holds
+contract-playbook › redline › redline-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8},"finding-1":{"type":"choice","choice":"skip","confidence":0.9}}
+contract-playbook › redline › redline-review ◆ redline round 2: stop as pass on findings: 0 act, 1 skip: the judge skipped every finding
 contract-playbook › redline › redline-review › @judge-review interaction:checkpoint
 contract-playbook › redline › redline-review · review: pass
 contract-playbook › redline › redline-review ◂ pass (2 iter)
@@ -131,7 +131,7 @@ contract-playbook ◂ dag pass
     },
     "redline": {
       "status": "pass",
-      "summary": "the judge chose holds"
+      "summary": "the judge skipped every finding"
     },
     "positions": {
       "status": "pass",
@@ -152,7 +152,7 @@ Seven clauses mapped, two rounds of redlines, two answers from the judge.
 The first set of redlines left out the two clauses the playbook never
 signs; the checker tagged each a block, the judge acted on both, and the set
 went back. The second set covered
-every clause and drew one taste note, and the judge said the redlines hold.
+every clause and drew one taste note, and the judge skipped it.
 The negotiating note passed its check first time. The run waited at
 `negotiate` with the redlines and the positions in `review/`, and the
 lawyer's yes on the page finished it. A no goes to `redline` with the lawyer's note as the finding.

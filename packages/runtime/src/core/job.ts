@@ -170,6 +170,12 @@ export interface AgentJobConfig {
    * invocation.
    */
   maxOutputBytes?: number;
+  /**
+   * Called with each engine result right after it returns, before it is
+   * turned into an outcome: a caller that needs the result's reported
+   * (effective) identity reads it here.
+   */
+  readonly onResult?: (result: AgentResult) => void;
   /** Fallback route(s) used when the primary engine hits a configured error. */
   fallback?: AgentRoute | AgentRoute[];
   /** Error codes that may spill to `fallback`. Default: RATE_LIMIT and QUOTA. */
@@ -559,6 +565,7 @@ export function agentJob(config: AgentJobConfig): Job {
             ctx.signal,
           );
           logEngineTransportFailure(ctx, result, env);
+          config.onResult?.(result);
           if (originalSelection && ['adapter', 'provider', 'modelFamily', 'model'].some((key) => originalSelection![key as keyof typeof originalSelection] !== result!.effective[key as keyof AgentResult['effective']])) {
             throw new LoopError({ code: 'CONFIG', message: 'the interaction requester engine or model changed while continuing its task' });
           }

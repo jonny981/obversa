@@ -42,6 +42,14 @@ const PASS = { status: 'pass', summary: 'nothing to add' };
 const FINDING = { severity: 'should-fix', evidence: 'the title is vague' } as const;
 const REVISE = { status: 'revise', summary: 'one finding', findings: [FINDING] };
 
+/** A complete reply to the round questions: every probability a clear yes. */
+const round = (choice: string): Record<string, unknown> => ({
+  holds: { noul: 0.9 },
+  worth_doing: { noul: 0.9 },
+  worth_another_round: { noul: 0.9 },
+  stop_reason: { choice },
+});
+
 /** Scripted replies, one per call; the last one repeats. Every prompt is kept. */
 const scripted = (replies: readonly unknown[], calls: string[], write?: (req: AgentRequest, call: number) => void) =>
   new MockEngine((req: AgentRequest) => {
@@ -360,7 +368,7 @@ describe('a dag node with agent and refine', () => {
     const judgeSeat = seat('judge-one', (req) => {
       const { state } = JSON.parse(req.prompt) as { state: { what: { draft?: string } } };
       judgeDrafts.push(state.what.draft);
-      return JSON.stringify({ stop_reason: { choice: 'holds' } });
+      return JSON.stringify(round('holds'));
     });
     const { outcome } = await run(dag({
       name: 'page',
@@ -374,7 +382,7 @@ describe('a dag node with agent and refine', () => {
             // way `pnpm build` produces it: it cannot be looked for first.
             checks: [['node', '-e', 'require("node:fs").mkdirSync("dist"); require("node:fs").writeFileSync("dist/page.md", "# built\\n")']],
             reviewers: [reviewer],
-            judge: judge(judgeSeat),
+            judge: judge(judgeSeat, { perFinding: false }),
           }),
         },
       },
@@ -593,11 +601,14 @@ describe('a dag node with agent and refine', () => {
     const judgeSeat = seat('judge-one', (req) => {
       judgeCalls += 1;
       const { questions } = JSON.parse(req.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
-      return JSON.stringify(Object.fromEntries(Object.entries(questions)
-        .filter(([, question]) => 'act' in question.criteria)
-        .map(([id, question]) => [id, question.instructions.includes('REAL')
-          ? { choice: 'act', reason: 'a reader cannot tell who the page is for' }
-          : { choice: 'skip', reason: 'a matter of taste' }])));
+      return JSON.stringify({
+        ...round('continue'),
+        ...Object.fromEntries(Object.entries(questions)
+          .filter(([, question]) => 'act' in question.criteria)
+          .map(([id, question]) => [id, question.instructions.includes('REAL')
+            ? { choice: 'act', reason: 'a reader cannot tell who the page is for' }
+            : { choice: 'skip', reason: 'a matter of taste' }])),
+      });
     });
     const { outcome } = await run(dag({
       name: 'page',
@@ -858,14 +869,14 @@ describe('a dag node with agent and refine', () => {
     });
     const judgeSeat = seat('judge-one', (req) => {
       whens.push((JSON.parse(req.prompt) as { state: { when: { round: number; rounds: { round: number }[] } } }).state.when);
-      return JSON.stringify({ stop_reason: { choice: 'continue' } });
+      return JSON.stringify(round('continue'));
     });
     const { outcome } = await run(dag({
       name: 'page',
       nodes: {
         write: {
           agent: builder,
-          refine: review({ reviewers: [reviewer], judge: judge(judgeSeat, { cap: 3 }) }),
+          refine: review({ reviewers: [reviewer], judge: judge(judgeSeat, { cap: 3, perFinding: false }) }),
         },
         accept: {
           needs: 'write',
@@ -1147,7 +1158,7 @@ describe('a dag node with agent and refine', () => {
     });
     const judgeSeat = seat('judge-one', (req) => {
       judgePrompts.push(req.prompt);
-      return JSON.stringify({ stop_reason: { choice: 'continue' } });
+      return JSON.stringify(round('continue'));
     });
     const build = () => dag({
       name: 'page',
@@ -1158,7 +1169,7 @@ describe('a dag node with agent and refine', () => {
           // The worker's death leaves the node mid-round: only a node
           // declared safe to retry continues without asking a person.
           retrySafe: true,
-          refine: review({ reviewers: [reviewer], judge: judge(judgeSeat, { cap: 1 }) }),
+          refine: review({ reviewers: [reviewer], judge: judge(judgeSeat, { cap: 1, perFinding: false }) }),
         },
       },
     });
@@ -1202,7 +1213,7 @@ describe('a dag node with agent and refine', () => {
       });
       const judgeSeat = seat('judge-mock', (req) => {
         calls.judge.push(req.prompt);
-        return JSON.stringify({ stop_reason: { choice: 'continue' } });
+        return JSON.stringify(round('continue'));
       });
       const goalSeat = goalReplies === undefined ? undefined : seat('goal-mock', (req) => {
         calls.goal.push(req.prompt);
@@ -1217,7 +1228,7 @@ describe('a dag node with agent and refine', () => {
             writes: 'page.md',
             ...(goalSeat === undefined ? {} : { goal: goalSeat }),
             reviewedBy: 'reviewer',
-            refine: judge(judgeSeat, { cap }),
+            refine: judge(judgeSeat, { cap, perFinding: false }),
           })],
         })
         : dag({
@@ -1233,7 +1244,7 @@ describe('a dag node with agent and refine', () => {
               refine: review({
                 reviewers: [reviewer],
                 ...(goalSeat === undefined ? {} : { goal: goalCheck(goalSeat, { target: 'write', text: BRIEF }) }),
-                judge: judge(judgeSeat, { cap }),
+                judge: judge(judgeSeat, { cap, perFinding: false }),
               }),
             },
           },

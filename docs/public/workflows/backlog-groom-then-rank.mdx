@@ -66,11 +66,11 @@ backlog-groom-then-rank › split › split-review › review-panel   gpt-5.6-lu
 backlog-groom-then-rank › split › split-review › review-panel • split-1: fail  one raw ticket has no story
 backlog-groom-then-rank › split › split-review › review-panel • split: fail  Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the "Dark mode pls" ticket is not covered by any story
 backlog-groom-then-rank › split › split-review › refine-judge • refine:judge
-backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.8},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6}}
-backlog-groom-then-rank › split › split-review ◆ split round 1: again on stop_reason: continue: the judge chose continue
+backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.8},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"choice","choice":"act","confidence":0.9}}
+backlog-groom-then-rank › split › split-review ◆ split round 1: again on findings: 1 act, 0 skip: the judge acts on 1 of 1 findings
 backlog-groom-then-rank › split › split-review › @judge-review interaction:checkpoint
 backlog-groom-then-rank › split › split-review · review: fail
-review did not pass (Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the "Dark mode pls" ticket is not covered by any story (the judge chose continue)); re-entering split-review
+review did not pass (Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the "Dark mode pls" ticket is not covered by any story (the judge acts on 1 of 1 findings)); re-entering split-review
 backlog-groom-then-rank › split › split-review · iteration 2
 backlog-groom-then-rank › split › split-review • split
 
@@ -84,8 +84,8 @@ backlog-groom-then-rank › split › split-review › review-panel   gpt-5.6-lu
 backlog-groom-then-rank › split › split-review › review-panel • split-1: fail  one taste note
 backlog-groom-then-rank › split › split-review › review-panel • split: fail  Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the PDF story could name the file size limit in its checks; nice to have
 backlog-groom-then-rank › split › split-review › refine-judge • refine:judge
-backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8}}
-backlog-groom-then-rank › split › split-review ◆ split round 2: stop as pass on stop_reason: holds: the judge chose holds
+backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8},"finding-1":{"type":"choice","choice":"skip","confidence":0.9}}
+backlog-groom-then-rank › split › split-review ◆ split round 2: stop as pass on findings: 0 act, 1 skip: the judge skipped every finding
 backlog-groom-then-rank › split › split-review › @judge-review interaction:checkpoint
 backlog-groom-then-rank › split › split-review · review: pass
 backlog-groom-then-rank › split › split-review ◂ pass (2 iter)
@@ -120,7 +120,7 @@ backlog-groom-then-rank ◂ dag pass
   "data": {
     "split": {
       "status": "pass",
-      "summary": "the judge chose holds"
+      "summary": "the judge skipped every finding"
     },
     "clarify": {
       "status": "pass",
@@ -140,9 +140,9 @@ backlog-groom-then-rank ◂ dag pass
 
 Two rounds of stories, two answers from the judge, one set of questions.
 The first set of stories left the founder's one-line wish uncovered; the
-reviewer named the ticket, and the judge said another round was worth it.
-The second set covered every ticket and drew one taste note, and the judge
-said the stories hold. The questions passed their review first time, and
+reviewer named the ticket, and the judge acted on the finding. The second
+set covered every ticket and drew one taste note, which the judge
+skipped, so the stories stood. The questions passed their review first time, and
 the run waited for the owner. The owner's yes on the page finished it.
 
 A grooming loop that stops with the work unfinished is doing its job. One

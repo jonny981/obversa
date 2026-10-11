@@ -17,8 +17,9 @@
 
 import type { Engine, EngineRef, UsageReceipt } from '../engines/engine.js';
 import type { Billing, CostReceipt } from '@obversa/api';
-import type { Memory, TeamSeat } from '@obversa/api';
-import type { LoopError } from './errors.js';
+import type { EngineSelectionRecord, ExecutionTarget, Memory, TeamSeat } from '@obversa/api';
+import type { LoopError, LoopErrorCode } from './errors.js';
+import type { TreeChange } from './git.js';
 import type { Budget } from './budget.js';
 import type { EnvHandle, Environment } from '../env/environment.js';
 import type { JsonObject, JsonValue, RunBrief } from '../graph/value.js';
@@ -277,6 +278,48 @@ export interface JudgeCheck {
   readonly status: Outcome['status'];
   /** The command's output, when the check did not pass. */
   readonly output?: string;
+}
+
+/** What a judge reads, in the order it reads it. */
+export interface JudgePacket {
+  /** What the work is for. */
+  readonly why: {
+    readonly brief?: string;
+    readonly useCase?: string;
+    readonly desc?: string;
+    readonly gate?: string;
+    /** A person's answers to the judge's earlier product decisions. */
+    readonly productFeedback?: readonly InteractionResponse[];
+  };
+  /** The change under review. */
+  readonly what: {
+    /** The files changed since the work began, in a git workspace. */
+    readonly changedFiles?: readonly TreeChange[];
+    /** The diff around each file and line a finding cites. */
+    readonly diffs?: readonly { readonly file: string; readonly line?: number; readonly diff: string }[];
+    readonly file?: string;
+    readonly draft?: string;
+  };
+  /** This round's evidence. */
+  readonly how: {
+    readonly checks?: readonly JudgeCheck[];
+    readonly goal?: readonly GoalRequirement[];
+    /** This round's findings, by the id each one's question uses. */
+    readonly findings: readonly (FeedbackFinding & { readonly id: string })[];
+  };
+  /** Where the rounds stand. */
+  readonly when: {
+    readonly round: number;
+    readonly cap?: number;
+    readonly lastRound?: true;
+    readonly limit?: string;
+    readonly rounds: readonly unknown[];
+    readonly skipped?: readonly SkippedFinding[];
+    /** The files changed since the judge last read the work, in a git workspace. */
+    readonly changedSinceLastRound?: readonly TreeChange[];
+  };
+  /** What the size limit cut, when it cut anything. */
+  readonly cut?: readonly string[];
 }
 
 /** What the work under review is for, and the file a judge reads, when there is one. */
@@ -797,7 +840,9 @@ export interface JudgeAnswer {
   readonly noul?: number;
   readonly probability?: number;
   readonly choice?: string;
-  readonly probabilities?: Readonly<Record<string, number>>;
+  /** The rating a `score` question's engine reports, when it reports one number. */
+  readonly score?: number;
+  readonly probabilities?: Readonly<Record<string, number>> | readonly { readonly label: string; readonly probability: number }[];
   /** A one-line reason, when the judge gives one with its answer. */
   readonly reason?: string;
 }
@@ -1231,7 +1276,11 @@ export type LoopEvent =
       // goes to the builder, and the judge is asked again once that round
       // is reviewed. After the last round a cap allows, no build round and
       // no judge call follow: the answer is recorded and the run fails.
-      status?: 'pass' | 'fail';
+      // `paused` ends the judge step with a failure (`failure` keeps the
+      // original error): a judge call that did not pass, a reply that did
+      // not parse, or a reply that left an asked question without a usable
+      // answer — never empty answers routed as `no clear answer`.
+      status?: 'pass' | 'fail' | 'paused';
       // When the judge decides each finding: every finding of the round, by
       // its id, with `act` (sent back to the builder) or `skip` and why.
       findings?: readonly { readonly id: string; readonly decision: 'act' | 'skip'; readonly reason: string }[];
@@ -1241,6 +1290,36 @@ export type LoopEvent =
       // How many characters the judge read, and what the size limit cut,
       // when it cut anything.
       packet?: { readonly size: number; readonly cut?: readonly string[] };
+      // The model identity the judge's engine result reported.
+      effective?: EngineSelectionRecord;
+      // The error a stopped judge step kept: the engine failure's own code
+      // and message, or the validation error for a bad reply.
+      failure?: { readonly code: LoopErrorCode; readonly message: string };
+    }
+  | {
+      // What the judge was sent, recorded before its engine call: the
+      // bounded packet, the complete question set (round questions plus the
+      // generated per-finding ones), the question-set identity and the
+      // judge seat's declared model identity. Secret shapes and injected env
+      // values in the packet and questions are kept as `[redacted]`; the
+      // judge itself reads them in full. A call that fails still leaves the
+      // request.
+      kind: 'refine:judge-request';
+      ts: number;
+      path: string[];
+      target: string;
+      round: number;
+      // The digest of the question set the judge was sent plus the options
+      // that shape the decision (`cap`, `perFinding`): two asks that put
+      // the same questions under the same rules share it, whatever brief
+      // or round they came from.
+      identity: string;
+      // The bounded packet, as sent, with secrets redacted.
+      packet: JudgePacket;
+      // The complete expanded question set, with secrets redacted.
+      questions: JudgeQuestions;
+      // The judge seat's declared model identity.
+      seat: ExecutionTarget;
     }
   | {
       // A review panel's synthesis: each finding after the merge and the

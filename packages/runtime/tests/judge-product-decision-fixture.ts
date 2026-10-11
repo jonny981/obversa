@@ -60,7 +60,12 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
   const judgeEngine = new MockEngine((request: AgentRequest) => {
     const count = productCalls(cwd).filter((call) => call.kind === 'judge').length;
     record({ kind: 'judge', prompt: request.prompt });
-    const answers: Record<string, unknown> = { stop_reason: { choice: scenario.choices[Math.min(count, scenario.choices.length - 1)] } };
+    const answers: Record<string, unknown> = {
+      holds: { noul: 0.9 },
+      worth_doing: { noul: 0.9 },
+      worth_another_round: { noul: 0.9 },
+      stop_reason: { choice: scenario.choices[Math.min(count, scenario.choices.length - 1)] },
+    };
     if (scenario.perFinding) {
       const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
       for (const [id, question] of Object.entries(questions)) {
@@ -69,7 +74,7 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
     }
     return JSON.stringify(answers);
   });
-  const refine = judge(seat(judgeEngine, 'judge-mock'), { cap: scenario.cap });
+  const refine = judge(seat(judgeEngine, 'judge-mock'), { cap: scenario.cap, perFinding: scenario.perFinding === true });
   const interaction = { id: 'rich-review', responseSchema: {} };
   if (kind === 'agent') return agentJob({ label: name, model: 'writer-mock', prompt: 'Write the original page.', interaction,
     engine: new MockEngine((request) => {

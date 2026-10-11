@@ -26,14 +26,25 @@ type KickbackEvent = Extract<LoopEvent, { kind: 'dag:kickback' }>;
 const kbEvents = (es: LoopEvent[]): KickbackEvent[] =>
   es.filter((e): e is KickbackEvent => e.kind === 'dag:kickback');
 
+/** A complete reply to the round questions: every probability a clear yes. */
+const roundAnswers = (choice: string): Record<string, unknown> => ({
+  holds: { noul: 0.9 },
+  worth_doing: { noul: 0.9 },
+  worth_another_round: { noul: 0.9 },
+  stop_reason: { choice },
+});
+
 /** A judge that acts on each finding marked REAL and skips the rest, each with a reason. */
 const decideBlocks = (request: { prompt: string }): string => {
   const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
-  return JSON.stringify(Object.fromEntries(Object.entries(questions)
-    .filter(([, question]) => 'act' in question.criteria)
-    .map(([id, question]) => [id, question.instructions.includes('REAL')
-      ? { choice: 'act', reason: 'it breaks the build' }
-      : { choice: 'skip', reason: 'outside how the work is really used' }])));
+  return JSON.stringify({
+    ...roundAnswers('continue'),
+    ...Object.fromEntries(Object.entries(questions)
+      .filter(([, question]) => 'act' in question.criteria)
+      .map(([id, question]) => [id, question.instructions.includes('REAL')
+        ? { choice: 'act', reason: 'it breaks the build' }
+        : { choice: 'skip', reason: 'outside how the work is really used' }])),
+  });
 };
 
 describe('dag kickback (cross-stage feedback)', () => {
@@ -549,8 +560,8 @@ describe("a judge in a dag node's refine review", () => {
       nodes: {
         implement: { refine: review({ judge: judge(judgeSeat(() => {
           judgeCalls += 1;
-          return JSON.stringify({ stop_reason: { choice: judgeCalls < 2 ? 'continue' : 'holds' } });
-        }), { cap: 5 }) }), job: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }) },
+          return JSON.stringify(roundAnswers(judgeCalls < 2 ? 'continue' : 'holds'));
+        }), { cap: 5, perFinding: false }) }), job: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }) },
         review: {
           needs: ['implement'], sendsBackTo: ['implement'],
           job: fnJob('review', () => revisionRequest({
@@ -589,8 +600,8 @@ describe("a judge in a dag node's refine review", () => {
       nodes: {
         implement: { refine: review({ judge: judge(judgeSeat(() => {
           judgeCalls += 1;
-          return JSON.stringify({ stop_reason: { choice: judgeCalls < 2 ? 'continue' : 'not_converging' } });
-        }), { cap: 5 }) }), job: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }) },
+          return JSON.stringify(roundAnswers(judgeCalls < 2 ? 'continue' : 'not_converging'));
+        }), { cap: 5, perFinding: false }) }), job: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }) },
         review: {
           needs: ['implement'], sendsBackTo: ['implement'],
           job: fnJob('review', () => revisionRequest({
@@ -650,7 +661,7 @@ describe("a judge in a dag node's refine review", () => {
     const { outcome } = await run(dag({
       name: 'judged-kickback-cap',
       nodes: {
-        implement: { refine: review({ judge: judge(judgeSeat(() => { judgeCalls += 1; return JSON.stringify({ stop_reason: { choice: 'continue' } }); }), { cap: 2 }) }), job: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }) },
+        implement: { refine: review({ judge: judge(judgeSeat(() => { judgeCalls += 1; return JSON.stringify(roundAnswers('continue')); }), { cap: 2, perFinding: false }) }), job: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }) },
         review: {
           needs: ['implement'], sendsBackTo: ['implement'],
           job: fnJob('review', () => revisionRequest({ target: 'implement', reason: 'still not there', findings: [{ evidence: 'x', severity: 'should-fix' }] })),
@@ -668,9 +679,12 @@ describe("a judge in a dag node's refine review", () => {
     // Act on a finding marked REAL, skip the rest; the second round has only taste notes left.
     const decide = (request: { prompt: string }) => {
       const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
-      return JSON.stringify(Object.fromEntries(Object.entries(questions)
-        .filter(([, question]) => 'act' in question.criteria)
-        .map(([id, question]) => [id, question.instructions.includes('REAL') ? { choice: 'act', reason: 'it breaks the build' } : { choice: 'skip' }])));
+      return JSON.stringify({
+        ...roundAnswers('continue'),
+        ...Object.fromEntries(Object.entries(questions)
+          .filter(([, question]) => 'act' in question.criteria)
+          .map(([id, question]) => [id, question.instructions.includes('REAL') ? { choice: 'act', reason: 'it breaks the build' } : { choice: 'skip' }])),
+      });
     };
     const seen: Outcome[] = [];
     let round = 0;
@@ -714,9 +728,12 @@ describe("a judge in a dag node's refine review", () => {
     // Act on the finding marked REAL, skip the taste note.
     const decide = (request: { prompt: string }) => {
       const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
-      return JSON.stringify(Object.fromEntries(Object.entries(questions)
-        .filter(([, question]) => 'act' in question.criteria)
-        .map(([id, question]) => [id, question.instructions.includes('REAL') ? { choice: 'act' } : { choice: 'skip', reason: 'a matter of taste' }])));
+      return JSON.stringify({
+        ...roundAnswers('continue'),
+        ...Object.fromEntries(Object.entries(questions)
+          .filter(([, question]) => 'act' in question.criteria)
+          .map(([id, question]) => [id, question.instructions.includes('REAL') ? { choice: 'act' } : { choice: 'skip', reason: 'a matter of taste' }])),
+      });
     };
     const reviewerPrompts: string[] = [];
     const reviewerEngine = new MockEngine((request) => {
@@ -780,8 +797,8 @@ describe("a judge in a dag node's refine review, with no cap or at its cap", () 
         implement: { refine: review({ judge: judge(judgeSeat(() => {
           const choice = choices[Math.min(calls.length, choices.length - 1)]!;
           calls.push(choice);
-          return JSON.stringify({ stop_reason: { choice } });
-        }), cap === undefined ? {} : { cap }) }), job: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }) },
+          return JSON.stringify(roundAnswers(choice));
+        }), cap === undefined ? { perFinding: false } : { cap, perFinding: false }) }), job: fnJob('implement', async () => { round += 1; return { status: 'pass', summary: `round ${round}` }; }) },
         review: {
           needs: ['implement'], sendsBackTo: ['implement'],
           job: fnJob('review', () => revisionRequest({ target: 'implement', reason: 'needs a pass', findings: findings(round) })),
@@ -881,7 +898,7 @@ describe("a judge in a dag node's refine review, with no cap or at its cap", () 
           engine: new MockEngine((request) => {
             prompts.push(request.prompt);
             judgeCalls += 1;
-            return JSON.stringify({ stop_reason: { choice: judgeCalls < 2 ? 'continue' : 'holds' } });
+            return JSON.stringify(roundAnswers(judgeCalls < 2 ? 'continue' : 'holds'));
           }),
           identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
         }, { cap: 1, questions: { stop_reason: { type: 'choice', instructions: 'Stop?', criteria: { holds: 'It holds.', continue: 'Go again.' } } } }) }), job: fnJob('implement', async () => { round += 1; return { status: 'pass' }; }) },

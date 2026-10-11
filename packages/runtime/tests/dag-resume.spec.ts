@@ -46,6 +46,14 @@ async function result(job: Job, options: RunOptions): Promise<RunResult> {
   return run(job, { cwd, signal: new AbortController().signal, ...options });
 }
 
+/** A complete reply to the round questions: every probability a clear yes. */
+const roundAnswers = (choice: string): Record<string, unknown> => ({
+  holds: { noul: 0.9 },
+  worth_doing: { noul: 0.9 },
+  worth_another_round: { noul: 0.9 },
+  stop_reason: { choice },
+});
+
 function counters() {
   const counts = { one: 0, two: 0, three: 0 };
   const node = (name: keyof typeof counts, fail = false): DagNode => ({
@@ -539,10 +547,10 @@ describe('dag resume', () => {
               engine: new MockEngine((request) => {
                 const { when } = (JSON.parse(request.prompt) as { state: { when: { round: number; rounds: unknown[] } } }).state;
                 judgeRounds.push({ round: when.round, rounds: when.rounds });
-                return JSON.stringify({ stop_reason: { choice: 'continue' } });
+                return JSON.stringify(roundAnswers('continue'));
               }),
               identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
-            }, { cap: 1 }),
+            }, { cap: 1, perFinding: false }),
           }),
         },
         review: {
@@ -580,10 +588,10 @@ describe('dag resume', () => {
     const judgeFor = (target: string) => judge({
       engine: new MockEngine(() => {
         consulted.push(target);
-        return JSON.stringify({ stop_reason: { choice } });
+        return JSON.stringify(roundAnswers(choice));
       }),
       identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
-    }, { cap: 2 });
+    }, { cap: 2, perFinding: false });
     const reviewOf = (target: string): DagNode => ({
       needs: target, sendsBackTo: [target], retrySafe: true,
       job: fnJob(`review-${target}`, () => revisionRequest({ target, reason: 'not yet', findings: [{ evidence: 'x', severity: 'should-fix' }] })),
@@ -953,7 +961,7 @@ describe('dag resume', () => {
     const judgeEngine = new MockEngine((request) => {
       judgeCalls.push(request);
       const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
-      const answers: Record<string, unknown> = { stop_reason: { choice: 'continue' } };
+      const answers: Record<string, unknown> = roundAnswers('continue');
       for (const [key, question] of Object.entries(questions)) {
         if (!('act' in question.criteria)) continue;
         answers[key] = question.instructions.includes('REAL')
@@ -1066,9 +1074,9 @@ describe('dag resume', () => {
             return { status: 'pass' as const };
           },
           refine: judge({
-            engine: new MockEngine(() => JSON.stringify({ stop_reason: { choice: 'product_decision' } })),
+            engine: new MockEngine(() => JSON.stringify(roundAnswers('product_decision'))),
             identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge-mock', model: 'judge-mock', tools: [] },
-          }, { cap: 2 }),
+          }, { cap: 2, perFinding: false }),
         }),
         stage('check', {
           needs: 'target',

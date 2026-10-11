@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { dag, fnJob, judge, review, run, stage, stopQuestions, workflow } from '../src/api.ts';
+import { dag, EngineError, fnJob, judge, review, revisionRequest, run, stage, stopQuestions, withEnv, workflow } from '../src/api.ts';
 import type { AgentRequest, JudgeQuestions, LoopEvent, Outcome, TeamSeat } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 
@@ -37,13 +37,15 @@ function scriptedTeam(opts: {
   readonly questions?: JudgeQuestions;
   readonly perFinding?: boolean;
   readonly brief?: string;
+  readonly draftText?: string;
+  readonly judgeEngine?: MockEngine;
 }) {
   const writerCalls: AgentRequest[] = [];
   const reviewCalls: AgentRequest[] = [];
   const judgeCalls: AgentRequest[] = [];
   const writer = new MockEngine((req) => {
     writerCalls.push(req);
-    writeFileSync(join(req.cwd!, 'page.md'), `draft ${reviewCalls.length}`);
+    writeFileSync(join(req.cwd!, 'page.md'), opts.draftText ?? `draft ${reviewCalls.length}`);
     return JSON.stringify({ status: 'pass', summary: 'wrote it' });
   });
   const reviewer = new MockEngine((req) => {
@@ -51,7 +53,7 @@ function scriptedTeam(opts: {
     reviewCalls.push(req);
     return JSON.stringify(reply);
   });
-  const judgeEngine = new MockEngine((req) => {
+  const judgeEngine = opts.judgeEngine ?? new MockEngine((req) => {
     const reply = opts.judgeReplies[Math.min(judgeCalls.length, opts.judgeReplies.length - 1)];
     judgeCalls.push(req);
     return JSON.stringify(typeof reply === 'function' ? reply(req.prompt) : reply);
@@ -88,20 +90,37 @@ const TONE = { severity: 'nice-to-have', evidence: 'taste: prefer a warmer tone'
 const TITLE = { severity: 'nice-to-have', evidence: 'taste: a shorter title reads better' } as const;
 const revise = (...findings: readonly unknown[]) => ({ status: 'revise', summary: `${findings.length} findings`, findings });
 
+/** A complete reply to the round questions: every probability a clear yes. */
+function roundAnswers(choice: string): Record<string, unknown> {
+  return {
+    holds: { noul: 0.9 },
+    worth_doing: { noul: 0.9 },
+    worth_another_round: { noul: 0.9 },
+    stop_reason: { choice },
+  };
+}
+
 /**
- * A judge that answers every per-finding question it is sent: act on a
- * finding marked REAL, skip the rest, each with a reason that names the
- * finding. `round` holds the round-level answers sent alongside.
+ * A judge that answers every question it is sent. `round` overrides the
+ * round answers (`roundAnswers('continue')` when not given); each finding
+ * acts when marked REAL and skips otherwise, each with a reason that names
+ * the finding.
  */
-function perFinding(round: Record<string, unknown> = { stop_reason: { choice: 'continue' } }) {
+function perFinding(round: Record<string, unknown> = {}) {
   return (prompt: string) => {
-    const { questions } = JSON.parse(prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
-    const answers: Record<string, unknown> = { ...round };
+    const { questions } = JSON.parse(prompt) as { questions: Record<string, { type: string; instructions: string; criteria: Record<string, string> }> };
+    const answers: Record<string, unknown> = { ...roundAnswers('continue'), ...round };
     for (const [key, question] of Object.entries(questions)) {
-      if (!('act' in question.criteria)) continue;
-      answers[key] = question.instructions.includes('REAL')
-        ? { choice: 'act', reason: 'a reader cannot tell who the page is for' }
-        : { choice: 'skip', reason: 'a matter of taste' };
+      if (key in answers) continue;
+      answers[key] = 'act' in question.criteria
+        ? question.instructions.includes('REAL')
+          ? { choice: 'act', reason: 'a reader cannot tell who the page is for' }
+          : { choice: 'skip', reason: 'a matter of taste' }
+        : question.type === 'choice'
+          ? { choice: 'continue' in question.criteria ? 'continue' : Object.keys(question.criteria)[0] }
+          : question.type === 'score'
+            ? { probabilities: Object.fromEntries((question.criteria as unknown as string[]).map((criterion) => [criterion, 0.9])) }
+            : { noul: 0.9 };
     }
     return answers;
   };
@@ -116,10 +135,23 @@ function judgeEventsOf(events: readonly LoopEvent[]) {
   return events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
 }
 
+/**
+ * The request the judge was sent, recorded before its own job started —
+ * a failed call still leaves what was asked.
+ */
+function judgeRequestBeforeCall(events: readonly LoopEvent[]) {
+  const requestAt = events.findIndex((e) => e.kind === 'refine:judge-request');
+  const callAt = events.findIndex((e) => e.kind === 'job:start' && e.label === 'refine:judge');
+  expect(requestAt).toBeGreaterThanOrEqual(0);
+  expect(callAt).toBeGreaterThanOrEqual(0);
+  expect(requestAt).toBeLessThan(callAt);
+  return events[requestAt] as Extract<LoopEvent, { kind: 'refine:judge-request' }>;
+}
+
 describe('refine: judge()', () => {
   it('names each node a judge decides about at the start of the graph, though no review fails and no judge is asked', async () => {
     const events: LoopEvent[] = [];
-    const { job, judgeCalls } = scriptedTeam({ reviewerReplies: [PASS], judgeReplies: [{ stop_reason: { choice: 'holds' } }] });
+    const { job, judgeCalls } = scriptedTeam({ reviewerReplies: [PASS], judgeReplies: [roundAnswers('holds')] });
     expect((await runTeam(job, events)).outcome.status).toBe('pass');
     expect(judgeCalls).toHaveLength(0);
     expect(judgeEventsOf(events)).toHaveLength(0);
@@ -130,7 +162,7 @@ describe('refine: judge()', () => {
       name: 'judged-send-back',
       nodes: {
         draft: {
-          refine: review({ judge: judge(seat(new MockEngine(() => JSON.stringify({ stop_reason: { choice: 'holds' } })), 'judge-mock')) }),
+          refine: review({ judge: judge(seat(new MockEngine(() => JSON.stringify(roundAnswers('holds'))), 'judge-mock'), { perFinding: false }) }),
           job: fnJob('draft', () => 'drafted'),
         },
         check: { needs: 'draft', sendsBackTo: ['draft'], job: fnJob('check', () => 'checked') },
@@ -144,7 +176,8 @@ describe('refine: judge()', () => {
     const events: LoopEvent[] = [];
     const { job, judgeCalls } = scriptedTeam({
       reviewerReplies: [REVISE(), REVISE()],
-      judgeReplies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }],
+      judgeReplies: [roundAnswers('continue'), roundAnswers('holds')],
+      perFinding: false,
       cap: 5,
     });
     const result = await runTeam(job, events);
@@ -160,7 +193,8 @@ describe('refine: judge()', () => {
     const events: LoopEvent[] = [];
     const { job, judgeCalls } = scriptedTeam({
       reviewerReplies: [REVISE()],
-      judgeReplies: [{ stop_reason: { choice: 'continue' } }],
+      judgeReplies: [roundAnswers('continue')],
+      perFinding: false,
       cap: 2,
     });
     const result = await runTeam(job, events);
@@ -186,6 +220,7 @@ describe('refine: judge()', () => {
         worth_another_round: { noul: 0.49 },
         stop_reason: { choice: 'continue' },
       }],
+      perFinding: false,
       cap: 3,
     });
     const result = await runTeam(job, events);
@@ -204,17 +239,31 @@ describe('refine: judge()', () => {
 
   it('the judge event says the route, the rule and the status a stop gives the node', async () => {
     for (const [reply, rule, status] of [
-      [{ stop_reason: { choice: 'holds' } }, 'stop_reason: holds', 'pass'],
-      [{ stop_reason: { choice: 'not_converging' } }, 'stop_reason: not_converging', 'fail'],
-      [{ worth_another_round: { noul: 0.3 } }, 'worth_another_round: 0.30', 'fail'],
+      [roundAnswers('holds'), 'stop_reason: holds', 'pass'],
+      [roundAnswers('not_converging'), 'stop_reason: not_converging', 'fail'],
     ] as const) {
       const events: LoopEvent[] = [];
-      const { job } = scriptedTeam({ reviewerReplies: [REVISE()], judgeReplies: [reply], cap: 3 });
+      const { job } = scriptedTeam({ reviewerReplies: [REVISE()], judgeReplies: [reply], perFinding: false, cap: 3 });
       await runTeam(job, events);
       const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
       expect(judgeEvents).toHaveLength(1);
       expect(judgeEvents[0], rule).toMatchObject({ route: 'stop', rule, status });
     }
+    // A question set without `stop_reason` decides on the probabilities alone.
+    const nouls: JudgeQuestions = Object.fromEntries(
+      Object.entries(stopQuestions()).filter(([key]) => key !== 'stop_reason'),
+    );
+    const noulsEvents: LoopEvent[] = [];
+    const { job: noulsJob } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [{ holds: { noul: 0.1 }, worth_doing: { noul: 0.9 }, worth_another_round: { noul: 0.3 } }],
+      questions: nouls,
+      cap: 3,
+    });
+    await runTeam(noulsJob, noulsEvents);
+    const noulsJudged = noulsEvents.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
+    expect(noulsJudged).toHaveLength(1);
+    expect(noulsJudged[0]).toMatchObject({ route: 'stop', rule: 'worth_another_round: 0.30', status: 'fail' });
   });
 
   it('the custom question set reaches the judge verbatim', async () => {
@@ -251,6 +300,7 @@ describe('refine: judge()', () => {
         worth_another_round: { noul: 0.8 },
         stop_reason: { choice: 'not_converging' },
       }],
+      perFinding: false,
       cap: 3,
     });
     const result = await runTeam(job, events);
@@ -272,7 +322,8 @@ describe('refine: judge()', () => {
       const events: LoopEvent[] = [];
       const { job } = scriptedTeam({
         reviewerReplies: [REVISE()],
-        judgeReplies: [{ stop_reason: { choice } }],
+        judgeReplies: [roundAnswers(choice)],
+        perFinding: false,
         cap: 5,
       });
       const result = await runTeam(job, events);
@@ -284,7 +335,7 @@ describe('refine: judge()', () => {
     const events: LoopEvent[] = [];
     const { job, judgeCalls } = scriptedTeam({
       reviewerReplies: [REVISE()],
-      judgeReplies: [{ stop_reason: { choice: 'holds' } }],
+      judgeReplies: [perFinding(roundAnswers('holds'))],
       cap: 2,
     });
     await runTeam(job, events);
@@ -293,6 +344,55 @@ describe('refine: judge()', () => {
     const [id] = findingQuestions(judgeCalls[0]!);
     expect(Object.keys(sent.questions)).toEqual([...Object.keys(stopQuestions()), id]);
     expect(sent.questions[id!]).toMatchObject({ type: 'choice', instructions: expect.stringContaining('fix this') });
+  });
+
+  it('accepts a score answer in the shape the judge engines report', async () => {
+    const events: LoopEvent[] = [];
+    const { job, judgeCalls } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [{
+        stop_reason: { choice: 'holds' },
+        // Each shape is the only answer its question gets: Jev's rating
+        // number, Jev's probabilities keyed by criterion, and the OpenAI
+        // Decisions API's list of one {label, probability} per level.
+        readiness: { score: 3, confidence: 0.9 },
+        risk: { confidence: 0.55, probabilities: { low: 0.3, high: 0.65 } },
+        finish: {
+          probabilities: [
+            { value: 0, label: 'Unsafe to ship', probability: 0.05 },
+            { value: 1, label: 'Needs another round', probability: 0.3 },
+            { value: 2, label: 'Ships clean', probability: 0.65 },
+          ],
+        },
+      }],
+      questions: {
+        stop_reason: {
+          type: 'choice',
+          instructions: 'Does the page hold?',
+          criteria: { holds: 'It holds.', continue: 'Another pass is worth it.' },
+        },
+        readiness: {
+          type: 'score',
+          instructions: 'How ready is the page?',
+          criteria: ['Unsafe to ship', 'Needs another round', 'Ships clean'],
+        },
+        risk: {
+          type: 'score',
+          instructions: 'How risky is shipping it?',
+          criteria: ['low', 'high'],
+        },
+        finish: {
+          type: 'score',
+          instructions: 'How finished is the page?',
+          criteria: ['Unsafe to ship', 'Needs another round', 'Ships clean'],
+        },
+      },
+      cap: 5,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('pass');
+    expect(judgeCalls).toHaveLength(1);
+    expect(judgeEventsOf(events)[0]).toMatchObject({ route: 'stop', status: 'pass' });
   });
 });
 
@@ -474,7 +574,8 @@ describe('refine: judge() with no cap', () => {
     const events: LoopEvent[] = [];
     const { job, writerCalls, judgeCalls } = scriptedTeam({
       reviewerReplies: [REVISE()],
-      judgeReplies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }],
+      judgeReplies: [roundAnswers('continue'), roundAnswers('continue'), roundAnswers('holds')],
+      perFinding: false,
     });
     const result = await runTeam(job, events);
     expect(result.outcome.status).toBe('pass');
@@ -489,7 +590,8 @@ describe('refine: judge() with no cap', () => {
   it('fails when the judge says not_converging', async () => {
     const { job, writerCalls, judgeCalls } = scriptedTeam({
       reviewerReplies: [REVISE()],
-      judgeReplies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'not_converging' } }],
+      judgeReplies: [roundAnswers('continue'), roundAnswers('not_converging')],
+      perFinding: false,
     });
     const result = await runTeam(job, []);
     expect(result.outcome.status).toBe('fail');
@@ -537,7 +639,7 @@ describe('refine: judge() at its cap', () => {
     const events: LoopEvent[] = [];
     const { job, writerCalls, judgeCalls } = scriptedTeam({
       reviewerReplies: [revise(TONE)],
-      judgeReplies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }],
+      judgeReplies: [roundAnswers('continue'), roundAnswers('holds')],
       cap: 1,
       perFinding: false,
     });
@@ -561,7 +663,8 @@ describe('refine: judge() at its cap', () => {
     const events: LoopEvent[] = [];
     const { job, writerCalls, judgeCalls } = scriptedTeam({
       reviewerReplies: [REVISE()],
-      judgeReplies: [{ stop_reason: { choice: 'continue' } }],
+      judgeReplies: [roundAnswers('continue')],
+      perFinding: false,
       cap: 1,
     });
     const result = await runTeam(job, events);
@@ -619,5 +722,466 @@ describe('refine: a plain number', () => {
     expect(writerCalls).toHaveLength(2);
     expect(writerCalls[1]!.prompt).toContain('fix this');
     expect(judgeEventsOf(events)).toHaveLength(0);
+  });
+});
+
+describe('refine: a failed judge stops the rounds', () => {
+  it('a judge whose own call fails pauses the stage with the engine error it kept, and spends no build on it', async () => {
+    const events: LoopEvent[] = [];
+    const { job, writerCalls, reviewCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [() => {
+        throw new EngineError({ kind: 'billing', message: 'HTTP 402: no credits left on the account' });
+      }],
+      cap: 5,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('paused');
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome?.status).toBe('paused');
+    expect(stageOutcome?.error?.code).toBe('ENGINE');
+    expect(stageOutcome?.error?.message).toContain('402');
+    expect(writerCalls).toHaveLength(1);
+    expect(reviewCalls).toHaveLength(1);
+    expect(judgeCalls).toHaveLength(1);
+    const event = judgeEventsOf(events)[0]!;
+    expect(event).toMatchObject({ route: 'stop', status: 'paused', rule: 'call failed' });
+    expect(event.failure).toMatchObject({ code: 'ENGINE', message: expect.stringContaining('402') });
+    const request = judgeRequestBeforeCall(events);
+    expect(Object.keys(request.questions)).toEqual([...Object.keys(stopQuestions()), 'finding-1']);
+  });
+
+  it('a reply that does not parse pauses the stage with a validation error, and spends no build on it', async () => {
+    const events: LoopEvent[] = [];
+    const judgeCalls: AgentRequest[] = [];
+    const { job, writerCalls, reviewCalls } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [],
+      judgeEngine: new MockEngine((req) => {
+        judgeCalls.push(req);
+        return { text: 'prose is not a JSON answers object' };
+      }),
+      cap: 5,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('paused');
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome?.status).toBe('paused');
+    expect(stageOutcome?.error?.code).toBe('VALIDATION');
+    expect(writerCalls).toHaveLength(1);
+    expect(reviewCalls).toHaveLength(1);
+    expect(judgeCalls).toHaveLength(1);
+    const event = judgeEventsOf(events)[0]!;
+    expect(event).toMatchObject({ route: 'stop', status: 'paused', rule: 'unreadable reply' });
+    expect(event.failure?.code).toBe('VALIDATION');
+    expect(event.effective?.model).toBe('judge-mock');
+    const request = judgeRequestBeforeCall(events);
+    expect(Object.keys(request.questions)).toEqual([...Object.keys(stopQuestions()), 'finding-1']);
+  });
+
+  it('a reply that holds none of the required answers pauses the stage and names the questions it was asked', async () => {
+    const events: LoopEvent[] = [];
+    const { job, writerCalls, reviewCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [{}],
+      cap: 5,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('paused');
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome?.status).toBe('paused');
+    expect(stageOutcome?.error?.code).toBe('VALIDATION');
+    expect(writerCalls).toHaveLength(1);
+    expect(reviewCalls).toHaveLength(1);
+    expect(judgeCalls).toHaveLength(1);
+    const event = judgeEventsOf(events)[0]!;
+    expect(event).toMatchObject({ route: 'stop', status: 'paused', rule: 'missing answers' });
+    expect(event.failure?.message).toContain('stop_reason');
+    expect(event.failure?.message).toContain('finding-1');
+    expect(event.effective?.model).toBe('judge-mock');
+    const request = judgeRequestBeforeCall(events);
+    expect(Object.keys(request.questions)).toEqual([...Object.keys(stopQuestions()), 'finding-1']);
+  });
+
+  it('a reply that answers only some questions pauses the stage, naming the ones it missed', async () => {
+    const events: LoopEvent[] = [];
+    const { job, writerCalls, reviewCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [{ worth_doing: { noul: 0.8 }, 'finding-1': { choice: 'act', reason: 'real' } }],
+      cap: 5,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('paused');
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome?.status).toBe('paused');
+    expect(stageOutcome?.error?.code).toBe('VALIDATION');
+    // A partial reply is not a decision: no build and no review followed it.
+    expect(writerCalls).toHaveLength(1);
+    expect(reviewCalls).toHaveLength(1);
+    expect(judgeCalls).toHaveLength(1);
+    const event = judgeEventsOf(events)[0]!;
+    expect(event).toMatchObject({ route: 'stop', status: 'paused', rule: 'missing answers' });
+    for (const key of ['holds', 'worth_another_round', 'stop_reason']) {
+      expect(event.failure?.message).toContain(key);
+    }
+    expect(event.failure?.message).not.toContain('finding-1');
+    expect(judgeRequestBeforeCall(events)).toBeDefined();
+  });
+
+  it('a reply that answers every round question but not the generated finding question pauses the stage', async () => {
+    const events: LoopEvent[] = [];
+    const { job, writerCalls, reviewCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [roundAnswers('holds')],
+      cap: 5,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('paused');
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome?.status).toBe('paused');
+    expect(stageOutcome?.error?.code).toBe('VALIDATION');
+    expect(writerCalls).toHaveLength(1);
+    expect(reviewCalls).toHaveLength(1);
+    expect(judgeCalls).toHaveLength(1);
+    const event = judgeEventsOf(events)[0]!;
+    expect(event).toMatchObject({ route: 'stop', status: 'paused', rule: 'missing answers' });
+    expect(event.failure?.message).toContain('finding-1');
+    expect(event.failure?.message).not.toContain('stop_reason');
+    expect(judgeRequestBeforeCall(events)).toBeDefined();
+  });
+
+  it('a reply whose answer does not fit its question pauses the stage instead of routing on it', async () => {
+    const events: LoopEvent[] = [];
+    const { job, writerCalls, reviewCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [{
+        ...roundAnswers('holds'),
+        holds: { probability: 'high' },
+        'finding-1': { choice: 'maybe' },
+      }],
+      cap: 5,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('paused');
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome?.status).toBe('paused');
+    expect(stageOutcome?.error?.code).toBe('VALIDATION');
+    expect(writerCalls).toHaveLength(1);
+    expect(reviewCalls).toHaveLength(1);
+    expect(judgeCalls).toHaveLength(1);
+    const event = judgeEventsOf(events)[0]!;
+    expect(event).toMatchObject({ route: 'stop', status: 'paused', rule: 'missing answers' });
+    expect(event.failure?.message).toContain('holds');
+    expect(event.failure?.message).toContain('finding-1');
+    expect(judgeRequestBeforeCall(events)).toBeDefined();
+  });
+
+  it('the record holds what the judge was asked before the call: packet, every question, the seat model', async () => {
+    const dir = workDir();
+    const record = join(dir, 'record.jsonl');
+    const { job } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [perFinding({ stop_reason: { choice: 'holds' } })],
+      cap: 5,
+    });
+    const result = await run(job, { cwd: dir, recordTo: record });
+    expect(result.outcome.status).toBe('pass');
+    const events = readFileSync(record, 'utf8').trim().split('\n')
+      .map((line) => JSON.parse(line) as LoopEvent & Record<string, unknown>);
+    const request = events.find((e) => e.kind === 'refine:judge-request');
+    expect(request).toBeDefined();
+    const judgeStart = events.findIndex((e) => e.kind === 'job:start' && e.label === 'refine:judge');
+    expect(events.indexOf(request!)).toBeLessThan(judgeStart);
+    expect((request!.packet as { when: { round: number } }).when.round).toBe(1);
+    expect(Object.keys(request!.questions as object).sort()).toEqual(
+      [...Object.keys(stopQuestions()), 'finding-1'].sort());
+    expect((request!.seat as { model: string }).model).toBe('judge-mock');
+    expect(request!.identity).toMatch(/^[0-9a-f]{64}$/);
+    const judged = events.find((e) => e.kind === 'refine:judge') as
+      (Extract<LoopEvent, { kind: 'refine:judge' }> & { effective?: { model?: string } }) | undefined;
+    expect(judged?.effective?.model).toBe('judge-mock');
+  });
+
+  it('the request identity is the question set\'s: two asks of the same questions under the same rules share it, whatever the brief', async () => {
+    const identityOf = async (brief: string) => {
+      const events: LoopEvent[] = [];
+      const { job } = scriptedTeam({
+        reviewerReplies: [REVISE()],
+        judgeReplies: [perFinding({ stop_reason: { choice: 'holds' } })],
+        cap: 5,
+        brief,
+      });
+      await runTeam(job, events);
+      return events.find((e) => e.kind === 'refine:judge-request')!.identity;
+    };
+    const a = await identityOf('Use case: a reader gets a short page.\n\nWrite the page.');
+    const b = await identityOf('Use case: a different brief entirely, one that rambles on at length.\n\nWrite the page.');
+    expect(a).toBe(b);
+  });
+
+  it('a resume after a paused judge failure re-asks the judge at the same round over the same panel, and builds nothing first', async () => {
+    const dir = workDir();
+    const record = join(dir, 'record.jsonl');
+    const failing = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [() => {
+        throw new EngineError({ kind: 'billing', message: 'HTTP 402: no credits left on the account' });
+      }],
+      cap: 5,
+    });
+    const first = await run(failing.job, { cwd: dir, recordTo: record });
+    expect(first.outcome.status).toBe('paused');
+    expect(failing.writerCalls).toHaveLength(1);
+    expect(failing.reviewCalls).toHaveLength(1);
+    expect(failing.judgeCalls).toHaveLength(1);
+
+    const repaired = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [perFinding({ stop_reason: { choice: 'holds' } })],
+      cap: 5,
+    });
+    const second = await run(repaired.job, { cwd: dir, recordTo: record, resume: true });
+    expect(second.outcome.status).toBe('pass');
+    // The completed review panel stands; nothing builds or re-reviews
+    // before the judge is re-asked for the same round.
+    expect(repaired.writerCalls).toHaveLength(0);
+    expect(repaired.reviewCalls).toHaveLength(0);
+    expect(repaired.judgeCalls).toHaveLength(1);
+    expect(JSON.parse(repaired.judgeCalls[0]!.prompt).state.when.round).toBe(1);
+
+    const events = readFileSync(record, 'utf8').trim().split('\n')
+      .map((line) => JSON.parse(line) as LoopEvent & Record<string, unknown>);
+    const lastStart = events.map((e, i) => [e, i] as const)
+      .filter(([e]) => e.kind === 'run:start').at(-1)![1];
+    const calls = events.slice(lastStart).filter((e) => e.kind === 'engine:usage');
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((e) => (e as { model?: string }).model === 'judge-mock')).toBe(true);
+  });
+
+  it('a send-back whose judge call fails pauses the graph, and the resume re-asks the judge for the same send-back without re-running a node', async () => {
+    const dir = workDir();
+    const record = join(dir, 'record.jsonl');
+    let builds = 0;
+    let checks = 0;
+    let closes = 0;
+    const build = (judgeEngine: MockEngine) => dag({
+      name: 'send-back-judge',
+      nodes: {
+        write: {
+          refine: review({ judge: judge(seat(judgeEngine, 'judge-mock'), { perFinding: false }) }),
+          job: fnJob('write', () => { builds += 1; return 'wrote'; }),
+        },
+        check: {
+          needs: 'write',
+          sendsBackTo: ['write'],
+          job: fnJob('check', () => {
+            checks += 1;
+            return revisionRequest({ target: 'write', reason: 'not yet', findings: [{ severity: 'should-fix', evidence: 'fix this' }] });
+          }),
+        },
+        close: { needs: 'check', job: fnJob('close', () => { closes += 1; return 'closed'; }) },
+      },
+    });
+    const failing = new MockEngine(() => {
+      throw new EngineError({ kind: 'billing', message: 'HTTP 402: no credits left on the account' });
+    });
+    const first = await run(build(failing), { cwd: dir, recordTo: record });
+    expect(first.outcome.status).toBe('paused');
+    const checkOutcome = (first.outcome.data as Record<string, Outcome>).check;
+    expect(checkOutcome?.error?.code).toBe('ENGINE');
+    expect(checkOutcome?.error?.message).toContain('402');
+    // The failed judge spent no build and no extra review.
+    expect(builds).toBe(1);
+    expect(checks).toBe(1);
+    expect(closes).toBe(0);
+
+    const judgeCalls: AgentRequest[] = [];
+    const repaired = new MockEngine((req) => {
+      judgeCalls.push(req);
+      return JSON.stringify(roundAnswers('holds'));
+    });
+    const second = await run(build(repaired), { cwd: dir, recordTo: record, resume: true });
+    expect(second.outcome.status).toBe('pass');
+    // The judge is asked again for the same send-back round; nothing builds
+    // or re-checks before it answers, and its holds lets the work stand.
+    expect(judgeCalls).toHaveLength(1);
+    expect(JSON.parse(judgeCalls[0]!.prompt).state.when.round).toBe(1);
+    expect(builds).toBe(1);
+    expect(checks).toBe(1);
+    expect(closes).toBe(1);
+  });
+
+  it('a finished step\'s data survives a judge pause: the dependent step receives it unchanged on resume', async () => {
+    const dir = workDir();
+    const record = join(dir, 'record.jsonl');
+    const email = 'dev@example.com';
+    const ran = { writes: 0, checks: 0, closes: 0 };
+    let received: unknown;
+    const build = (judgeEngine: MockEngine) => dag({
+      name: 'send-back-data',
+      nodes: {
+        write: {
+          refine: review({ judge: judge(seat(judgeEngine, 'judge-mock'), { perFinding: false }) }),
+          job: fnJob('write', () => { ran.writes += 1; return { status: 'pass', data: email }; }),
+        },
+        check: {
+          needs: 'write',
+          sendsBackTo: ['write'],
+          job: fnJob('check', () => {
+            ran.checks += 1;
+            return revisionRequest({ target: 'write', reason: 'not yet', findings: [{ severity: 'should-fix', evidence: 'fix this' }] });
+          }),
+        },
+        close: {
+          needs: ['write', 'check'],
+          job: fnJob('close', (ctx) => { ran.closes += 1; received = ctx.needs?.write?.data; }),
+        },
+      },
+    });
+    const failing = new MockEngine(() => {
+      throw new EngineError({ kind: 'billing', message: 'HTTP 402: no credits left on the account' });
+    });
+    const first = await run(build(failing), { cwd: dir, recordTo: record });
+    expect(first.outcome.status).toBe('paused');
+    expect(ran).toEqual({ writes: 1, checks: 1, closes: 0 });
+
+    const repaired = new MockEngine(() => JSON.stringify(roundAnswers('holds')));
+    const second = await run(build(repaired), { cwd: dir, recordTo: record, resume: true });
+    expect(second.outcome.status).toBe('pass');
+    expect(ran).toEqual({ writes: 1, checks: 1, closes: 1 });
+    expect(received).toBe(email);
+  });
+
+  it('a raw finding from a function step reaches every re-asked judge whole and stays out of every recorded request', async () => {
+    const dir = workDir();
+    const record = join(dir, 'record.jsonl');
+    const email = 'dev@example.com';
+    const token = 'sk-live-secret123xyz';
+    const prompts: string[] = [];
+    // A function step's finding is never scrubbed on capture, so only a scrub
+    // of the saved rounds could change what a re-asked judge reads.
+    const build = (judgeEngine: MockEngine) => dag({
+      name: 'send-back-secret',
+      nodes: {
+        write: {
+          refine: review({ judge: judge(seat(judgeEngine, 'judge-mock'), { perFinding: false }) }),
+          job: fnJob('write', () => ({ status: 'pass', data: 'draft' })),
+        },
+        check: {
+          needs: 'write',
+          sendsBackTo: ['write'],
+          job: fnJob('check', () => revisionRequest({ target: 'write', reason: 'not yet', findings: [{ severity: 'should-fix', evidence: `mail ${email} with ${token}` }] })),
+        },
+      },
+    });
+    const failing = () => new MockEngine((req) => {
+      prompts.push(req.prompt);
+      throw new EngineError({ kind: 'billing', message: 'HTTP 402: no credits left on the account' });
+    });
+    expect((await run(build(failing()), { cwd: dir, recordTo: record })).outcome.status).toBe('paused');
+    expect((await run(build(failing()), { cwd: dir, recordTo: record, resume: true })).outcome.status).toBe('paused');
+    const repaired = new MockEngine((req) => { prompts.push(req.prompt); return JSON.stringify(roundAnswers('holds')); });
+    expect((await run(build(repaired), { cwd: dir, recordTo: record, resume: true })).outcome.status).toBe('pass');
+
+    expect(prompts).toHaveLength(3);
+    for (const prompt of prompts) {
+      expect(prompt).toContain(email);
+      expect(prompt).toContain(token);
+    }
+    const requests = readFileSync(record, 'utf8').trim().split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((e) => e.kind === 'refine:judge-request');
+    expect(requests).toHaveLength(3);
+    for (const request of requests) {
+      const kept = JSON.stringify(request);
+      expect(kept).not.toContain(email);
+      expect(kept).not.toContain(token);
+    }
+  });
+
+  it('the recorded request scrubs an injected env value and a secret shape out of the packet it keeps', async () => {
+    const dir = workDir();
+    const record = join(dir, 'record.jsonl');
+    const { job } = scriptedTeam({
+      reviewerReplies: [REVISE()],
+      judgeReplies: [perFinding(roundAnswers('holds'))],
+      cap: 5,
+      brief: 'Use case: deploy with key supersecretvalue and token sk-ant-secret123xyz.',
+    });
+    const result = await run(withEnv({ JUDGE_API_KEY: 'supersecretvalue' }, job), { cwd: dir, recordTo: record });
+    expect(result.outcome.status).toBe('pass');
+    const events = readFileSync(record, 'utf8').trim().split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const request = events.find((e) => e.kind === 'refine:judge-request')!;
+    const kept = JSON.stringify(request);
+    expect(kept).not.toContain('supersecretvalue');
+    expect(kept).not.toContain('sk-ant-secret123xyz');
+    expect((request.packet as { why: { brief: string } }).why.brief).toContain('[redacted]');
+  });
+
+  it('a secret in the work survives a paused judge and stays out of every recorded request', async () => {
+    const dir = workDir();
+    const record = join(dir, 'record.jsonl');
+    const email = 'dev@example.com';
+    const token = 'sk-live-secret123xyz';
+    const draftText = `the draft quotes ${email} and ${token}`;
+    const finding = { severity: 'should-fix', evidence: `mail ${email} with ${token}` } as const;
+    const team = (judgeReplies: readonly unknown[]) => scriptedTeam({
+      reviewerReplies: [revise(finding)],
+      judgeReplies,
+      draftText,
+      cap: 5,
+    });
+    const fails = (): never => {
+      throw new EngineError({ kind: 'billing', message: 'HTTP 402: no credits left on the account' });
+    };
+    const first = team([fails]);
+    const one = await run(first.job, { cwd: dir, recordTo: record });
+    expect(one.outcome.status).toBe('paused');
+    expect(first.writerCalls).toHaveLength(1);
+    expect(first.reviewCalls).toHaveLength(1);
+    expect(first.judgeCalls).toHaveLength(1);
+
+    const second = team([fails]);
+    const two = await run(second.job, { cwd: dir, recordTo: record, resume: true });
+    expect(two.outcome.status).toBe('paused');
+    // The saved panel stands: nothing builds or re-reviews, and the judge
+    // is asked again at the same round.
+    expect(second.writerCalls).toHaveLength(0);
+    expect(second.reviewCalls).toHaveLength(0);
+    expect(second.judgeCalls).toHaveLength(1);
+
+    const third = team([perFinding({ stop_reason: { choice: 'holds' } })]);
+    const three = await run(third.job, { cwd: dir, recordTo: record, resume: true });
+    expect(three.outcome.status).toBe('pass');
+    expect(third.writerCalls).toHaveLength(0);
+    expect(third.reviewCalls).toHaveLength(0);
+    expect(third.judgeCalls).toHaveLength(1);
+
+    // Each re-ask went over the state the first call read: the second and
+    // third requests are the first's, draft and finding unchanged.
+    expect(second.judgeCalls[0]!.prompt).toBe(first.judgeCalls[0]!.prompt);
+    expect(third.judgeCalls[0]!.prompt).toBe(first.judgeCalls[0]!.prompt);
+    const sent = JSON.parse(first.judgeCalls[0]!.prompt).state as {
+      when: { round: number }; what: { draft: string };
+      how: { findings: readonly { evidence: string }[] };
+    };
+    expect(sent.when.round).toBe(1);
+    expect(sent.what.draft).toBe(draftText);
+    // The reviewer's reply is scrubbed when it is captured, so the finding
+    // the judge reads is the one the record keeps.
+    expect(sent.how.findings[0]!.evidence).toBe('mail [redacted] with [redacted]');
+
+    // Three asks, three recorded requests, and no request event holds
+    // either secret.
+    const requests = readFileSync(record, 'utf8').trim().split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((e) => e.kind === 'refine:judge-request');
+    expect(requests).toHaveLength(3);
+    for (const request of requests) {
+      const kept = JSON.stringify(request);
+      expect(kept).not.toContain(email);
+      expect(kept).not.toContain(token);
+    }
   });
 });

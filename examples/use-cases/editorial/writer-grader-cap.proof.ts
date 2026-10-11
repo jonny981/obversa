@@ -39,10 +39,10 @@ const thirdDraft = [
 ].join('\n');
 
 // The grader returns the draft twice: a superlative, then a number the
-// brief never gave, then only a taste note. The judge sends the first two
-// back as worth another round and stops the loop on the third; the run
-// stops for the editor. Three writer turns, three grader turns, three
-// judged rounds.
+// brief never gave, then only a taste note. The judge acts on the rule
+// findings, sending both rounds back, and skips the taste note, which
+// stops the loop; the run stops for the editor. Three writer turns,
+// three grader turns, three judged rounds.
 await withExample({
   here,
   example: 'writer-grader-cap',
@@ -72,9 +72,9 @@ await withExample({
 
   const judged = (await recordEvents(run, 'records/writer-grader-cap.jsonl')).filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.reason), [
-    'the judge chose continue',
-    'the judge chose continue',
-    'the judge chose holds',
+    'the judge acts on 1 of 1 findings',
+    'the judge acts on 1 of 1 findings',
+    'the judge skipped every finding',
   ]);
   assert.deepEqual(judged.map((event) => event.answers?.stop_reason?.choice), ['continue', 'continue', 'holds']);
 

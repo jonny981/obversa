@@ -297,6 +297,9 @@ export function dag(config: DagConfig): Job {
     const checkpointPath = [...path, '@judge-kickback'];
     const saved = prior === undefined ? undefined : savedInteraction(parent, checkpointPath, identity);
     let pending = saved?.pending as unknown as { from: string; count: number; state: JudgeState } | undefined;
+    // A judge whose call failed: it is re-asked for the same send-back at
+    // the same round on resume — unlike `pending`, it waits on no person.
+    let judgeRetry = saved?.judgeRetry as unknown as { from: string; count: number; state: JudgeState } | undefined;
     const targetCounts = new Map<string, number>(Object.entries(saved?.targetCounts ?? {}) as [string, number][]);
     const judgeHistory = new Map<string, JudgeRound[]>(Object.entries(saved?.history ?? {}) as [string, JudgeRound[]][]);
     // Each target's file as its judge last read it, so each round of the
@@ -1005,7 +1008,8 @@ export function dag(config: DagConfig): Job {
       // builds before it, the send-backs to it that were carried out and
       // the rounds it ran on its own reviews. A request the judge lets
       // stand, or a second reviewer of the same build, is the same round.
-      const count = pending?.from === from ? pending.count : (targetCounts.get(to) ?? 0) + 1;
+      const waiting = pending?.from === from ? pending : judgeRetry?.from === from ? judgeRetry : undefined;
+      const count = waiting !== undefined ? waiting.count : (targetCounts.get(to) ?? 0) + 1;
       const limit = targetLimit(to);
 
       if (undeclared(from, to, reason, count, limit)) continue;
@@ -1027,15 +1031,18 @@ export function dag(config: DagConfig): Job {
         const history = judgeHistory.get(to) ?? [];
         const work = targetWork(to);
         const { draft, changedLines, tree } = await readJudgedWork(parent.workspace.dir, work, { draft: judgeDrafts.get(to), tree: history.at(-1)?.tree }, parent.fingerprintExcludePaths);
-        const state: JudgeState = pending?.from === from ? pending.state : judgeState({
+        // A judge paused on a failed call, like a pending product
+        // decision, is asked again over the state it saved: the same
+        // draft, findings and evidence its first call read.
+        const state: JudgeState = waiting !== undefined ? waiting.state : judgeState({
           work, draft, tree, ...roundEvidence(to), productFeedback: productFeedback.get(to) ?? [], latestFindings: requestFindings, skipped: judgeSkipped.get(to) ?? [], rounds: history, round: round.judge,
         });
         // The judge runs as part of the node that sent the work back:
         // inside that node's timeout and the graph's concurrency limit.
         const result = await concurrency(() => consultJudge(cfgJudge, state, nodeCtx(from, undefined), [...path, from], {
           target: to, identity: interactionIdentity({ identity, from, to }), pending: pending?.from === from,
-          save: (questionState) => checkpointInteraction(parent, checkpointPath, identity, jsonSnapshot({
-            pending: { from, count, state: questionState },
+          save: (questionState, retry) => checkpointInteraction(parent, checkpointPath, identity, jsonSnapshot({
+            [retry === true ? 'judgeRetry' : 'pending']: { from, count, state: questionState },
             results: Object.fromEntries([...results].map(([name, outcome]) => [name, outcomeSnapshot(outcome)])),
             wrote: wroteSoFar(),
             readKickbacks: Object.fromEntries([...readKickback].map(([name, o]) => [name, outcomeSnapshot(o)])),
@@ -1046,6 +1053,7 @@ export function dag(config: DagConfig): Job {
         }));
         if ('paused' in result) { judgePaused = true; record(from, result.paused, 'done'); break; }
         pending = undefined;
+        judgeRetry = undefined;
         productFeedback.set(to, result.state.productFeedback ?? []);
         judgeHistory.set(to, [...history, judgeRound(state, changedLines, result)]);
         if (draft === undefined) judgeDrafts.delete(to); else judgeDrafts.set(to, draft);

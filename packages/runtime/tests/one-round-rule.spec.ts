@@ -54,7 +54,7 @@ interface Intent {
   /** One list of replies per reviewer, by round. */
   readonly reviews: readonly (readonly unknown[])[];
   /** A number of refinements, or a judge's options and replies. */
-  readonly refine: number | { readonly cap?: number; readonly replies: readonly unknown[]; readonly interaction?: InteractionBinding };
+  readonly refine: number | { readonly cap?: number; readonly replies: readonly unknown[]; readonly interaction?: InteractionBinding; readonly perFinding?: boolean };
   /** Reviewers that must pass for the round to pass; every one by default. */
   readonly agree?: number;
   /** The writer leaves the page as it was after the first draft. */
@@ -126,6 +126,7 @@ function build(form: Form, intent: Intent): Built {
     : judge(seat(scripted(judgeOf.replies, calls.judge, calls.judgeTimeouts), 'judge-mock'), {
       ...(judgeOf.cap !== undefined ? { cap: judgeOf.cap } : {}),
       ...(judgeOf.interaction ? { interaction: judgeOf.interaction } : {}),
+      ...(judgeOf.perFinding !== undefined ? { perFinding: judgeOf.perFinding } : {}),
     });
   const goalSeat = intent.goal ? seat(scripted(intent.goal, calls.goal), 'goal-mock', ['Read']) : undefined;
   const answers = [...(intent.person ?? [])];
@@ -310,16 +311,33 @@ const PASS = { status: 'pass', summary: 'nothing to add' };
 const REAL = { severity: 'block', evidence: 'REAL: the page never says who it is for' } as const;
 const TASTE = { severity: 'nice-to-have', evidence: 'taste: prefer a warmer tone' } as const;
 
-/** Act on a finding marked REAL and skip the rest; `round` holds the round answers. */
-function perFinding(round: Record<string, unknown> = { stop_reason: { choice: 'continue' } }) {
+/** A complete reply to the round questions: every probability a clear yes. */
+function round(choice: string): Record<string, unknown> {
+  return {
+    holds: { noul: 0.9 },
+    worth_doing: { noul: 0.9 },
+    worth_another_round: { noul: 0.9 },
+    stop_reason: { choice },
+  };
+}
+
+/**
+ * Answer every question the prompt asks: `round` overrides the round
+ * answers, each finding marked REAL is acted on, the rest skipped.
+ */
+function perFinding(overrides: Record<string, unknown> = {}) {
   return (prompt: string) => {
-    const { questions } = JSON.parse(prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
-    const answers: Record<string, unknown> = { ...round };
+    const { questions } = JSON.parse(prompt) as { questions: Record<string, { type: string; instructions: string; criteria: Record<string, string> }> };
+    const answers: Record<string, unknown> = { ...round('continue'), ...overrides };
     for (const [key, question] of Object.entries(questions)) {
-      if (!('act' in question.criteria)) continue;
-      answers[key] = question.instructions.includes('REAL')
-        ? { choice: 'act', reason: 'a reader cannot tell who the page is for' }
-        : { choice: 'skip', reason: 'a matter of taste' };
+      if (key in answers) continue;
+      answers[key] = 'act' in question.criteria
+        ? question.instructions.includes('REAL')
+          ? { choice: 'act', reason: 'a reader cannot tell who the page is for' }
+          : { choice: 'skip', reason: 'a matter of taste' }
+        : question.type === 'choice'
+          ? { choice: 'continue' in question.criteria ? 'continue' : Object.keys(question.criteria)[0] }
+          : { noul: 0.9 };
     }
     return answers;
   };
@@ -343,7 +361,7 @@ describe('the same intent in every form', () => {
   it('a judge with no cap lets the work stand when it says it holds', async () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
-      refine: { replies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('continue'), round('holds')] },
     }, { status: 'pass', builds: 2, judged: 2 });
     for (const { form, judge: prompts, events } of runs) {
       expect(judgeInput(prompts[0]!), form).toMatchObject({ when: { round: 1, rounds: [], limit: expect.stringContaining('No round limit') } });
@@ -360,7 +378,7 @@ describe('the same intent in every form', () => {
   it('not_converging fails the work with the last findings and the judge\'s reason', async () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
-      refine: { replies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'not_converging' } }] },
+      refine: { perFinding: false, replies: [round('continue'), round('not_converging')] },
     }, { status: 'fail', builds: 2, judged: 2 });
     for (const { form, verdict: outcome } of runs) {
       expect(outcome.status, form).toBe('fail');
@@ -372,7 +390,7 @@ describe('the same intent in every form', () => {
   it('a cap of 1 allows one refinement, and the judge answers the last round', async () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
-      refine: { cap: 1, replies: [{ stop_reason: { choice: 'continue' } }] },
+      refine: { cap: 1, perFinding: false, replies: [round('continue')] },
     }, { status: 'fail', builds: 2, judged: 2 });
     for (const { form, judge: prompts, verdict: outcome } of runs) {
       expect(judgeInput(prompts[0]!).when, form).not.toHaveProperty('lastRound');
@@ -385,7 +403,7 @@ describe('the same intent in every form', () => {
   it('a judge that says the last round holds lets the work stand with its findings open', async () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
-      refine: { cap: 1, replies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }] },
+      refine: { cap: 1, perFinding: false, replies: [round('continue'), round('holds')] },
     }, { status: 'pass', builds: 2, judged: 2 });
     for (const { form, result } of runs) {
       const data = result.outcome.data as Record<string, Outcome>;
@@ -413,7 +431,7 @@ describe('the same intent in every form', () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE, PASS]],
       goal: [unmet, met],
-      refine: { cap: 2, replies: [{ stop_reason: { choice: 'continue' } }] },
+      refine: { cap: 2, perFinding: false, replies: [round('continue')] },
     }, { status: 'pass', builds: 3, judged: 1 });
     for (const { form, judge: prompts, reviewer } of runs) {
       expect(reviewer, form).toHaveLength(2);
@@ -434,7 +452,7 @@ describe('the same intent in every form', () => {
     };
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
-      refine: { cap: 3, interaction, replies: [{ stop_reason: { choice: 'product_decision' } }, { stop_reason: { choice: 'holds' } }] },
+      refine: { cap: 3, interaction, perFinding: false, replies: [round('product_decision'), round('holds')] },
     }, { status: 'pass', builds: 2, judged: 2 });
     for (const { form, writer, judge: prompts } of runs) {
       expect(writer[1], form).toContain('Write for new users.');
@@ -446,7 +464,7 @@ describe('the same intent in every form', () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [],
       person: ['Say who the page is for.', null],
-      refine: { replies: [{ stop_reason: { choice: 'continue' } }] },
+      refine: { perFinding: false, replies: [round('continue')] },
     }, { status: 'pass', builds: 2, judged: 1 });
     for (const { form, judge: prompts, writer } of runs) {
       expect(judgeInput(prompts[0]!), form).toMatchObject({ how: { findings: [{ severity: 'block', evidence: 'Say who the page is for.' }] }, when: { round: 1 } });
@@ -505,7 +523,7 @@ describe('the same intent in every form', () => {
   it('the judge runs inside the time limit of the node that holds the review', async () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
       timeoutMs: 54_321,
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judgeTimeouts } of runs) expect(judgeTimeouts, form).toEqual([54_321]);
@@ -534,7 +552,7 @@ describe('what the judge reads, the same in every form', () => {
       reviews: [[REVISE]],
       desc: 'Write the welcome page.',
       gate: 'A new reader knows who the page is for.',
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       expect(judgeInput(prompts[0]!).why, form).toEqual({
@@ -552,7 +570,7 @@ describe('what the judge reads, the same in every form', () => {
       reviews: [[cites]],
       repo: notesRepo,
       edit: (dir, build) => editNotes(dir, build === 1 ? { 5: 'line 5 changed', 50: 'line 50 changed' } : { 5: 'line 5 changed', 50: 'line 50 fixed' }),
-      refine: { replies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('continue'), round('holds')] },
     }, { status: 'pass', builds: 2, judged: 2 });
     for (const { form, judge: prompts } of runs) {
       const first = judgeInput(prompts[0]!);
@@ -579,7 +597,7 @@ describe('what the judge reads, the same in every form', () => {
       reviews: [[cites]],
       repo: notesRepo,
       edit: (dir) => rmSync(join(dir, 'notes.md'), { force: true }),
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       const { what } = judgeInput(prompts[0]!);
@@ -597,7 +615,7 @@ describe('what the judge reads, the same in every form', () => {
       repo: (dir) => notesRepo(dir, 'docs'),
       folder: 'docs',
       edit: (dir) => editNotes(dir, { 50: 'line 50 changed' }),
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       const { what } = judgeInput(prompts[0]!);
@@ -635,7 +653,7 @@ describe('what the judge reads, the same in every form', () => {
       edit: (dir) => {
         for (const file of ['Dockerfile', 'Makefile', '.gitignore', 'api/page.tsx', 'app/[id]/page.tsx']) writeFileSync(join(dir, file), `one\n${file} changed\n`);
       },
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       const diffs = judgeInput(prompts[0]!).what.diffs as { file: string; line: number; diff: string }[] | undefined;
@@ -672,7 +690,7 @@ describe('what the judge reads, the same in every form', () => {
       edit: (dir) => {
         for (const file of files) writeFileSync(join(dir, file), `one\n${file} changed\n`);
       },
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       const diffs = judgeInput(prompts[0]!).what.diffs as { file: string; line: number; diff: string }[] | undefined;
@@ -689,7 +707,7 @@ describe('what the judge reads, the same in every form', () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[PASS]],
       check: ['node', '-e', 'console.log("FAIL: expected 2, got 3");process.exit(1)'],
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       const checks = judgeInput(prompts[0]!).how.checks as { name: string; command: string; status: string; output: string }[];
@@ -707,7 +725,7 @@ describe('what the judge reads, the same in every form', () => {
       reviews: [[PASS]],
       check: ['node', '-e', 'console.log("FAIL: first check");process.exit(1)'],
       secondCheck: ['node', '-e', 'console.log("FAIL: second check");process.exit(1)'],
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 2 });
     for (const { form, judge: prompts } of runs) {
       const checks = judgeInput(prompts[1]!).how.checks as { name: string; status: string; output?: string }[];
@@ -723,7 +741,7 @@ describe('what the judge reads, the same in every form', () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
       lint: ['node', '-e', 'process.exit(0)'],
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       expect(judgeInput(prompts[0]!).how.checks, form).toEqual([{ name: 'lint', command: 'node -e process.exit(0)', status: 'pass' }]);
@@ -734,7 +752,7 @@ describe('what the judge reads, the same in every form', () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
       check: ['node', '-e', 'process.exit(0)'],
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       expect(judgeInput(prompts[0]!).how.checks, form).toBeUndefined();
@@ -746,7 +764,7 @@ describe('what the judge reads, the same in every form', () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
       goal: [met],
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       expect(judgeInput(prompts[0]!).how.goal, form).toEqual(met.requirements);
@@ -766,7 +784,7 @@ describe('what the judge reads, the same in every form', () => {
       });
       const reviewer = new MockEngine(() => JSON.stringify(REVISE));
       const goalSeat = (reply: unknown) => seat(scripted([reply], []), 'goal-mock', ['Read']);
-      const judgeSeat = seat(scripted([{ stop_reason: { choice: 'holds' } }], judged), 'judge-mock');
+      const judgeSeat = seat(scripted([round('holds')], judged), 'judge-mock');
       const job = form === 'workflow'
         ? workflow('pages', {
           brief: BRIEF,
@@ -776,8 +794,8 @@ describe('what the judge reads, the same in every form', () => {
             reviewer: [seat(reviewer, 'reviewer-1', ['Read'])],
           },
           stages: [
-            stage('intro', { agent: 'introWriter', writes: 'intro.md', reviewedBy: 'reviewer', refine: judge(judgeSeat), goal: goalSeat(intro) }),
-            stage('page', { agent: 'pageWriter', writes: 'page.md', reviewedBy: 'reviewer', refine: judge(judgeSeat), goal: goalSeat(page) }),
+            stage('intro', { agent: 'introWriter', writes: 'intro.md', reviewedBy: 'reviewer', refine: judge(judgeSeat, { perFinding: false }), goal: goalSeat(intro) }),
+            stage('page', { agent: 'pageWriter', writes: 'page.md', reviewedBy: 'reviewer', refine: judge(judgeSeat, { perFinding: false }), goal: goalSeat(page) }),
           ],
         })
         : (() => {
@@ -792,10 +810,10 @@ describe('what the judge reads, the same in every form', () => {
             brief: BRIEF,
             useCase: 'a reader gets a clear, short page.',
             nodes: {
-              intro: { refine: buildReview({ judge: judge(judgeSeat) }), job: writer('intro.md'), file: 'intro.md' },
+              intro: { refine: buildReview({ judge: judge(judgeSeat, { perFinding: false }) }), job: writer('intro.md'), file: 'intro.md' },
               'intro-goal': { needs: 'intro', job: goalCheck(goalSeat(intro), { target: 'intro', text: BRIEF }), sendsBackTo: ['intro'] },
               'intro-review': { needs: 'intro-goal', job: panel('intro'), sendsBackTo: ['intro'] },
-              page: { needs: 'intro-review', refine: buildReview({ judge: judge(judgeSeat) }), job: writer('page.md'), file: 'page.md' },
+              page: { needs: 'intro-review', refine: buildReview({ judge: judge(judgeSeat, { perFinding: false }) }), job: writer('page.md'), file: 'page.md' },
               'page-goal': { needs: 'page', job: goalCheck(goalSeat(page), { target: 'page', text: BRIEF }), sendsBackTo: ['page'] },
               'page-review': { needs: 'page-goal', job: panel('page'), sendsBackTo: ['page'] },
             },
@@ -813,7 +831,7 @@ describe('what the judge reads, the same in every form', () => {
   it('the how: who raised each finding, by the id its question uses', async () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       expect(judgeInput(prompts[0]!).how.findings, form).toEqual([{ id: 'finding-1', reviewer: 'write-1', ...FINDING }]);
@@ -822,8 +840,8 @@ describe('what the judge reads, the same in every form', () => {
 
   it('the when: every earlier round\'s findings, with the judge\'s own decision on each and its reason', async () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
-      reviews: [[{ status: 'revise', summary: 'two findings', findings: [REAL, TASTE] }]],
-      refine: { replies: [perFinding(), { stop_reason: { choice: 'holds' } }] },
+      reviews: [[{ status: 'revise', summary: 'two findings', findings: [REAL, TASTE] }, { status: 'revise', summary: 'one finding', findings: [TASTE] }]],
+      refine: { replies: [perFinding(), perFinding(round('holds'))] },
     }, { status: 'pass', builds: 2, judged: 2 });
     for (const { form, judge: prompts } of runs) {
       expect(judgeInput(prompts[1]!).when.rounds, form).toMatchObject([{
@@ -842,7 +860,7 @@ describe('what the judge reads, the same in every form', () => {
       reviews: [[REVISE]],
       edit: (dir) => writeFileSync(join(dir, 'page.md'), 'x'.repeat(10_000)),
       judgeContextLimit: 2_000,
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts, events } of runs) {
       const packet = judgeInput(prompts[0]!);
@@ -861,7 +879,7 @@ describe('what the judge reads, the same in every form', () => {
       check: ['node', '-e', 'console.log("FAIL ".repeat(12000));process.exit(1)'],
       // The check's failure is also this round's finding, which is never cut.
       judgeContextLimit: 6_000,
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       const packet = judgeInput(prompts[0]!);
@@ -881,7 +899,7 @@ describe('what the judge reads, the same in every form', () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[long]],
       judgeContextLimit: 4_000,
-      refine: { replies: [{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('continue'), round('continue'), round('continue'), round('holds')] },
     }, { status: 'pass', builds: 4, judged: 4 });
     for (const { form, judge: prompts } of runs) {
       const packet = judgeInput(prompts[3]!);
@@ -902,7 +920,7 @@ describe('what the judge reads, the same in every form', () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
       judgeContextLimit: 10,
-      refine: { replies: [{ stop_reason: { choice: 'holds' } }] },
+      refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       const packet = judgeInput(prompts[0]!);
@@ -964,7 +982,7 @@ describe('what one run keeps to itself', () => {
     const result = await run(dag({
       name: 'page',
       nodes: {
-        write: { refine: buildReview({ judge: judge(seat(scripted([{ stop_reason: { choice: 'holds' } }, { stop_reason: { choice: 'continue' } }], judged), 'judge-mock'), { cap: 1 }) }), job: fnJob('write', () => { builds += 1; return `draft ${builds}`; }) },
+        write: { refine: buildReview({ judge: judge(seat(scripted([round('holds'), round('continue')], judged), 'judge-mock'), { cap: 1, perFinding: false }) }), job: fnJob('write', () => { builds += 1; return `draft ${builds}`; }) },
         style: {
           needs: 'write',
           sendsBackTo: ['write'],
@@ -1052,8 +1070,8 @@ describe.each(['workflow', 'dag'] as const)('a person reviewer with a judge acro
       writeFileSync(join(req.cwd!, 'page.md'), `draft ${writer.length}`);
       return JSON.stringify({ status: 'pass', summary: `wrote draft ${writer.length}` });
     });
-    const judgeEngine = scripted([{ stop_reason: { choice: 'continue' } }], judgeCalls);
-    const refine = refinements ?? judge(seat(judgeEngine, 'judge-mock'), cap === undefined ? {} : { cap });
+    const judgeEngine = scripted([round('continue')], judgeCalls);
+    const refine = refinements ?? judge(seat(judgeEngine, 'judge-mock'), cap === undefined ? { perFinding: false } : { cap, perFinding: false });
     // A resume builds the job again, as a fresh worker would.
     const job = (): Job => form === 'dag' ? dag({
       name: 'page',
@@ -1181,7 +1199,7 @@ describe('the goal check\'s verdicts across a resume', () => {
       const reviewerEngine = new MockEngine(() => JSON.stringify(PASS));
       // The person's question is about the review's summary, which stays the
       // same, so the rebuilt work meets the same refusal; the judge lets it stand.
-      const judgeSeat = seat(scripted([{ stop_reason: { choice: 'continue' } }, { stop_reason: { choice: 'holds' } }], judged), 'judge-mock');
+      const judgeSeat = seat(scripted([round('continue'), round('holds')], judged), 'judge-mock');
       const goalSeat = seat(scripted([met], []), 'goal-mock', ['Read']);
       // A resume builds the job again, as a fresh worker would.
       const job = (): Job => form === 'workflow' ? workflow('page', {
@@ -1192,7 +1210,7 @@ describe('the goal check\'s verdicts across a resume', () => {
           approver: person('Is the page ready?'),
         },
         stages: [
-          stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', refine: judge(judgeSeat), goal: goalSeat }),
+          stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', refine: judge(judgeSeat, { perFinding: false }), goal: goalSeat }),
           stage('approve', { input: 'approver', sendsBackTo: 'write' }),
         ],
       }) : dag({
@@ -1201,7 +1219,7 @@ describe('the goal check\'s verdicts across a resume', () => {
         useCase: 'a reader gets a clear, short page.',
         nodes: {
           write: {
-            refine: buildReview({ judge: judge(judgeSeat) }),
+            refine: buildReview({ judge: judge(judgeSeat, { perFinding: false }) }),
             job: agentJob({ label: 'write', engine: writerEngine, model: 'writer-mock', workspaceMode: 'write', consumeFeedback: true, prompt: 'Write page.md.', outcome: (text) => outcomeFromAgentText(text) }),
             file: 'page.md',
           },
@@ -1273,8 +1291,8 @@ describe.each([
     });
     const reviewEngine = scripted(intent.reviews, []);
     const goalSeat = 'goal' in intent ? seat(scripted(intent.goal, []), 'goal-mock', ['Read']) : undefined;
-    const judgeEngine = scripted([{ stop_reason: { choice: 'continue' } }], judgeCalls);
-    const refine = typeof intent.refine === 'number' ? intent.refine : judge(seat(judgeEngine, 'judge-mock'), intent.refine);
+    const judgeEngine = scripted([round('continue')], judgeCalls);
+    const refine = typeof intent.refine === 'number' ? intent.refine : judge(seat(judgeEngine, 'judge-mock'), { ...intent.refine, perFinding: false });
     // A resume builds the job again, as a fresh worker would.
     const job = (): Job => form === 'workflow' ? workflow('page', {
       brief: BRIEF,
@@ -1394,7 +1412,7 @@ describe('a resume that reuses the saved rounds', () => {
       const reviewerEngine = new MockEngine(() => JSON.stringify(PASS));
       const judged: string[] = [];
       inputs[form] = judged;
-      const judgeSeat = seat(scripted([{ stop_reason: { choice: 'holds' } }], judged), 'judge-mock');
+      const judgeSeat = seat(scripted([round('holds')], judged), 'judge-mock');
       const check = ['node', '-e', 'console.log("FAIL: first check");process.exit(1)'];
       const secondCheck = ['node', '-e', 'console.log("FAIL: second check");process.exit(1)'];
       // A resume builds the job again, as a fresh worker would.
@@ -1406,7 +1424,7 @@ describe('a resume that reuses the saved rounds', () => {
           approver: person('Is the page ready?'),
         },
         stages: [
-          stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', refine: judge(judgeSeat) }),
+          stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', refine: judge(judgeSeat, { perFinding: false }) }),
           stage('check', { run: check, sendsBackTo: 'write' }),
           stage('approve', { input: 'approver' }),
           stage('second-check', { run: secondCheck, sendsBackTo: 'write' }),
@@ -1417,7 +1435,7 @@ describe('a resume that reuses the saved rounds', () => {
         useCase: 'a reader gets a clear, short page.',
         nodes: {
           write: {
-            refine: buildReview({ judge: judge(judgeSeat) }),
+            refine: buildReview({ judge: judge(judgeSeat, { perFinding: false }) }),
             job: agentJob({ label: 'write', engine: writerEngine, model: 'writer-mock', workspaceMode: 'write', consumeFeedback: true, prompt: 'Write page.md.', outcome: (text) => outcomeFromAgentText(text) }),
             file: 'page.md',
           },
@@ -1529,7 +1547,7 @@ describe('the check for unchanged work in a git workspace', () => {
 
   it.each([
     ...(['workflow', 'dag', 'loop'] as const).map((form) => ({ form, refine: 3 as Intent['refine'], judged: 0 })),
-    ...(['workflow', 'dag'] as const).map((form) => ({ form, refine: { replies: [{ stop_reason: { choice: 'continue' } }] } as Intent['refine'], judged: 3 })),
+    ...(['workflow', 'dag'] as const).map((form) => ({ form, refine: { perFinding: false, replies: [round('continue')] } as Intent['refine'], judged: 3 })),
   ])('a writer that fixes a declared file Git ignores has changed the work, every round ($form, judged $judged)', async ({ form, refine, judged }) => {
     const cwd = await tmpRepo();
     writeFileSync(join(cwd, '.gitignore'), 'page.md\n');

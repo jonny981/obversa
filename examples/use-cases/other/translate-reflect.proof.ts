@@ -20,11 +20,11 @@ const revised = literal
 const terms = '| English | Where | Rendered | Note |\n| --- | --- | --- | --- |\n| invoice | throughout | facture | |\n| recurring invoice | first paragraph | facture récurrente | |\n| Drafts | second paragraph | Brouillons | |\n| send | first and third paragraphs | envoyer | "expédier" reads more naturally for a parcel, not a PDF; the glossary is right here |\n| paid | first paragraph | payée | |\n| payment reminder | third paragraph | relance de paiement | "rappel" is what most people say; the glossary keeps "relance", the accounting term |\n';
 
 // The reviewer reflects twice: two glossary terms rendered with the words
-// the glossary rules out, then only a taste note. The judge sends the first
-// back as worth another round and stops on the taste note; the terms note
-// records where the glossary cost naturalness, and the run reaches the
-// editor with the note still open, which is the point: a judge stopped it,
-// not the reviewer. The editor answers on the run's page.
+// the glossary rules out, then only a taste note. The judge acts on both
+// findings and sends the first back, then skips the taste note; the terms
+// note records where the glossary cost naturalness, and the run reaches
+// the editor with the note still open, which is the point: a judge stopped
+// it, not the reviewer. The editor answers on the run's page.
 await withExample({
   here,
   example: 'translate-reflect',
@@ -57,8 +57,8 @@ await withExample({
   const record = await recordEvents(run, 'records/translate-reflect.jsonl');
   const judged = record.filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.reason), [
-    'the judge chose continue',
-    'the judge chose holds',
+    'the judge acts on 2 of 2 findings',
+    'the judge skipped every finding',
   ]);
   const nuance = record.filter((event) => event.kind === 'dag:node' && event.node === 'nuance' && event.phase === 'done');
   assert.deepEqual(nuance.map((event) => (event.outcome as { status: string }).status), ['paused', 'pass'], 'the run pauses at the editor, then the answer passes the step');

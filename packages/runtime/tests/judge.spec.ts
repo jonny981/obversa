@@ -146,8 +146,7 @@ describe('judgeDecision', () => {
   });
 
   it('defaults to another round when nothing in the reply resolves a stop', () => {
-    // An empty answers object is what an unreadable judge reply becomes
-    // (askJudge's own JSON.parse failure path), and it must not force a stop.
+    // An empty answers object resolves no stop: it routes as no clear answer.
     expect(judgeDecision({})).toEqual({ again: true, reason: 'the judge says another round is worth it', rule: 'no clear answer' });
   });
 

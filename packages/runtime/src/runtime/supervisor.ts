@@ -542,8 +542,12 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
       // job:end line instead, and the record keeps neither.
       return '';
     case 'interaction:checkpoint':
-      // State a resume reads back, saved as rounds advance: the record keeps
-      // it, and a person reads the steps and send-backs it follows instead.
+      // State a resume reads back as rounds advance: the record keeps it, and
+      // a person reads the steps and send-backs that follow it.
+      return '';
+    case 'refine:judge-request':
+      // What the judge was asked, saved ahead of the call: the record keeps
+      // it, and a person reads the answer the judge gives next.
       return '';
     case 'engine:tool':
       return `${at}  tool ${event.name} ${event.phase}${event.target ? ` ${event.target}` : ''}`;

@@ -62,10 +62,10 @@ writer-grader-cap › draft › draft-review › review-panel • draft: fail  R
 writer-grader-cap › draft › draft-review › refine-judge • refine:judge
 
 writer-grader-cap › draft › draft-review › refine-judge   jev-latest: 10/5 tok
-writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.72},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6}}
-writer-grader-cap › draft › draft-review ◆ draft round 1: again on stop_reason: continue: the judge chose continue
+writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.72},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"choice","choice":"act","confidence":0.9}}
+writer-grader-cap › draft › draft-review ◆ draft round 1: again on findings: 1 act, 0 skip: the judge acts on 1 of 1 findings
 writer-grader-cap › draft › draft-review · review: fail
-review did not pass (Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 1: "the best in the business" breaks rule 3, no superlatives (the judge chose continue)); re-entering draft-review
+review did not pass (Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 1: "the best in the business" breaks rule 3, no superlatives (the judge acts on 1 of 1 findings)); re-entering draft-review
 writer-grader-cap › draft › draft-review · iteration 2
 writer-grader-cap › draft › draft-review • draft
 
@@ -81,10 +81,10 @@ writer-grader-cap › draft › draft-review › review-panel • draft: fail  R
 writer-grader-cap › draft › draft-review › refine-judge • refine:judge
 
 writer-grader-cap › draft › draft-review › refine-judge   jev-latest: 10/5 tok
-writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.61},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6}}
-writer-grader-cap › draft › draft-review ◆ draft round 2: again on stop_reason: continue: the judge chose continue
+writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.61},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"choice","choice":"act","confidence":0.9}}
+writer-grader-cap › draft › draft-review ◆ draft round 2: again on findings: 1 act, 0 skip: the judge acts on 1 of 1 findings
 writer-grader-cap › draft › draft-review · review: fail
-review did not pass (Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 3: "40 percent" breaks rule 4; the brief gives no number (the judge chose continue)); re-entering draft-review
+review did not pass (Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 3: "40 percent" breaks rule 4; the brief gives no number (the judge acts on 1 of 1 findings)); re-entering draft-review
 writer-grader-cap › draft › draft-review · iteration 3
 writer-grader-cap › draft › draft-review • draft
 
@@ -100,8 +100,8 @@ writer-grader-cap › draft › draft-review › review-panel • draft: fail  R
 writer-grader-cap › draft › draft-review › refine-judge • refine:judge
 
 writer-grader-cap › draft › draft-review › refine-judge   jev-latest: 10/5 tok
-writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8}}
-writer-grader-cap › draft › draft-review ◆ draft round 3: stop as pass on stop_reason: holds: the judge chose holds
+writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8},"finding-1":{"type":"choice","choice":"skip","confidence":0.9}}
+writer-grader-cap › draft › draft-review ◆ draft round 3: stop as pass on findings: 0 act, 1 skip: the judge skipped every finding
 writer-grader-cap › draft › draft-review · review: pass
 writer-grader-cap › draft › draft-review ◂ pass (3 iter)
 writer-grader-cap · node draft: done (pass)
@@ -117,7 +117,7 @@ writer-grader-cap ◂ dag paused
   "data": {
     "draft": {
       "status": "pass",
-      "summary": "the judge chose holds"
+      "summary": "the judge skipped every finding"
     },
     "publish": {
       "status": "paused",
@@ -143,7 +143,7 @@ writer-grader-cap ◂ dag paused
           ]
         },
         "input": {
-          "draft": "the judge chose holds"
+          "draft": "the judge skipped every finding"
         },
         "presentation": {}
       }
@@ -154,11 +154,11 @@ writer-grader-cap ◂ dag paused
 
 Three drafts, three rounds of findings, three answers from the judge. The
 first draft called the review "the best in the business", and the grader
-named the line and the rule against superlatives; the judge said another
-round was worth it. The second draft explained the loop and added a number
-the brief never gave, and the grader named that; the judge said the same
-again. The third draft drew one taste note, and the judge said the draft
-holds, so the run stopped for the editor. Nothing was published.
+named the line and the rule against superlatives; the judge acted on the
+finding. The second draft explained the loop and added a number
+the brief never gave, and the grader named that; the judge acted on that
+too. The third draft drew one taste note, which the judge skipped, so the
+draft stood and the run stopped for the editor. Nothing was published.
 
 ## The file
 
@@ -210,19 +210,22 @@ asks Jev the same questions instead:
     "holds": { "type": "noul", "noul": 0.2 },
     "worth_doing": { "type": "noul", "noul": 0.8 },
     "worth_another_round": { "type": "noul", "noul": 0.72 },
-    "stop_reason": { "type": "choice", "choice": "continue", "confidence": 0.6 }
+    "stop_reason": { "type": "choice", "choice": "continue", "confidence": 0.6 },
+    "finding-1": { "type": "choice", "choice": "act", "confidence": 0.9 }
   },
   {
     "holds": { "type": "noul", "noul": 0.2 },
     "worth_doing": { "type": "noul", "noul": 0.8 },
     "worth_another_round": { "type": "noul", "noul": 0.61 },
-    "stop_reason": { "type": "choice", "choice": "continue", "confidence": 0.6 }
+    "stop_reason": { "type": "choice", "choice": "continue", "confidence": 0.6 },
+    "finding-1": { "type": "choice", "choice": "act", "confidence": 0.9 }
   },
   {
     "holds": { "type": "noul", "noul": 0.9 },
     "worth_doing": { "type": "noul", "noul": 0.2 },
     "worth_another_round": { "type": "noul", "noul": 0.1 },
-    "stop_reason": { "type": "choice", "choice": "holds", "confidence": 0.8 }
+    "stop_reason": { "type": "choice", "choice": "holds", "confidence": 0.8 },
+    "finding-1": { "type": "choice", "choice": "skip", "confidence": 0.9 }
   }
 ]
 ```
@@ -388,9 +391,9 @@ flowchart LR
 
 The proof runs the file against scripted seats and a recorded judge, and
 checks the loop the page describes: three writer turns, three grader reads,
-the judge answering continue, continue, holds, the superlative and the
-invented number gone from the draft on disk, and the run stopped at the
-editor. Obversa recorded the run as one event log, so it shows each draft,
+the judge acting on the two rule findings and skipping the taste note, the
+superlative and the invented number gone from the draft on disk, and the
+run stopped at the editor. Obversa recorded the run as one event log, so it shows each draft,
 each set of findings and each answer from the judge in order, with the
 reasons on the record for the editor to read.
 

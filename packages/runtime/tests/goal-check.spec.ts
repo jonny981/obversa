@@ -34,6 +34,14 @@ const oneUnmet = { requirements: [MET, UNMET] };
 const PASS = { status: 'pass', summary: 'nothing to add' };
 const REVISE = { status: 'revise', summary: 'one finding', findings: [{ severity: 'should-fix', evidence: 'REVIEW: the title is vague' }] };
 
+/** A complete reply to the round questions: every probability a clear yes. */
+const round = (choice: string): Record<string, unknown> => ({
+  holds: { noul: 0.9 },
+  worth_doing: { noul: 0.9 },
+  worth_another_round: { noul: 0.9 },
+  stop_reason: { choice },
+});
+
 /** The scripted reply for this call: the last one repeats if the loop runs longer. */
 function scripted(replies: readonly unknown[], calls: AgentRequest[]) {
   return (req: AgentRequest) => {
@@ -80,7 +88,7 @@ function scriptedTeam(opts: {
         gate: 'Every requirement in the brief is on the page.',
         goal: seat(goalEngine, 'goal-mock', ['Read']),
         reviewedBy: 'reviewer',
-        refine: opts.judgeReplies ? judge(seat(judgeEngine, 'judge-mock'), { cap: opts.refine ?? 3 }) : opts.refine ?? 3,
+        refine: opts.judgeReplies ? judge(seat(judgeEngine, 'judge-mock'), { cap: opts.refine ?? 3, perFinding: false }) : opts.refine ?? 3,
       }),
     ],
   });
@@ -133,7 +141,7 @@ describe('workflow(): goal on an agent stage', () => {
     const { job, writerCalls, judgeCalls, reviewCalls } = scriptedTeam({
       goalReplies: [oneUnmet, allMet],
       reviewerReplies: [REVISE],
-      judgeReplies: [{ stop_reason: { choice: 'holds' } }],
+      judgeReplies: [round('holds')],
     });
     const result = await runTeam(job);
     expect(result.outcome.status).toBe('pass');
@@ -214,7 +222,7 @@ describe('workflow(): goal on an agent stage', () => {
       const team = scriptedTeam({
         goalReplies: [allMet],
         reviewerReplies: [REVISE],
-        judgeReplies: [{ stop_reason: { choice: calls.judge === 0 ? 'product_decision' : 'holds' } }],
+        judgeReplies: [round(calls.judge === 0 ? 'product_decision' : 'holds')],
       });
       const result = await run(team.job, { cwd, recordTo, callbacks, resume: again, onEvent: (event) => events.push(event) });
       calls.writer += team.writerCalls.length;
@@ -286,14 +294,14 @@ describe('goalCheck(): the dag() helper', () => {
     const judgeCalls: AgentRequest[] = [];
     const goalEngine = new MockEngine(scripted([oneUnmet, allMet], goalCalls));
     // A judge that would let any round stand: an unmet requirement must not reach it.
-    const judgeEngine = new MockEngine(scripted([{ stop_reason: { choice: 'holds' } }], judgeCalls));
+    const judgeEngine = new MockEngine(scripted([round('holds')], judgeCalls));
     let builds = 0;
     let reviews = 0;
     const graph = dag({
       name: 'goal-dag-judged',
       nodes: {
         build: {
-          refine: review({ judge: judge(seat(judgeEngine, 'judge-mock'), { cap: 2 }) }),
+          refine: review({ judge: judge(seat(judgeEngine, 'judge-mock'), { cap: 2, perFinding: false }) }),
           job: fnJob('build', () => { builds += 1; return 'built'; }),
         },
         goal: {

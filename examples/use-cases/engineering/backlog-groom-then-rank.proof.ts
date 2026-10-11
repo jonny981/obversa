@@ -21,11 +21,11 @@ const threeStories = [
 ].join('');
 const fourStories = `${threeStories}${story('Dark mode', 'Dark mode pls', 'A user switches the app to a dark theme that follows the system setting by default.', 'Every screen has a dark variant with readable contrast', 'The choice is remembered per user')}`;
 
-// The reviewer sends the first split back with one finding the judge says
-// is worth another round; the second split covers all four and the
-// reviewer's remaining note is taste, so the judge stops the loop. The
-// questions are written and accepted, and the run waits for the owner,
-// who answers on the run's page.
+// The reviewer sends the first split back with one finding the judge acts
+// on; the second split covers all four and the reviewer's remaining note
+// is taste, which the judge skips, so the split stands. The questions are
+// written and accepted, and the run waits for the owner, who answers on
+// the run's page.
 await withExample({
   here,
   example: 'backlog-groom-then-rank',
@@ -59,8 +59,8 @@ await withExample({
   const record = await recordEvents(run, 'records/backlog-groom-then-rank.jsonl');
   const judged = record.filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.reason), [
-    'the judge chose continue',
-    'the judge chose holds',
+    'the judge acts on 1 of 1 findings',
+    'the judge skipped every finding',
   ]);
   const rank = record.filter((event) => event.kind === 'dag:node' && event.node === 'rank' && event.phase === 'done');
   assert.deepEqual(rank.map((event) => (event.outcome as { status: string }).status), ['paused', 'pass'], 'the run pauses at the owner, then the answer passes the step');

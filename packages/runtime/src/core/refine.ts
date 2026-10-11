@@ -403,11 +403,19 @@ export function judgedReview(work: RefinedWork, cfgJudge: Judge, review: Job, ru
     const checkpointPath = [...ctx.path, '@judge-review'];
     let saved = savedInteraction(ctx, checkpointPath, identity);
     let { draft, changedLines, tree } = await readJudgedWork(ctx.workspace.dir, judgedWork, { draft: shared.previousDraft, tree: shared.rounds.at(-1)?.tree }, ctx.fingerprintExcludePaths);
-    if (saved && (saved.state as unknown as JudgeState).draft !== draft) saved = undefined;
+    const savedState = saved?.state as unknown as JudgeState | undefined;
+    // The checkpoint stands only for the draft it saved: the saved draft's
+    // hash against the draft read fresh, so a draft that changed since the
+    // pause is judged as it is now, and one that did not keeps the saved
+    // panel. A saved state without a draft stands only when none is read.
+    const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+    if (saved && (savedState?.draft === undefined
+      ? draft !== undefined
+      : draft === undefined || hash(savedState.draft) !== hash(draft))) saved = undefined;
     if (saved) {
-      shared.rounds = (saved.state as unknown as JudgeState).rounds;
-      shared.productFeedback = (saved.state as unknown as JudgeState).productFeedback ?? [];
-      shared.skipped = (saved.state as unknown as JudgeState).skipped ?? [];
+      shared.rounds = savedState!.rounds;
+      shared.productFeedback = savedState!.productFeedback ?? [];
+      shared.skipped = savedState!.skipped ?? [];
     }
     // A saved question means `before` passed in this round: it does not run again.
     if (!saved && before) {
@@ -434,12 +442,19 @@ export function judgedReview(work: RefinedWork, cfgJudge: Judge, review: Job, ru
     // run of it, and the rounds this one counted toward the review budget.
     // A round a red check sent back does not count toward it.
     const round = roundRule(run.base + run.reviewed(), cfgJudge.cap);
-    const state: JudgeState = saved ? saved.state as unknown as JudgeState : judgeState({
+    // A judge paused on a failed call, like a pending product decision, is
+    // asked again over the state it saved: the same draft, findings and
+    // evidence its first call read. `judgeRetry` on the checkpoint is what
+    // tells the two apart: only a product decision waits on a person.
+    const state: JudgeState = saved !== undefined ? savedState! : judgeState({
       work: judgedWork, draft, tree, ...shared.evidence(), productFeedback: shared.productFeedback, latestFindings: findings, skipped: shared.skipped, rounds: shared.rounds, round: round.judge,
     });
     const result = await consultJudge(cfgJudge, state, ctx, ctx.path, {
-      target: work.name, identity, pending: saved !== undefined,
-      save: (questionState) => checkpointInteraction(ctx, checkpointPath, identity, jsonSnapshot({ state: questionState, panel: outcomeSnapshot(reviewOutcome) })),
+      target: work.name, identity, pending: saved !== undefined && saved.judgeRetry !== true,
+      save: (questionState, retry) => checkpointInteraction(ctx, checkpointPath, identity, jsonSnapshot({
+        state: questionState, panel: outcomeSnapshot(reviewOutcome),
+        ...(retry === true ? { judgeRetry: true } : {}),
+      })),
     });
     if ('paused' in result) return result.paused;
     checkpointInteraction(ctx, checkpointPath, identity, null);

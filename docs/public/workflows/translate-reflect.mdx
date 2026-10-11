@@ -67,11 +67,11 @@ translate-reflect › translate › translate-review › review-panel   gpt-5.6-
 translate-reflect › translate › translate-review › review-panel • translate-1: fail  two glossary terms are rendered with the words the glossary rules out
 translate-reflect › translate › translate-review › review-panel • translate: fail  Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "s'expédie" and "l'expédie" where the glossary says "envoyer" - translate-1 [should-fix]: "rappels de paiement" where the glossary says "relance de paiement"
 translate-reflect › translate › translate-review › refine-judge • refine:judge
-translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.72},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6}}
-translate-reflect › translate › translate-review ◆ translate round 1: again on stop_reason: continue: the judge chose continue
+translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.72},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"choice","choice":"act","confidence":0.9},"finding-2":{"type":"choice","choice":"act","confidence":0.9}}
+translate-reflect › translate › translate-review ◆ translate round 1: again on findings: 2 act, 0 skip: the judge acts on 2 of 2 findings
 translate-reflect › translate › translate-review › @judge-review interaction:checkpoint
 translate-reflect › translate › translate-review · review: fail
-review did not pass (Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "s'expédie" and "l'expédie" where the glossary says "envoyer" - translate-1 [should-fix]: "rappels de paiement" where the glossary says "relance de paiement" (the judge chose continue)); re-entering translate-review
+review did not pass (Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "s'expédie" and "l'expédie" where the glossary says "envoyer" - translate-1 [should-fix]: "rappels de paiement" where the glossary says "relance de paiement" (the judge acts on 2 of 2 findings)); re-entering translate-review
 translate-reflect › translate › translate-review · iteration 2
 translate-reflect › translate › translate-review • translate
 
@@ -85,8 +85,8 @@ translate-reflect › translate › translate-review › review-panel   gpt-5.6-
 translate-reflect › translate › translate-review › review-panel • translate-1: fail  one taste note
 translate-reflect › translate › translate-review › review-panel • translate: fail  Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "le jour venu" is fine; "le jour dit" sat closer to the source, taste only
 translate-reflect › translate › translate-review › refine-judge • refine:judge
-translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8}}
-translate-reflect › translate › translate-review ◆ translate round 2: stop as pass on stop_reason: holds: the judge chose holds
+translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8},"finding-1":{"type":"choice","choice":"skip","confidence":0.9}}
+translate-reflect › translate › translate-review ◆ translate round 2: stop as pass on findings: 0 act, 1 skip: the judge skipped every finding
 translate-reflect › translate › translate-review › @judge-review interaction:checkpoint
 translate-reflect › translate › translate-review · review: pass
 translate-reflect › translate › translate-review ◂ pass (2 iter)
@@ -110,7 +110,7 @@ translate-reflect ◂ dag pass
   "data": {
     "translate": {
       "status": "pass",
-      "summary": "the judge chose holds"
+      "summary": "the judge skipped every finding"
     },
     "terms": {
       "status": "pass",
@@ -129,9 +129,9 @@ translate-reflect ◂ dag pass
 
 Two translations, two reads, two answers from the judge. The first
 translation rendered two glossary terms with the words the glossary rules
-out; the reviewer named them, and the judge said another round was worth
-it. The second followed the glossary and drew one taste note, and the judge
-said the translation holds. The run waited at `nuance` with the
+out; the reviewer named them, and the judge acted on both. The second
+followed the glossary and drew one taste note, which the judge skipped, so
+the translation stood. The run waited at `nuance` with the
 translation in `fr/article.md` and the terms note in `fr/terms.md`, and the
 editor's yes on the page finished it. A no goes to `translate` with the editor's note as the
 finding.

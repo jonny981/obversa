@@ -12,6 +12,14 @@ function seat(engine: MockEngine, model: string, tools: readonly string[] = []):
   return { engine, identity: { adapter: 'mock', provider: 'mock', modelFamily: model, model, tools } };
 }
 
+/** A complete reply to the round questions: every probability a clear yes. */
+const round = (choice: string): Record<string, unknown> => ({
+  holds: { noul: 0.9 },
+  worth_doing: { noul: 0.9 },
+  worth_another_round: { noul: 0.9 },
+  stop_reason: { choice },
+});
+
 interface PromptFinding { readonly id: string; readonly evidence: string }
 
 function promptFindings(req: AgentRequest): PromptFinding[] {
@@ -357,7 +365,7 @@ describe('workflow synthesise', () => {
     const second = new MockEngine(() => review('The opening paragraph runs on.'));
     const judgeEngine = new MockEngine((req) => {
       judgeCalls.push(req);
-      return JSON.stringify({ stop_reason: { choice: 'holds' } });
+      return JSON.stringify(round('holds'));
     });
     const dir = mkdtempSync(join(tmpdir(), 'panel-synthesis-'));
     dirs.push(dir);
@@ -373,7 +381,7 @@ describe('workflow synthesise', () => {
           writes: 'page.md',
           reviewedBy: 'reviewers',
           synthesise: true,
-          refine: judge(seat(judgeEngine, 'judge-mock'), { cap: 2 }),
+          refine: judge(seat(judgeEngine, 'judge-mock'), { cap: 2, perFinding: false }),
         }),
       ],
     }), { cwd: dir });
@@ -402,7 +410,7 @@ describe('workflow synthesise', () => {
     });
     const judgeEngine = new MockEngine((req) => {
       judgeCalls.push(req);
-      return JSON.stringify({ stop_reason: { choice: 'holds' } });
+      return JSON.stringify(round('holds'));
     });
     const dir = mkdtempSync(join(tmpdir(), 'panel-synthesis-'));
     dirs.push(dir);
@@ -416,7 +424,7 @@ describe('workflow synthesise', () => {
         ],
       },
       stages: [
-        stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewers', synthesise: true, refine: judge(seat(judgeEngine, 'judge-mock')) }),
+        stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewers', synthesise: true, refine: judge(seat(judgeEngine, 'judge-mock'), { perFinding: false }) }),
       ],
     }), { cwd: dir });
 

@@ -213,10 +213,13 @@ The answers about each finding decide the route. When any finding is
 work stands as a pass. This holds whatever the round answers say, so a
 chosen `not_converging` neither drops a finding the judge acts on nor fails
 a round whose findings it skips. The one exception is `product_decision`:
-the judge asks a person as described below. A finding the judge does not
-answer follows the round answer: it goes back when that answer is
-`continue`, and it is skipped when that answer is `holds` or
-`over_polishing`.
+the judge asks a person as described below. When the judge itself cannot
+answer, the loop stops rather than spending a build. A failed judge call
+pauses the run with the engine's own error. A reply that does not parse,
+or that leaves an asked question without a usable answer, pauses it with
+a validation error. A resumed run asks the judge again for the same round,
+over the review that was already done. Nothing builds and nothing reviews
+again first.
 
 A `dag()` node takes the same `judge()` value in `review({ judge })` on its
 `refine`, which covers the node's own reviews and the send-backs other

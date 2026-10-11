@@ -262,14 +262,19 @@ describe('totals', () => {
     const recordTo = join(workDir(), 'record.jsonl');
     const events: LoopEvent[] = [];
     const judgeSeat: TeamSeat = {
-      engine: new MockEngine(() => JSON.stringify({ stop_reason: { choice: 'holds' } })),
+      engine: new MockEngine(() => JSON.stringify({
+        holds: { noul: 0.9 },
+        worth_doing: { noul: 0.9 },
+        worth_another_round: { noul: 0.9 },
+        stop_reason: { choice: 'holds' },
+      })),
       identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
     };
     let reviewRuns = 0;
     const job = dag({
       name: 'judged-review',
       nodes: {
-        implement: { refine: review({ judge: judge(judgeSeat, { cap: 2 }) }), job: fnJob('implement', () => 'built') },
+        implement: { refine: review({ judge: judge(judgeSeat, { cap: 2, perFinding: false }) }), job: fnJob('implement', () => 'built') },
         review: {
           needs: 'implement',
           sendsBackTo: ['implement'],
@@ -1244,7 +1249,12 @@ function seat(engineValue: Engine, model: string, tools: readonly string[] = [])
 /** A judge that acts on a finding marked REAL and skips the rest. */
 function actOnReal(prompt: string) {
   const { questions } = JSON.parse(prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
-  const answers: Record<string, unknown> = { stop_reason: { choice: 'continue' } };
+  const answers: Record<string, unknown> = {
+    holds: { noul: 0.9 },
+    worth_doing: { noul: 0.9 },
+    worth_another_round: { noul: 0.9 },
+    stop_reason: { choice: 'continue' },
+  };
   for (const [key, question] of Object.entries(questions)) {
     if (!('act' in question.criteria)) continue;
     answers[key] = question.instructions.includes('REAL')

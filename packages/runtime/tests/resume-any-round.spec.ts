@@ -1756,7 +1756,7 @@ describe('a resume after a change the record does not match steps by', () => {
       name: 'delivery',
       nodes: {
         build: {
-              refine: review({ judge: judge(recordedJudge(judgeFile)) }),
+              refine: review({ judge: judge(recordedJudge(judgeFile), { perFinding: false }) }),
           job: agentJob({
             label: 'build',
             engine: new MockEngine((request) => { seen.builds.push(request.prompt); return 'built'; }),
@@ -1792,7 +1792,12 @@ describe('a resume after a change the record does not match steps by', () => {
 
   async function judgeAnswers(): Promise<string> {
     const file = join(cwd, 'judge.json');
-    await writeFile(file, JSON.stringify([{ stop_reason: { choice: 'continue' } }]));
+    await writeFile(file, JSON.stringify([{
+      holds: { noul: 0.9 },
+      worth_doing: { noul: 0.9 },
+      worth_another_round: { noul: 0.9 },
+      stop_reason: { choice: 'continue' },
+    }]));
     return file;
   }
 
@@ -1860,7 +1865,7 @@ describe('a resume after a change the record does not match steps by', () => {
       options: { timeout },
       roles: { writer: seat(writer, 'writer-mock', ['Write']), reviewer: [seat(reviewer, 'reviewer-mock', ['Read'])] },
       stages: [
-        stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', retrySafe: true, refine: judge(recordedJudge(judgeFile)) }),
+        stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', retrySafe: true, refine: judge(recordedJudge(judgeFile), { perFinding: false }) }),
         stage('check', {
           sendsBackTo: 'write',
           fn: fnJob('check', () => {
