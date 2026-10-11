@@ -172,6 +172,7 @@ export const stageBranches = {
   F233: 'feat/rdc-sources-markdown',
   F226: 'feat/node-refine',
   F232: 'fix/consumer-red-run',
+  F234: 'fix/opencode-scan-vanished',
   F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',

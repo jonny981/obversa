@@ -41,6 +41,19 @@ import {
   type OpenCodeCliEngineOptions,
 } from '../src/index.ts';
 
+// A pass-through listing with an optional hook, so a test can remove an
+// entry in the moment between the workspace scan listing it and opening it.
+const fsHooks = vi.hoisted(() => ({ afterReaddir: undefined as undefined | ((path: string) => void) }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const readdirSync = ((path: Parameters<typeof actual.readdirSync>[0], options?: unknown) => {
+    const entries = actual.readdirSync(path, options as never);
+    fsHooks.afterReaddir?.(String(path));
+    return entries;
+  }) as typeof actual.readdirSync;
+  return { ...actual, default: { ...actual, readdirSync }, readdirSync };
+});
+
 const roots: string[] = [];
 
 function personOpenCodeVariables(): string[] {
@@ -886,6 +899,69 @@ describe('OpenCode CLI adapter', () => {
     }), () => {}, new AbortController().signal)).rejects.toThrow(
       'outside the workspace',
     );
+  });
+
+  it('skips a folder that vanishes between the workspace listing and its scan', async () => {
+    const workspace = temporaryDirectory('lines-opencode-vanishing-folder-');
+    const doomed = join(workspace, 'calls.log.lock');
+    mkdirSync(doomed);
+    const listed = realpathSync(workspace);
+    fsHooks.afterReaddir = (path) => {
+      if (path !== listed) return;
+      rmSync(doomed, { recursive: true, force: true });
+      fsHooks.afterReaddir = undefined;
+    };
+    try {
+      const result = await new OpenCodeCliEngine({
+        ...options(),
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'success' },
+      }).run(request({
+        cwd: workspace,
+        tools: ['read'],
+        allowedTools: ['Read(**)'],
+      }), () => {}, new AbortController().signal);
+      expect(existsSync(doomed)).toBe(false);
+      expect(result.parts.at(-1)).toEqual({ kind: 'assistant', text: 'answer', final: true });
+    } finally {
+      fsHooks.afterReaddir = undefined;
+    }
+  });
+
+  it('skips a symlink that vanishes between the workspace listing and its scan', async () => {
+    const workspace = temporaryDirectory('lines-opencode-vanishing-link-');
+    mkdirSync(join(workspace, 'inside'));
+    const link = join(workspace, 'link');
+    symlinkSync(join(workspace, 'inside'), link);
+    const listed = realpathSync(workspace);
+    fsHooks.afterReaddir = (path) => {
+      if (path !== listed) return;
+      rmSync(link, { force: true });
+      fsHooks.afterReaddir = undefined;
+    };
+    try {
+      const result = await new OpenCodeCliEngine({
+        ...options(),
+        environment: { OBVERSA_TEST_OPENCODE_SCENARIO: 'success' },
+      }).run(request({
+        cwd: workspace,
+        tools: ['read'],
+        allowedTools: ['Read(**)'],
+      }), () => {}, new AbortController().signal);
+      expect(result.parts.at(-1)).toEqual({ kind: 'assistant', text: 'answer', final: true });
+    } finally {
+      fsHooks.afterReaddir = undefined;
+    }
+  });
+
+  it('still refuses a symlink that exists but resolves nowhere', async () => {
+    const workspace = temporaryDirectory('lines-opencode-dangling-link-');
+    symlinkSync(join(workspace, 'missing-target'), join(workspace, 'dangling'));
+
+    await expect(new OpenCodeCliEngine(options()).run(request({
+      cwd: workspace,
+      tools: ['read'],
+      allowedTools: ['Read(**)'],
+    }), () => {}, new AbortController().signal)).rejects.toThrow('could not inspect project symlink');
   });
 
   it('allows contained directory symlinks in a pnpm-shaped workspace', async () => {

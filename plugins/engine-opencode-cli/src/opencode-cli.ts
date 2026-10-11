@@ -1,4 +1,5 @@
 import {
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -422,6 +423,19 @@ function authValue(value: JsonObject | undefined): JsonObject {
   return checked;
 }
 
+function vanished(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+}
+
+function linkExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function assertSymlinksStayInWorkspace(
   workspace: string,
   capabilities: readonly string[],
@@ -441,6 +455,9 @@ function assertSymlinksStayInWorkspace(
       visited.add(resolvedDirectory);
       entries = readdirSync(resolvedDirectory, { withFileTypes: true });
     } catch (error) {
+      // A folder listed a moment ago and gone now (a lock folder, a build's
+      // temporary output) holds no symlink that could leave the workspace.
+      if (directory !== workspace && vanished(error)) continue;
       throw new TypeError(
         `OpenCode could not inspect the workspace under ${directory}: ${
           error instanceof Error ? error.message : String(error)
@@ -456,6 +473,9 @@ function assertSymlinksStayInWorkspace(
           target = realpathSync(path);
           directoryTarget = statSync(target).isDirectory();
         } catch (error) {
+          // A link removed since the listing points nowhere; a link that
+          // still exists but cannot be resolved is refused as before.
+          if (vanished(error) && !linkExists(path)) continue;
           throw new TypeError(
             `OpenCode could not inspect project symlink ${path}: ${
               error instanceof Error ? error.message : String(error)
