@@ -173,6 +173,7 @@ export const stageBranches = {
   F226: 'feat/node-refine',
   F232: 'fix/consumer-red-run',
   F234: 'fix/opencode-scan-vanished',
+  F230: 'fix/failed-judge-stops',
   F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',
