@@ -482,6 +482,12 @@ const packageRules = new Map([
     dependencies: ['@obversa/api'],
     peerDependencies: [],
   }],
+  ['@obversa/rdc', {
+    directory: 'packages/rdc',
+    kind: 'interface',
+    dependencies: [],
+    peerDependencies: [],
+  }],
   ['@obversa/obversa', {
     directory: 'packages/obversa',
     kind: 'meta',
@@ -499,6 +505,7 @@ const packageRules = new Map([
       '@obversa/memory-markdown',
       '@obversa/memory-simple',
       '@obversa/notify-webhook',
+      '@obversa/rdc',
       '@obversa/runner',
       '@obversa/runtime',
       '@obversa/surface',

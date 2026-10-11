@@ -20,6 +20,7 @@
     "@obversa/memory-simple",
     "@obversa/notify-webhook",
     "@obversa/obversa",
+    "@obversa/rdc",
     "@obversa/runner",
     "@obversa/runtime",
     "@obversa/surface",

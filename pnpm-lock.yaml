@@ -216,6 +216,9 @@ importers:
       '@obversa/notify-webhook':
         specifier: workspace:^
         version: link:../../plugins/notify-webhook
+      '@obversa/rdc':
+        specifier: workspace:^
+        version: link:../rdc
       '@obversa/runner':
         specifier: workspace:^
         version: link:../runner
@@ -228,6 +231,8 @@ importers:
       '@obversa/surface-diff':
         specifier: workspace:^
         version: link:../surface-diff
+
+  packages/rdc: {}
 
   packages/runner:
     dependencies:

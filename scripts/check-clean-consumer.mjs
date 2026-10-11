@@ -363,8 +363,10 @@ function run(command, args, options = {}) {
 
 const consumerSource = `
 import assert from 'node:assert/strict';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
 
 import {
   MEMORY_ROOT,
@@ -410,6 +412,12 @@ import {
 import { commandEnvironment } from '@obversa/runtime/env/command';
 import runtimePackage from '@obversa/runtime/package.json' with { type: 'json' };
 import { featureDelivery, thresholdPanel, writerReviewerPair } from '@obversa/builtin-workflows';
+import {
+  knowledgeBase,
+  pickFromSources,
+  rules,
+  type MemoryCandidate,
+} from '@obversa/rdc';
 
 const packedTeamBuilders = [featureDelivery, thresholdPanel, writerReviewerPair];
 assert.equal(packedTeamBuilders.length, 3);
@@ -587,11 +595,42 @@ const result = await run(
 );
 assert.equal(result.outcome.status, 'pass');
 
+// The packed RDC package: a knowledge base and a rules folder are read,
+// and pick asks the scripted decision function which candidates the task
+// needs. The 'applies: always' rule is selected without a question.
+const rdcRoot = join(process.cwd(), 'rdc-fixtures');
+await mkdir(join(rdcRoot, 'kb'), { recursive: true });
+await mkdir(join(rdcRoot, 'rules'), { recursive: true });
+await writeFile(
+  join(rdcRoot, 'kb', 'note.md'),
+  '## Packed note\\nThe packed round trip supplies the evidence.\\n',
+);
+await writeFile(
+  join(rdcRoot, 'rules', 'always.md'),
+  '---\\napplies: always\\n---\\n# Always\\nEvery task follows it.\\n',
+);
+const pickedMemory = await pickFromSources(
+  [knowledgeBase(join(rdcRoot, 'kb')), rules(join(rdcRoot, 'rules'))],
+  { task: 'the packed round trip' },
+  {
+    task: 'the packed round trip',
+    decide: async (batch) => Object.fromEntries(batch.questions.map((question) => [
+      question.key,
+      { status: 'answered' as const, probability: 0.9 },
+    ])),
+  },
+);
+const pickedCandidates: readonly MemoryCandidate[] = pickedMemory.selected;
+assert.equal(pickedCandidates.length, 2);
+assert.equal(pickedCandidates.some((candidate) => candidate.applies === 'always'), true);
+assert.equal(pickedMemory.record.rulesCoverage, 'complete');
+
 console.log(JSON.stringify({
   runtime: result.outcome.status,
   memoryCases: conformance.cases,
   simple: created.ok,
   git: gitViewed.ok,
+  rdc: { selected: pickedCandidates.length, rulesCoverage: pickedMemory.record.rulesCoverage },
 }));
 `;
 
@@ -1109,7 +1148,7 @@ async function main() {
       killSignal: 'SIGKILL',
     });
     assert.equal(redRun.status, 1, redRun.stdout + redRun.stderr);
-    assert.match(redRun.stderr, /"status": "fail"/, 'an unrepaired line must not pass');
+    assert.match(redRun.stderr, /"status": "fail"/, `an unrepaired line must not pass\n${(redRun.stdout + redRun.stderr).slice(-8000)}`);
 
     const compiledGraph = JSON.parse(
       run(process.execPath, ['dist/custom-graph.js'], { cwd: consumerDirectory }),
@@ -1282,6 +1321,8 @@ async function main() {
       report.memoryCases !== 17 ||
       report.simple !== true ||
       report.git !== true ||
+      report.rdc?.selected !== 2 ||
+      report.rdc?.rulesCoverage !== 'complete' ||
       productionLine.status !== 'pass' ||
       productionLine.attempts !== 2 ||
       productionLine.summary !== 'config is complete' ||
@@ -1305,7 +1346,7 @@ async function main() {
     if (refs.length !== 1) throw new Error(`Git memory created ${refs.length} private refs instead of one`);
 
     console.log(
-      'Clean offline consumer passed with TypeScript 7 and 6, offline-review.ts, described-team.ts, safe-change.ts, the compiled feature-delivery.ts real-engine example, the three packed team examples, forge-helper.ts, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, both preflight examples, 17 memory cases, and both memory adapters.',
+      'Clean offline consumer passed with TypeScript 7 and 6, offline-review.ts, described-team.ts, safe-change.ts, the compiled feature-delivery.ts real-engine example, the three packed team examples, forge-helper.ts, the outside graph, the pipeline executor example, the review loop, the callback gate, proof-bound approval, the turn-taking executor example, durable storage, safe node attempts, the supervised runner, both preflight examples, 17 memory cases, both memory adapters, and an RDC pick over packed Markdown sources.',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

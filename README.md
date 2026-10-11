@@ -302,10 +302,11 @@ CrewAI, Temporal, Claude Code subagents and eve.
 
 ## Working on Obversa
 
-23 publishable packages. `packages/` holds the eight that define the
+24 publishable packages. `packages/` holds the nine that define the
 product: `@obversa/runtime` runs a workflow, `@obversa/api` holds the
 engine and memory contracts, `@obversa/core` runs bounded child processes,
-`@obversa/runner` supervises stored runs, `@obversa/builtin-workflows`
+`@obversa/runner` supervises stored runs, `@obversa/rdc` ranks, decides
+and curates memory candidates, `@obversa/builtin-workflows`
 ships three ready-made teams and a workflow that proposes changes to a
 workflow from its record, `@obversa/obversa` is the install above,
 and `@obversa/surface` with `@obversa/surface-diff` is the local review
