@@ -2,7 +2,6 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises';
 
 import { claude } from '@obversa/engine-claude-cli';
 import {
-  agentJob,
   approval,
   commandJob,
   dag,
@@ -59,20 +58,19 @@ const overdue = ((ledger.outcome.data as Record<string, Outcome | undefined>).se
 /** One overdue invoice: a draft, then a send or a person. */
 function chase(invoice: OverdueInvoice) {
   const draftPath = `chase/${invoice.id}.md`;
-  const draft = agentJob({
-    label: 'draft',
-    engine: 'drafter',
-    prompt: [
-      `Draft the chaser for ${invoice.id} to ${invoice.customer} (${invoice.contact}):`,
-      `${invoice.currency} ${invoice.amount}, due ${invoice.due}, ${invoice.daysOverdue} days overdue.`,
-      invoice.dispute ? `The customer has raised a dispute: ${invoice.dispute}` : 'No dispute is on file.',
-      `Follow briefs/chase.md and write ${draftPath}.`,
-    ].join('\n'),
-  });
   return dag({
     name: `chase-${invoice.id}`,
     nodes: {
-      draft,
+      draft: {
+        desc: [
+          `Draft the chaser for ${invoice.id} to ${invoice.customer} (${invoice.contact}):`,
+          `${invoice.currency} ${invoice.amount}, due ${invoice.due}, ${invoice.daysOverdue} days overdue.`,
+          invoice.dispute ? `The customer has raised a dispute: ${invoice.dispute}` : 'No dispute is on file.',
+          `Follow briefs/chase.md and write ${draftPath}.`,
+        ].join('\n'),
+        agent: drafter,
+        writes: draftPath,
+      },
       ...(invoice.dispute
         ? {
           decide: {
@@ -105,7 +103,6 @@ const reports: Report[] = [];
 await mkdir('history', { recursive: true });
 for (const invoice of overdue) {
   const result = await run(chase(invoice), {
-    engines: { drafter: drafter.engine },
     recordTo: `records/${invoice.id}.jsonl`,
     runId: `chase-${invoice.id}`,
     onEvent,

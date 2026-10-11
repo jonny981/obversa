@@ -1039,7 +1039,9 @@ async function main() {
     assert.equal(compiledTeamPanel.threshold, '1 of 2');
     assert.deepEqual(compiledTeamPanel.reviewerCalls, [1, 1]);
     assert.equal(compiledTeamFeature.status, 'pass');
-    assert.equal(compiledTeamFeature.rounds, 3);
+    assert.equal(compiledTeamFeature.builds, 4);
+    assert.equal(compiledTeamFeature.checkBacks, 1);
+    assert.equal(compiledTeamFeature.reviewBacks, 2);
     assert.deepEqual(compiledTeamFeature.goalChecks, ['unmet', 'met', 'met']);
     assert.deepEqual(compiledTeamFeature.synthesis, ['kept', 'disputed']);
     assert.deepEqual(compiledTeamFeature.judge, ['act', 'skip']);

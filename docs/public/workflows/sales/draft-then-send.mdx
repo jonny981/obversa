@@ -151,20 +151,15 @@ Each contact is one `dag()` run of three steps. The draft seat writes
 `outbox/<contact>.md`; the person's decision is an `approval` step; the send
 is a command that runs only when the decision was yes:
 
-```ts examples/use-cases/sales/draft-then-send.ts (excerpt) {4-5,18-22,25-26}
+```ts examples/use-cases/sales/draft-then-send.ts (excerpt) {4-5,13-17,20-21}
   return dag({
     name: `outreach-${contact.id}`,
     nodes: {
-      draft: agentJob({
-        label: 'draft',
-        engine: 'draft',
-        prompt: [
-          `Draft the first note to ${contact.name} at ${contact.company}.`,
-          `Their notes: ${contact.notes}`,
-          `Sign off as ${list.sender}.`,
-          `Follow briefs/outreach.md and write outbox/${contact.id}.md.`,
-        ].join('\n'),
-      }),
+      draft: {
+        desc: `Draft the first note to ${contact.name} at ${contact.company}. Their notes: ${contact.notes}. Sign off as ${list.sender}. Follow briefs/outreach.md and write outbox/${contact.id}.md.`,
+        agent: draft,
+        writes: `outbox/${contact.id}.md`,
+      },
       approve: {
         needs: 'draft',
         // The person's decision from the last pass, when there is one.
@@ -187,10 +182,9 @@ pauses with the question on the record, and the send never runs. A no fails
 the step with the person's note as its summary, and the send never runs
 either. The host then files each contact by what happened:
 
-```ts examples/use-cases/sales/draft-then-send.ts (excerpt) {8-9,18-19}
+```ts examples/use-cases/sales/draft-then-send.ts (excerpt) {7-8,17-18}
 for (const contact of list.contacts) {
   const result = await run(outreach(contact), {
-    engines: { draft: draft.engine },
     recordTo: `records/${contact.id}.jsonl`,
     runId: `outreach-${contact.id}`,
     onEvent: (event) => console.log(formatEvent(event)),
@@ -221,7 +215,6 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises';
 
 import { claude } from '@obversa/engine-claude-cli';
 import {
-  agentJob,
   approval,
   commandJob,
   dag,
@@ -264,16 +257,11 @@ function outreach(contact: Contact) {
   return dag({
     name: `outreach-${contact.id}`,
     nodes: {
-      draft: agentJob({
-        label: 'draft',
-        engine: 'draft',
-        prompt: [
-          `Draft the first note to ${contact.name} at ${contact.company}.`,
-          `Their notes: ${contact.notes}`,
-          `Sign off as ${list.sender}.`,
-          `Follow briefs/outreach.md and write outbox/${contact.id}.md.`,
-        ].join('\n'),
-      }),
+      draft: {
+        desc: `Draft the first note to ${contact.name} at ${contact.company}. Their notes: ${contact.notes}. Sign off as ${list.sender}. Follow briefs/outreach.md and write outbox/${contact.id}.md.`,
+        agent: draft,
+        writes: `outbox/${contact.id}.md`,
+      },
       approve: {
         needs: 'draft',
         // The person's decision from the last pass, when there is one.
@@ -301,7 +289,6 @@ const reports: Report[] = [];
 await mkdir('history', { recursive: true });
 for (const contact of list.contacts) {
   const result = await run(outreach(contact), {
-    engines: { draft: draft.engine },
     recordTo: `records/${contact.id}.jsonl`,
     runId: `outreach-${contact.id}`,
     onEvent: (event) => console.log(formatEvent(event)),

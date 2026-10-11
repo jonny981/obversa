@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { commandJob, dag, failed, fnJob, passed, run } from '@obversa/runtime';
+import { commandJob, dag, failed, fnJob, passed, review as buildReview, run } from '@obversa/runtime';
 
 const workspace = mkdtempSync(join(tmpdir(), 'command-kickback-'));
 const source = join(workspace, 'add.mjs');
@@ -61,16 +61,16 @@ const review = (name: string, summary: string) =>
 
 export const commandKickback = dag({
   name: 'command-kickback',
-  maxKickbacks: 1,
   nodes: {
     implement: {
       desc: 'Write the change.',
       gate: 'The source file exists.',
+      refine: buildReview({ rounds: 1 }),
       job: implement,
     },
     test: {
       needs: 'implement',
-      acceptsKickbackTo: ['implement'],
+      sendsBackTo: ['implement'],
       desc: 'Run the tests; a red run goes back to implement with the output.',
       gate: 'The test command exits 0.',
       job: test,

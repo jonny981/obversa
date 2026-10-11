@@ -18,11 +18,12 @@ import {
 
 import {
   assertDistinctSeats,
-  assertKickbacks,
+  assertRefineBudget,
   assertReviewers,
   assertTeamInput,
   APPROVAL_NOTE,
   expectedFilesPrompt,
+  nodeRefine,
   panelReviewers,
   requireNoFiles,
   requireNonEmptyFiles,
@@ -323,11 +324,11 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
     config.implement,
     ...config.reviewers.map(({ seat }) => seat),
   ]);
-  const configuredKickbacks = config.maxKickbacks ?? 1;
-  const maxKickbacks = typeof configuredKickbacks === 'number'
-    ? configuredKickbacks
-    : { 'research-requirements': 1, ...configuredKickbacks };
-  assertKickbacks(maxKickbacks);
+  const configuredRefine = config.refine ?? 1;
+  const refineBudget = typeof configuredRefine === 'number'
+    ? configuredRefine
+    : { 'research-requirements': 1, ...configuredRefine };
+  assertRefineBudget(refineBudget, ['research-requirements', 'plan', 'tests-first']);
 
   const contextWriter = outputWriter(
     'research-context',
@@ -495,7 +496,6 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
   return dag({
     name: 'feature-delivery',
     stopOnError: true,
-    maxKickbacks,
     nodes: {
       prepare: {
         job: prepareRun(config.workspace),
@@ -514,33 +514,36 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
         desc: 'Turn the brief and the context note into requirements, one REQ-n per line, each testable and traced to the brief.',
         gate: 'Every requirement is testable, traces to the brief, and asks for nothing the brief does not.',
         needs: ['research-context'],
+        refine: nodeRefine(refineBudget, 'research-requirements'),
       },
       plan: {
         job: plan,
         desc: 'Write an executable plan from the requirements, one acceptance check per job.',
         gate: 'Every requirement has a check in the plan and no check asks for more than its requirement.',
         needs: ['research-requirements'],
-        acceptsKickbackTo: ['research-requirements'],
+        sendsBackTo: ['research-requirements'],
+        refine: nodeRefine(refineBudget, 'plan'),
       },
       'plan-review': {
         job: planReview,
         desc: 'Have the reviewers read the plan against the requirements and send it back if it falls short.',
         gate: 'At least the threshold number of reviewers have accepted the plan.',
         needs: ['plan'],
-        acceptsKickbackTo: ['plan'],
+        sendsBackTo: ['plan'],
       },
       'tests-first': {
         job: testsFirst,
         desc: 'Write the declared test files from the accepted plan before any implementation exists.',
         gate: 'Every declared test file exists and is not empty.',
         needs: ['plan-review'],
+        refine: nodeRefine(refineBudget, 'tests-first'),
       },
       'tests-review': {
         job: testsReview,
         desc: 'Have the reviewers check that the tests cover the plan and that any red test is red for a stated reason.',
         gate: 'At least the threshold number of reviewers have accepted the tests.',
         needs: ['tests-first'],
-        acceptsKickbackTo: ['tests-first'],
+        sendsBackTo: ['tests-first'],
       },
       implement: {
         job: implementationLoop,

@@ -3,11 +3,20 @@ import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { agentJob } from './core/job.js';
-import { copyJobMeta } from './core/describe.js';
 import { LoopError } from './core/errors.js';
+import { seatIdentity } from './core/refine.js';
 import type { Job, JobContext } from './core/types.js';
 import type { TeamSeat } from '@obversa/api';
 import { INVALID_TEAM_DECISION, outcomeFromAgentText } from './workflow-agent-response.js';
+
+export {
+  assertDistinctSeats,
+  requireNoFiles,
+  requireNonEmptyFiles,
+  seatIdentity,
+} from './core/refine.js';
+export type { ReviewerSeat } from './core/types.js';
+import type { ReviewerSeat } from './core/types.js';
 
 type TeamWorkspaceMode = 'read' | 'write';
 
@@ -22,120 +31,6 @@ export interface TeamInput {
   readonly workspace: string;
   readonly files: readonly string[];
   readonly test: TestCommand;
-}
-
-export interface ReviewerSeat {
-  readonly name: string;
-  readonly seat: TeamSeat;
-  readonly scope?: string;
-}
-
-export function seatIdentity(seat: TeamSeat): TeamSeat['identity'] {
-  const identity = seat.identity;
-  if (
-    !identity
-    || typeof identity.adapter !== 'string'
-    || typeof identity.provider !== 'string'
-    || typeof identity.modelFamily !== 'string'
-    || typeof identity.model !== 'string'
-    || !Array.isArray(identity.tools)
-    || !identity.adapter.trim()
-    || !identity.provider.trim()
-    || !identity.model.trim()
-    || !identity.modelFamily.trim()
-  ) {
-    throw new TypeError('engine identity must contain adapter, provider, model family, and model');
-  }
-  return identity;
-}
-
-export function assertDistinctSeats(seats: readonly TeamSeat[]): void {
-  const identities = seats.map((seat, index) => {
-    try {
-      return seatIdentity(seat);
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : 'invalid engine identity';
-      throw new TypeError(`seat ${index + 1} has an invalid engine identity: ${message}`, { cause });
-    }
-  });
-  for (let leftIndex = 0; leftIndex < identities.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < identities.length; rightIndex += 1) {
-      const left = identities[leftIndex]!;
-      const right = identities[rightIndex]!;
-      const sameFamily = left.modelFamily === right.modelFamily;
-      if (!sameFamily) continue;
-      throw new TypeError(
-        `seats ${leftIndex + 1} and ${rightIndex + 1} report the same model family ${left.modelFamily}; model family must be distinct per seat`,
-      );
-    }
-  }
-}
-
-export function requireNonEmptyFiles(
-  label: string,
-  job: Job,
-  workspace: string,
-  files: readonly string[],
-): Job {
-  return async (ctx) => {
-    const outcome = await job(ctx);
-    if (outcome.status !== 'pass') return outcome;
-    for (const file of files) {
-      const path = join(workspace, file);
-      try {
-        const details = await stat(path);
-        if (!details.isFile() || details.size === 0) {
-          return {
-            status: 'fail',
-            summary: `${label} did not produce a non-empty file: ${file}`,
-          };
-        }
-      } catch {
-        return {
-          status: 'fail',
-          summary: `${label} did not produce a non-empty file: ${file}`,
-        };
-      }
-    }
-    return outcome;
-  };
-}
-
-export function requireNoFiles(
-  label: string,
-  job: Job,
-  workspace: string,
-  files: readonly string[],
-  phase: 'body' | 'review' = 'review',
-): Job {
-  const wrapper: Job = async (ctx) => {
-    const before = new Map<string, FileSnapshot>();
-    for (const file of files) {
-      before.set(file, await snapshotFile(join(workspace, file)));
-    }
-    const outcome = await job(ctx);
-    const changed: string[] = [];
-    for (const file of files) {
-      const after = await snapshotFile(join(workspace, file));
-      const previous = before.get(file)!;
-      if (
-        previous.exists !== after.exists
-        || previous.hash !== after.hash
-      ) {
-        changed.push(file);
-      }
-    }
-    if (changed.length) {
-      const summary = `${label} wrote, changed or removed the implementation before its step completed: ${changed.join(', ')}`;
-      return {
-        status: 'fail',
-        summary,
-        error: new LoopError({ code: 'WRITE_BOUNDARY', phase, message: summary }),
-      };
-    }
-    return outcome;
-  };
-  return copyJobMeta(wrapper, job);
 }
 
 interface FileSnapshot {

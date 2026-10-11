@@ -115,20 +115,24 @@ try {
       claude: [
         { writes: {}, reply: pass('retry, cap and abort are accepted criteria') },
         { writes: { 'reviews/correctness-first.json': '{"status":"revise"}\n' }, reply: revise('correctness found one missing criterion', 'the source does not stop when the caller aborts') },
-        { writes: { 'reviews/api.json': '{"status":"pass"}\n' }, reply: pass('the public exports are correct') },
         { writes: { 'reviews/correctness-second.json': '{"status":"pass"}\n' }, reply: pass('correctness accepted the repaired files') },
-        { writes: {}, reply: pass('the public exports remain correct') },
       ],
       codex: [
         { writes: { 'src/retry.js': DRAFT_SOURCE, 'test/retry.test.js': DRAFT_TESTS }, reply: pass('wrote the first draft') },
-        { writes: { 'reviews/tests-first.json': '{"status":"revise"}\n' }, reply: revise('tests found one missing criterion', 'the tests do not cover an aborted caller') },
         { writes: { 'src/retry.js': REPAIRED_SOURCE, 'test/retry.test.js': REPAIRED_TESTS }, reply: pass('repaired the abort criterion') },
+      ],
+      opencode: [
+        { writes: { 'reviews/tests-first.json': '{"status":"revise"}\n' }, reply: revise('tests found one missing criterion', 'the tests do not cover an aborted caller') },
         { writes: { 'reviews/tests-second.json': '{"status":"pass"}\n' }, reply: pass('tests accepted the repaired files') },
+      ],
+      grok: [
+        { writes: { 'reviews/api.json': '{"status":"pass"}\n' }, reply: pass('the public exports are correct') },
+        { writes: {}, reply: pass('the public exports remain correct') },
       ],
     }, null, 2) + '\n',
   );
   const callsLog = join(workspace, '.obversa-stand-in-calls.log');
-  for (const name of ['claude', 'codex', 'opencode']) {
+  for (const name of ['claude', 'codex', 'opencode', 'grok']) {
     await symlink(standIn, join(bin, name));
   }
 

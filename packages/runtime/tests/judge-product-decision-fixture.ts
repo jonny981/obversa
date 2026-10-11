@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { agentJob, createStoredCallbackClient, dag, fnJob, humanReview, judge, loop, person, revisionRequest, run, stage, workflow } from '../src/api.ts';
+import { agentJob, createStoredCallbackClient, dag, fnJob, humanReview, judge, loop, person, review as buildReview, revisionRequest, run, stage, workflow } from '../src/api.ts';
 import type { AgentRequest, Job, TeamSeat } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 import { openStoredRunFixtureStorage } from './stored-run-fixture.ts';
@@ -96,11 +96,13 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
   }
   return dag({
     name: 'product-review',
-    maxKickbacks: { [name]: refine },
     nodes: {
-      [name]: agentJob({ label: name, model: 'writer-mock', prompt: 'Write the page.', consumeFeedback: true,
-        engine: new MockEngine((request) => writer(request.prompt).summary) }),
-      review: { needs: [name], acceptsKickbackTo: [name], desc: scenario.brief ?? 'Choose the audience', job: fnJob('review', async (ctx) => {
+      [name]: {
+        refine: buildReview({ judge: refine }),
+        job: agentJob({ label: name, model: 'writer-mock', prompt: 'Write the page.', consumeFeedback: true,
+          engine: new MockEngine((request) => writer(request.prompt).summary) }),
+      },
+      review: { needs: [name], sendsBackTo: [name], desc: scenario.brief ?? 'Choose the audience', job: fnJob('review', async (ctx) => {
         // A review node reads what the judge skipped from its context.
         const result = review(ctx.skippedFindings?.map((skipped) => skipped.finding.evidence).join('\n'));
         if (result.status === 'pass') return { status: 'pass' as const };

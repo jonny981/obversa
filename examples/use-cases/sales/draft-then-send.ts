@@ -2,7 +2,6 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises';
 
 import { claude } from '@obversa/engine-claude-cli';
 import {
-  agentJob,
   approval,
   commandJob,
   dag,
@@ -45,16 +44,11 @@ function outreach(contact: Contact) {
   return dag({
     name: `outreach-${contact.id}`,
     nodes: {
-      draft: agentJob({
-        label: 'draft',
-        engine: 'draft',
-        prompt: [
-          `Draft the first note to ${contact.name} at ${contact.company}.`,
-          `Their notes: ${contact.notes}`,
-          `Sign off as ${list.sender}.`,
-          `Follow briefs/outreach.md and write outbox/${contact.id}.md.`,
-        ].join('\n'),
-      }),
+      draft: {
+        desc: `Draft the first note to ${contact.name} at ${contact.company}. Their notes: ${contact.notes}. Sign off as ${list.sender}. Follow briefs/outreach.md and write outbox/${contact.id}.md.`,
+        agent: draft,
+        writes: `outbox/${contact.id}.md`,
+      },
       approve: {
         needs: 'draft',
         // The person's decision from the last pass, when there is one.
@@ -82,7 +76,6 @@ const reports: Report[] = [];
 await mkdir('history', { recursive: true });
 for (const contact of list.contacts) {
   const result = await run(outreach(contact), {
-    engines: { draft: draft.engine },
     recordTo: `records/${contact.id}.jsonl`,
     runId: `outreach-${contact.id}`,
     onEvent: (event) => console.log(formatEvent(event)),

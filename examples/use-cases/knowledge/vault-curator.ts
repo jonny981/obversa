@@ -4,7 +4,6 @@ import { dirname, join } from 'node:path';
 import { claude } from '@obversa/engine-claude-cli';
 import { openMarkdownCorpus } from '@obversa/memory-markdown';
 import {
-  agentJob,
   approval,
   dag,
   fnJob,
@@ -62,17 +61,16 @@ const steer: Record<string, DagNode> = Object.fromEntries(notes.map((note) => {
 const curator = dag({
   name: 'vault-curator',
   nodes: {
-    propose: agentJob({
-      label: 'propose',
-      engine: 'curator',
-      workspaceMode: 'read',
-      tools: ['Read', 'Glob'],
-      prompt: `Read the notes in inbox/ (${notes.join(', ')}) and the folders in vault/, and propose as briefs/vault.md says.`,
-    }),
+    propose: {
+      desc: `Read the notes in inbox/ (${notes.join(', ')}) and the folders in vault/, and propose as briefs/vault.md says.`,
+      agent: seat,
+      writes: 'proposals.json',
+    },
+    // The seat's proposals land in proposals.json; parse reads them back as data.
     parse: {
       needs: 'propose',
-      job: fnJob('parse', (ctx): Outcome => {
-        const proposals = JSON.parse(String(ctx.needs?.propose?.data ?? '[]')) as Proposal[];
+      job: fnJob('parse', async (): Promise<Outcome> => {
+        const proposals = JSON.parse(await readFile('proposals.json', 'utf8')) as Proposal[];
         return { status: 'pass', summary: `${proposals.length} proposals`, data: proposals };
       }),
     },
@@ -100,25 +98,21 @@ const curator = dag({
         const paths = [...new Set(hits.map((hit) => hit.path))];
         const grounded = await ground(vault.memory, { sources: paths.map((path) => ({ path })) });
         if (!grounded.ok) throw new Error(grounded.error.message);
-        return { status: 'pass', summary: `${hits.length} passages in ${paths.length} files`, data: { paths, prompt: grounded.value.prompt } };
+        await mkdir('search', { recursive: true });
+        await writeFile(`search/${question.id}-context.md`, grounded.value.prompt);
+        return { status: 'pass', summary: `${hits.length} passages in ${paths.length} files`, data: { paths } };
       }),
     },
     answer: {
       needs: 'search',
-      job: agentJob({
-        label: 'answer',
-        engine: 'curator',
-        prompt: (ctx) => {
-          const { prompt } = ctx.needs?.search?.data as { prompt: string };
-          return `${prompt}\n\nAnswer as briefs/vault.md says and write answers/${question.id}.md.\n\nQuestion: ${question.text}`;
-        },
-      }),
+      desc: `Read the passages in search/${question.id}-context.md and answer as briefs/vault.md says, writing answers/${question.id}.md.\n\nQuestion: ${question.text}`,
+      agent: seat,
+      writes: `answers/${question.id}.md`,
     },
   },
 });
 
 const result = await run(curator, {
-  engines: { curator: seat.engine },
   recordTo: 'records/vault-curator.jsonl',
   runId: 'vault-curator',
   onEvent: (event) => console.log(formatEvent(event)),

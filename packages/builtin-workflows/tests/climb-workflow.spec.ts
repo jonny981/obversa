@@ -23,6 +23,7 @@ import {
   LoopError,
   person,
   pipeline,
+  review,
   run,
   stage,
   workflow,
@@ -274,17 +275,17 @@ describe('climbWorkflow', () => {
       const candidate = (await readFile(path, 'utf8')).includes(CANDIDATE);
       let answers = 0;
       return pipeline('rounds', [
-        { name: 'answer', job: fnJob('answer', () => { answers += 1; }) },
+        { name: 'answer', refine: review({ rounds: 1 }), job: fnJob('answer', () => { answers += 1; }) },
         {
           name: 'check',
-          acceptsKickbackTo: ['answer'],
+          sendsBackTo: ['answer'],
           job: fnJob('check', () => {
             if (TUNING.includes(task)) return candidate ? 'right' : { status: 'fail', summary: 'wrong' };
             if (candidate && answers === 1) return { status: 'fail', summary: 'once more', revision: { target: 'answer', reason: 'once more' } };
             return 'right';
           }),
         },
-      ], { maxKickbacks: 1 });
+      ]);
     };
     const { report } = await climb({ file, change, load, tasks: { tuning: TUNING, heldOut: HELD_OUT }, runs: 1, mode: 'auto' });
 
@@ -1309,12 +1310,11 @@ describe('climbWorkflow', () => {
       });
       return dag({
         name: 'goal',
-        maxKickbacks: 1,
         nodes: {
-          answer: { job: fnJob('answer', () => 'done') },
+          answer: { refine: review({ rounds: 1 }), job: fnJob('answer', () => 'done') },
           check: {
             needs: 'answer',
-            acceptsKickbackTo: ['answer'],
+            sendsBackTo: ['answer'],
             job: goalCheck(
               { engine: goal, identity: { adapter: 'mock', provider: 'mock', modelFamily: 'goal', model: 'goal', tools: ['Read'] } },
               { target: 'answer', text: 'Answer the sum.' },
@@ -1378,15 +1378,18 @@ describe('climbWorkflow', () => {
       return workflow('note', {
         brief: 'Write note.md.',
         roles: {
-          // Without the change, the writer writes the file only on its third build.
+          // Without the change, the writer leaves note.md missing until its
+          // third build; extra.md changes every build, so the unchanged-work
+          // guard stays out of the check send-backs this test counts.
           write: seat('writer', ['Write'], (cwd) => {
             builds += 1;
+            execFileSync('sh', ['-c', `echo draft ${builds} >> ${JSON.stringify(join(cwd, 'extra.md'))}`]);
             if (candidate || builds === 3) execFileSync('sh', ['-c', `echo draft >> ${JSON.stringify(join(cwd, 'note.md'))}`]);
             return { status: 'pass', summary: 'wrote' };
           }),
           review: [seat('reviewer', ['Read'], () => ({ status: 'pass', summary: 'reads well' }))],
         },
-        stages: [stage('write', { agent: 'write', writes: 'note.md', desc: 'Write the note.', reviewedBy: 'review', refine: 3 })],
+        stages: [stage('write', { agent: 'write', writes: ['note.md', 'extra.md'], desc: 'Write the note.', reviewedBy: 'review', refine: 3 })],
       });
     };
     const { report } = await climb({ file, change, load, tasks: { tuning: ['a'], heldOut: ['b'] }, runs: 1, mode: 'auto' });

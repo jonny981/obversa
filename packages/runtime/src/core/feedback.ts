@@ -342,7 +342,10 @@ const REVIEW_PANEL_DEFAULT_CONCURRENCY = DEFAULT_FANOUT_CONCURRENCY;
 function isReviewInfrastructureError(
   error: LoopError | undefined,
 ): error is LoopError {
-  return isInfrastructureError(error);
+  // A reviewer that never ran — its engine threw, or refused to start on an
+  // `invalid-config` failure — is an operational error, never a verdict on
+  // the work: the panel pauses on it rather than sending it back.
+  return error?.code === 'CONFIG' || isInfrastructureError(error);
 }
 
 function isReviewBoundaryError(error: LoopError | undefined): error is LoopError {

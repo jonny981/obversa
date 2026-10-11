@@ -10,6 +10,7 @@ import {
   fnJob,
   kickback,
   pipeline,
+  review,
   run,
   type AgentRequest,
   type CallbackClient,
@@ -23,14 +24,14 @@ const FINDING = 'the summary does not name the ticket';
 
 /** The workflow file a run names as its source. The run below is built in the test; this is the file it ran from. */
 const WORKFLOW = [
-  "import { fnJob, kickback, pipeline } from '@obversa/runtime';",
+  "import { fnJob, kickback, pipeline, review } from '@obversa/runtime';",
   '',
   "const brief = 'Summarise the ticket in three lines.';",
   '',
   'export const summary = pipeline(\'summary\', [',
-  "  { name: 'draft', job: fnJob('draft', () => brief) },",
-  "  { name: 'check', job: fnJob('check', () => kickback('draft', 'the summary does not name the ticket')), acceptsKickbackTo: ['draft'] },",
-  '], { maxKickbacks: 3 });',
+  "  { name: 'draft', refine: review({ rounds: 3 }), job: fnJob('draft', () => brief) },",
+  "  { name: 'check', job: fnJob('check', () => kickback('draft', 'the summary does not name the ticket')), sendsBackTo: ['draft'] },",
+  ']);',
   '',
 ].join('\n');
 
@@ -49,8 +50,8 @@ const NO_CHECK_DIFF = [
   '--- a/summary.workflow.ts',
   '+++ b/summary.workflow.ts',
   '@@ -6,2 +6,1 @@',
-  "   { name: 'draft', job: fnJob('draft', () => brief) },",
-  "-  { name: 'check', job: fnJob('check', () => kickback('draft', 'the summary does not name the ticket')), acceptsKickbackTo: ['draft'] },",
+  "   { name: 'draft', refine: review({ rounds: 3 }), job: fnJob('draft', () => brief) },",
+  "-  { name: 'check', job: fnJob('check', () => kickback('draft', 'the summary does not name the ticket')), sendsBackTo: ['draft'] },",
   '',
 ].join('\n');
 
@@ -64,13 +65,13 @@ let recordFile: string;
 async function recordedRun(): Promise<void> {
   let drafts = 0;
   const job = pipeline('summary', [
-    { name: 'draft', job: fnJob('draft', () => { drafts += 1; return `draft ${drafts}`; }) },
+    { name: 'draft', refine: review({ rounds: 3 }), job: fnJob('draft', () => { drafts += 1; return `draft ${drafts}`; }) },
     {
       name: 'check',
       job: fnJob('check', () => (drafts <= 3 ? kickback('draft', FINDING) : 'the summary names the ticket')),
-      acceptsKickbackTo: ['draft'],
+      sendsBackTo: ['draft'],
     },
-  ], { maxKickbacks: 3 });
+  ]);
   const result = await run(job, { cwd: dir, recordTo: recordFile, source: workflowFile });
   expect(result.outcome.status).toBe('pass');
 }

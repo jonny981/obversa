@@ -70,9 +70,9 @@ reads it back; a rejection returns the findings to the writer. Run it with
 
 | Function | What it runs | Configuration |
 | --- | --- | --- |
-| `writerReviewerPair` | A writer, the test command, and a reviewer whose findings return to the writer. | `PairConfig`: `writer`, `reviewer`, optional `maxKickbacks`. |
-| `thresholdPanel` | An implementation, the test command, and a panel that needs `threshold` acceptances. | `PanelConfig`: `implement`, `reviewers`, `threshold`, optional `maxKickbacks`. |
-| `featureDelivery` | Research, requirements, planning, tests, implementation, review, approval, evidence and learning. | `FeatureDeliveryConfig`: `analyse`, `implement`, `reviewers`, `reviewThreshold`, `approve`, `testFiles`, optional `maxKickbacks`. |
+| `writerReviewerPair` | A writer, the test command, and a reviewer whose findings return to the writer. | `PairConfig`: `writer`, `reviewer`, optional `refine`. |
+| `thresholdPanel` | An implementation, the test command, and a panel that needs `threshold` acceptances. | `PanelConfig`: `implement`, `reviewers`, `threshold`, optional `refine`. |
+| `featureDelivery` | Research, requirements, planning, tests, implementation, review, approval, evidence and learning. | `FeatureDeliveryConfig`: `analyse`, `implement`, `reviewers`, `reviewThreshold`, `approve`, `testFiles`, optional `refine`. |
 
 Every configuration extends `TeamInput`. A seat is a `TeamSeat` from
 `@obversa/api`, an engine with its declared identity:
@@ -128,7 +128,7 @@ Both are re-exported from `@obversa/runtime/workflow-support`.
 | `reviewers` | `readonly ReviewerSeat[]` | required | Each a `name`, a `seat` and an optional review `scope`. |
 | `threshold`, `reviewThreshold` | `number` | required | How many reviewers must accept. |
 | `testFiles` | `readonly string[]` | required for `featureDelivery` | The test files written before the code; every entry must be in `files`. |
-| `maxKickbacks` | `KickbackBudget` | none | How often a review may run the writer again. |
+| `refine` | `RefineBudget` | `1` | The send-backs each target may take. A number gives every target the same count. A map gives each named target its own count or judge, and a target the map leaves out refuses send-backs (`featureDelivery` still gives `research-requirements` 1). |
 
 ## Errors
 

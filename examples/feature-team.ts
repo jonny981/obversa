@@ -7,7 +7,7 @@
  * job here is a small function, so the shape of the team is the only thing
  * on show.
  */
-import { approval, fnJob, pipeline, reviewPanel, run, type Outcome } from '@obversa/runtime';
+import { approval, fnJob, pipeline, review as buildReview, reviewPanel, run, type Outcome } from '@obversa/runtime';
 
 /** The work itself. In a real team each of these calls an engine. */
 const analyse = fnJob('analyse', () => 'the ticket asks for a report export with a header row');
@@ -61,12 +61,19 @@ export const featureDelivery = pipeline(
   'feature-delivery',
   [
     { name: 'analyse', job: analyse },
-    { name: 'implement', job: implement },
+    {
+      name: 'implement',
+      refine: buildReview({ rounds: 2 }),
+      job: implement,
+    },
     { name: 'test', job: testStage },
-    { name: 'review', job: review, acceptsKickbackTo: ['implement'] },
+    {
+      name: 'review',
+      job: review,
+      sendsBackTo: ['implement'],
+    },
     { name: 'approve', job: approve },
   ],
-  { maxKickbacks: 2 },
 );
 
 const result = await run(featureDelivery);

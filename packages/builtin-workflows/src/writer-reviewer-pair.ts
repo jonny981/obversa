@@ -1,9 +1,10 @@
 import {
   assertDistinctSeats,
-  assertKickbacks,
+  assertRefineBudget,
   assertTeamInput,
   dag,
   expectedFilesPrompt,
+  nodeRefine,
   requireNonEmptyFiles,
   teamAgent,
   teamTest,
@@ -13,8 +14,8 @@ import type { PairConfig } from './types.js';
 export function writerReviewerPair(config: PairConfig) {
   assertTeamInput(config);
   assertDistinctSeats([config.writer, config.reviewer]);
-  const maxKickbacks = config.maxKickbacks ?? 1;
-  assertKickbacks(maxKickbacks);
+  const refineBudget = config.refine ?? 1;
+  assertRefineBudget(refineBudget, ['writer']);
   const writer = teamAgent(
     'writer',
     config.writer,
@@ -41,13 +42,13 @@ export function writerReviewerPair(config: PairConfig) {
   return dag({
     name: 'writer-reviewer-pair',
     stopOnError: true,
-    maxKickbacks,
     nodes: {
       writer: {
         job: checkedWriter,
         desc: 'Write the code and its test from the brief.',
         gate: 'The files named in the brief exist in the workspace.',
         needs: [],
+        refine: nodeRefine(refineBudget, 'writer'),
       },
       test: {
         job: test,
@@ -60,7 +61,7 @@ export function writerReviewerPair(config: PairConfig) {
         desc: 'Read the code and the test result and accept or send the work back.',
         gate: 'A different model family has accepted the change.',
         needs: ['test'],
-        acceptsKickbackTo: ['writer'],
+        sendsBackTo: ['writer'],
       },
     },
   });

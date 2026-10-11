@@ -105,9 +105,9 @@ as a revision.
 ```ts examples/goal-check.ts (excerpt)
 const graph = dag({
   name: 'welcome-page-dag',
-  maxKickbacks: 1,
   nodes: {
     build: {
+      refine: review({ rounds: 1 }),
       job: fnJob('build', (ctx) => {
         builds += 1;
         const hours = builds > 1 ? '\nOpen 9:00 to 17:00, Monday to Friday.' : '';
@@ -115,15 +115,19 @@ const graph = dag({
         return `wrote draft ${builds}`;
       }),
     },
-    goal: { needs: 'build', acceptsKickbackTo: ['build'], job: goalCheck(checker, { target: 'build', text: brief }) },
+    goal: {
+      needs: 'build',
+      sendsBackTo: ['build'],
+      job: goalCheck(checker, { target: 'build', text: brief }),
+    },
     review: { needs: 'goal', job: fnJob('review', () => 'reads well') },
   },
 });
 ```
 
-The send-back takes the same route as any other node's, so `maxKickbacks`
-limits it, and the goal node lists `build` in `acceptsKickbackTo`. A judge
-on `maxKickbacks` for the target does not decide it.
+The send-back takes the same route as any other node's, so the build
+node's `refine` limits it, and the goal node lists `build` in
+`sendsBackTo`. A judge in the target's `review()` does not decide it.
 The judge still decides what the review node sends back.
 
 ## What the run did

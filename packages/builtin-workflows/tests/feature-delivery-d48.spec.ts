@@ -63,7 +63,7 @@ function config(overrides: Partial<FeatureDeliveryConfig> = {}): FeatureDelivery
     reviewers: [{ name: 'correctness', seat: seat(reviewer, 'reviewer'), scope: 'implementation' }],
     reviewThreshold: 1,
     approve: seat(approve, 'approve'),
-    maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
+    refine: { plan: 3, 'tests-first': 3 },
     ...overrides,
   };
 }
@@ -366,7 +366,7 @@ describe('featureDelivery D48 contract', () => {
         reviewers: [{ name: 'correctness', seat: seat(reviewer, 'reviewer'), scope: 'implementation' }],
         reviewThreshold: 1,
         approve: seat(approve, 'approve'),
-        maxKickbacks: { plan: 3, 'tests-first': 3, implement: 3 },
+        refine: { plan: 3, 'tests-first': 3 },
       }), { cwd: workspace });
 
       expect(result.outcome.status, JSON.stringify(result.outcome)).toBe('pass');

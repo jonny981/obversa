@@ -10,6 +10,7 @@ import type { TeamSeat } from '@obversa/api';
 import { agentJob } from './core/job.js';
 import { LoopError } from './core/errors.js';
 import { revisionRequest } from './core/feedback.js';
+import { interactionDeclaration } from './core/interaction.js';
 import type { GoalRequirement, Job, JobContext } from './core/types.js';
 import { objectAt } from './workflow-agent-response.js';
 
@@ -98,7 +99,7 @@ export function goalCheckJob(
     prompt: goalPrompt(source, retry),
   });
   const attempts = [ask(false), ask(true)];
-  return async (ctx) => {
+  const check: Job = async (ctx) => {
     let requirements: GoalRequirement[] | undefined;
     for (const attempt of attempts) {
       const outcome = await attempt(ctx);
@@ -125,13 +126,17 @@ export function goalCheckJob(
     }, { data });
     return { ...outcome, revision: { ...outcome.revision!, skipJudge: true } };
   };
+  // The check's declared inputs stand in for its source in every identity
+  // that digests it: the closure's `toString()` is the same whatever the
+  // requirements, target or seat, so a changed requirement would not show.
+  return interactionDeclaration(check, { goalCheck: { source, target, seat: seat.identity } });
 }
 
 /**
  * A goal check as one `dag()` node: put it between the build and the review
  * nodes. It passes when every requirement in `text` is met, and otherwise
  * sends the unmet ones, with evidence, back to `target` as a revision. A
- * judge on `maxKickbacks` for `target` does not decide them.
+ * judge on `target`'s `review()` does not decide them.
  */
 export function goalCheck(seat: TeamSeat, opts: { readonly target: string; readonly text: string }): Job {
   return goalCheckJob('goal-check', seat, { text: opts.text }, opts.target, (ctx) => ctx.graph?.attempt ?? 1);

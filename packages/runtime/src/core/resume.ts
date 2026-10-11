@@ -10,9 +10,9 @@ import { join } from 'node:path';
 
 import { RECORDED_ENGINE_USAGE, type RecordedEngineUsage } from './job.js';
 import { approval, delegateNodeJob } from './approval-job.js';
-import type { DagConfig, DagNode, Job, JobContext, Judge, Outcome, RecordedStage, ResumedStageRecords } from './types.js';
-import { isJudge } from './judge.js';
-import { hasSavedInteraction, interactionDeclaration } from './interaction.js';
+import type { DagConfig, DagNode, Job, JobContext, Outcome, RecordedStage, ResumedStageRecords } from './types.js';
+import type { TeamSeat } from '@obversa/api';
+import { hasSavedInteraction, interactionDeclaration, interactionIdentity } from './interaction.js';
 import { REBUILD_UNTIL, rebuildUntil, recordedRounds, recordKey, roundsOf, staleUntil } from './context.js';
 import type { Writes } from './describe.js';
 
@@ -45,45 +45,67 @@ function canonicalForDigest(value: unknown): unknown {
   return value;
 }
 
-/** The dag's resume identity: a digest over the declared shape: name,
- * concurrency, kickback budget (a judge digests as its cap and questions;
- * the seat is excluded), the default `isolation`, and each node's needs,
- * `when`, `optional` and effective isolation (the node's `isolate`, else the
- * dag's `isolation`). Node `job` functions are excluded for the same reason
- * engine instances are excluded in `workflow()`: they carry state a digest
- * cannot match. */
+/** The dag's resume identity: a digest over the declared shape: name, brief,
+ * use case, concurrency, the default `isolation`, and each node's needs,
+ * send-back routes, `desc`, `gate`, `when`, `optional`, `writes`, `file`,
+ * `agent` seat (its model and family; the engine instance is excluded for
+ * the same reason engine instances are excluded in `workflow()`: it carries
+ * state a digest cannot match), `refine` (a judge digests as its cap and
+ * questions; the seats as their models and families) and effective isolation
+ * (the node's `isolate`, else the dag's `isolation`). The brief, `desc`,
+ * `gate` and use case are the task an agent node and its judge are given:
+ * a finished node whose task changed since its record stands for nothing.
+ * Node `job` functions are excluded for the same reason. */
 export function dagResumeIdentity(config: DagConfig): string {
-  const kickbacks = config.maxKickbacks === undefined
-    ? null
-    : typeof config.maxKickbacks === 'number'
-      ? config.maxKickbacks
-      : Object.fromEntries(
-        Object.keys(config.maxKickbacks).sort().map((target) => {
-          const limit = (config.maxKickbacks as Record<string, number | Judge>)[target]!;
-          return [target, isJudge(limit)
-            ? { judge: { cap: limit.cap, questions: canonicalForDigest(limit.questions) } }
-            : limit];
-        }),
-      );
+  const seat = (value: TeamSeat | true | undefined): unknown =>
+    value === undefined ? null
+      : value === true ? true
+        : { model: value.identity?.model ?? null, modelFamily: value.identity?.modelFamily ?? null };
+  const refine = (value: DagNode['refine']): unknown => value === undefined ? null : {
+    checks: value.checks,
+    // `goalCheck()` declares its requirements, target and seat on the job it
+    // returns: the digest reads those, since the job's source is the same
+    // whatever they are. A hand-written goal job digests as its source.
+    goal: value.goal === undefined ? null : interactionIdentity(value.goal),
+    reviewers: value.reviewers?.map((definition) => ({
+      name: definition.name,
+      scope: definition.scope ?? null,
+      seat: seat(definition.seat),
+    })) ?? null,
+    pass: value.pass,
+    synthesise: seat(value.synthesise),
+    judge: value.judge === undefined ? null : {
+      cap: value.judge.cap ?? null,
+      questions: canonicalForDigest(value.judge.questions),
+    },
+    rounds: value.rounds ?? null,
+    checkRounds: value.checkRounds,
+    fixer: seat(value.fixer),
+  };
   const declared = {
     name: config.name,
+    brief: config.brief ?? null,
+    useCase: config.useCase ?? null,
     concurrency: config.concurrency ?? null,
     isolation: config.isolation ?? null,
-    maxKickbacks: kickbacks,
     nodes: Object.fromEntries(
       Object.keys(config.nodes).sort().map((name) => {
         const node = config.nodes[name]!;
         const declaredNode: Partial<DagNode> = typeof node === 'function' ? {} : node;
-        const needs = declaredNode.needs === undefined
-          ? []
-          : typeof declaredNode.needs === 'string'
-            ? [declaredNode.needs]
-            : [...declaredNode.needs];
+        const list = (value: string | readonly string[] | undefined): string[] =>
+          value === undefined ? [] : typeof value === 'string' ? [value] : [...value];
         return [name, {
-          needs,
+          needs: list(declaredNode.needs),
+          sendsBackTo: list(declaredNode.sendsBackTo),
           optional: declaredNode.optional === true,
           isolate: declaredNode.isolate ?? config.isolation === 'worktree',
           when: canonicalForDigest(declaredNode.when ?? null),
+          desc: declaredNode.desc ?? null,
+          gate: declaredNode.gate ?? null,
+          file: declaredNode.file ?? null,
+          writes: declaredNode.writes === 'workspace' ? 'workspace' : list(declaredNode.writes),
+          agent: seat(declaredNode.agent),
+          refine: refine(declaredNode.refine),
         }];
       }),
     ),

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { run, dag, isolated, tournament, fnJob, kickback } from '../src/api.ts';
+import { run, dag, isolated, tournament, fnJob, kickback, review } from '../src/api.ts';
 import type { LoopEvent, RunOptions } from '../src/api.ts';
 import { addWorktree } from '../src/core/git.ts';
 import { MockEngine } from '../src/testing.ts';
@@ -113,15 +113,17 @@ describe('a run cleans up the forks it made', () => {
     const { outcome } = await run(dag({
       name: 'ship',
       isolation: 'worktree',
-      maxKickbacks: 1,
       nodes: {
-        build: fnJob('build', async (ctx) => {
-          write(ctx.workspace.dir, 'out.txt', `build ${reviews}\n`);
-          return { status: 'pass' };
-        }),
+        build: {
+          refine: review({ rounds: 1 }),
+          job: fnJob('build', async (ctx) => {
+            write(ctx.workspace.dir, 'out.txt', `build ${reviews}\n`);
+            return { status: 'pass' };
+          }),
+        },
         review: {
           needs: ['build'],
-          acceptsKickbackTo: ['build'],
+          sendsBackTo: ['build'],
           job: fnJob('review', async () => {
             reviews += 1;
             return reviews === 1 ? kickback('build', 'tighten it') : { status: 'pass' };

@@ -368,11 +368,9 @@ function triage(ticket: Ticket, policy: Policy, helpdeskUrl: string) {
       },
       draft: {
         needs: 'route',
-        job: agentJob({
-          label: 'draft',
-          engine: 'support',
-          prompt: `Draft the reply as briefs/support.md says and write ${reply}.\n\n${ticketText}`,
-        }),
+        desc: `Draft the reply to this ticket as briefs/support.md says and write ${reply}.\n\n${ticketText}`,
+        agent: support,
+        writes: reply,
       },
       send: {
         needs: ['route', 'draft'],

@@ -1,3 +1,7 @@
+import { writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { describe, it, expect, afterAll, vi } from 'vitest';
 
 import {
@@ -6,9 +10,12 @@ import {
   jobMeta,
   fnJob,
   commandSucceeds,
+  createCallbackClient,
+  judge,
+  review,
   LoopError,
 } from '../src/api.ts';
-import type { RunOptions } from '../src/api.ts';
+import type { AgentRequest, CallbackRequest, RunCallbacks, RunOptions, TeamSeat } from '../src/api.ts';
 import { renderPipelineTable } from '../src/core/pipeline.ts';
 import { MockEngine } from '../src/testing.ts';
 import { tmpRepo, cleanupRepos } from './git-helpers.ts';
@@ -24,6 +31,13 @@ const mockOpts: RunOptions = {
   engine: 'mock',
   engines: { mock: new MockEngine(() => '') },
 };
+
+/** A seat that answers through a scripted MockEngine, as the refine specs build theirs. */
+const seat = (engine: MockEngine, model: string, tools: readonly string[] = ['Read']): TeamSeat => ({
+  engine,
+  identity: { adapter: 'mock', provider: 'mock', modelFamily: model.split('-', 1)[0]!, model, tools },
+});
+
 const pass = (rec: string[], name: string) =>
   fnJob(name, async () => {
     rec.push(name);
@@ -34,6 +48,17 @@ const fail = (rec: string[], name: string) =>
     rec.push(name);
     return { status: 'fail' as const };
   });
+
+/** Claim a pending question and submit the answer, the way a person would. */
+async function answer(client: RunCallbacks, request: CallbackRequest, approved = true) {
+  const claim = await client.claim(request.requestId, 'person');
+  expect(claim.ok).toBe(true);
+  if (!claim.ok) throw new Error(`claim refused: ${claim.kind}`);
+  const submitted = await client.submit(request.requestId, claim.claimToken, 'person', request.digest, {
+    approved,
+  });
+  expect(submitted.ok).toBe(true);
+}
 
 describe('pipeline', () => {
   it('auto-chains stages and runs them strictly in order', async () => {
@@ -260,5 +285,85 @@ describe('pipeline', () => {
     // before it starts; stopOnError:false lets the unrelated branch finish.
     expect(ran.sort()).toEqual(['after', 'bad', 'slow']);
     expect(outcome.status).toBe('fail'); // bad still fails the pipeline
+  });
+
+  it('gives the stage\'s file to the judge as the artifact it reads', async () => {
+    const repo = await tmpRepo();
+    const judgeCalls: AgentRequest[] = [];
+    const writer = new MockEngine((req) => {
+      writeFileSync(join(req.cwd!, 'page.md'), 'the first draft\n');
+      return JSON.stringify({ status: 'pass', summary: 'wrote it' });
+    });
+    const reviewer = new MockEngine(() => JSON.stringify({
+      status: 'revise',
+      summary: 'one finding',
+      findings: [{ severity: 'should-fix', evidence: 'the title is vague' }],
+    }));
+    const judgeEngine = new MockEngine((req) => {
+      judgeCalls.push(req);
+      return JSON.stringify({ stop_reason: { choice: 'holds' } });
+    });
+
+    const { outcome } = await run(
+      pipeline('p', [
+        {
+          name: 'write',
+          agent: seat(writer, 'writer-mock', ['Write']),
+          writes: 'page.md',
+          file: 'page.md',
+          refine: review({
+            reviewers: [seat(reviewer, 'reviewer-mock')],
+            judge: judge(seat(judgeEngine, 'judge-mock'), { cap: 2 }),
+          }),
+        },
+      ]),
+      { cwd: repo },
+    );
+
+    expect(outcome.status).toBe('pass');
+    expect(judgeCalls).toHaveLength(1);
+    // The judge's state names the file and carries its draft, as a dag()
+    // node's `file` gives it.
+    const state = (JSON.parse(judgeCalls[0]!.prompt) as { state: { what: { file?: string; draft?: string } } }).state;
+    expect(state.what.file).toBe('page.md');
+    expect(state.what.draft).toBe('the first draft\n');
+  });
+
+  it('rebuilds a finished stage whose file is missing on a resume', async () => {
+    const repo = await tmpRepo();
+    const recordTo = join(repo, 'record.jsonl');
+    let builds = 0;
+    const writer = new MockEngine((req) => {
+      builds += 1;
+      writeFileSync(join(req.cwd!, 'page.md'), `draft ${builds}\n`);
+      return JSON.stringify({ status: 'pass', summary: 'wrote it' });
+    });
+    const pipe = () => pipeline('p', [
+      {
+        name: 'write',
+        agent: seat(writer, 'writer-mock', ['Write']),
+        writes: 'page.md',
+        file: 'page.md',
+      },
+    ]);
+
+    expect((await run(pipe(), { cwd: repo, recordTo })).outcome.status).toBe('pass');
+    expect(builds).toBe(1);
+    await rm(join(repo, 'page.md'));
+
+    // `file` is part of what the stage's saved result stands for: gone, the
+    // result is not reused. The stage is not retrySafe, so the resume asks
+    // before it builds again, naming the missing file.
+    const callbacks = createCallbackClient();
+    const paused = await run(pipe(), { cwd: repo, recordTo, resume: true, callbacks });
+    expect(paused.outcome.status).toBe('paused');
+    expect(paused.outcome.summary).toMatch(/Stage "write" wrote page\.md, which is missing/);
+    const [request] = await callbacks.listPending();
+    expect((request?.input as { missing?: string[] })?.missing).toEqual(['page.md']);
+    await answer(callbacks, request!);
+
+    const resumed = await run(pipe(), { cwd: repo, recordTo, resume: true, callbacks });
+    expect(resumed.outcome.status).toBe('pass');
+    expect(builds).toBe(2);
   });
 });

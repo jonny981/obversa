@@ -48,19 +48,19 @@ own. Each entry is one argument. The string form splits on spaces and
 refuses a quote. The graph then puts a second command, `size`, between the
 test and two reviews, and each review carries a `when`:
 
-```ts examples/command-kickback.ts (excerpt) {3,17,24,31}
+```ts examples/command-kickback.ts (excerpt) {7,12}
 export const commandKickback = dag({
   name: 'command-kickback',
-  maxKickbacks: 1,
   nodes: {
     implement: {
       desc: 'Write the change.',
       gate: 'The source file exists.',
+      refine: buildReview({ rounds: 1 }),
       job: implement,
     },
     test: {
       needs: 'implement',
-      acceptsKickbackTo: ['implement'],
+      sendsBackTo: ['implement'],
       desc: 'Run the tests; a red run goes back to implement with the output.',
       gate: 'The test command exits 0.',
       job: test,
@@ -101,13 +101,13 @@ skipped and recorded as skipped. Leave `when` off any branch that must run,
 because a skip doesn't fail the run. `failed` means the command ran and
 failed; a dependency that never got to decide meets neither condition.
 
-`maxKickbacks` limits how many times the writer runs again. A number is one
-count for the whole graph; a map gives each target its own number of
-[refinements](/concepts/feedback-loops#counting-rounds). When a count is
-spent, the run fails with the last output as its reason instead of looping.
-The `test` node lists `implement` in `acceptsKickbackTo`: a node names
-every step it can send work back to, and a send-back anywhere else fails it
-with an error that names both steps.
+`implement`'s `refine: review({ rounds: 1 })` allows one send-back to it:
+when the count is spent, the run fails with the last output as its reason
+instead of looping. `review({ judge })` on a node hands the same call to a
+judge. The `test` node lists `implement` in `sendsBackTo`: a node names
+every step it can send work back to, a send-back anywhere else fails it
+with an error that names both steps, and a target with no `refine` cannot
+take one at all.
 
 ## What the run did
 
@@ -146,7 +146,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { commandJob, dag, failed, fnJob, passed, run } from '@obversa/runtime';
+import { commandJob, dag, failed, fnJob, passed, review as buildReview, run } from '@obversa/runtime';
 
 const workspace = mkdtempSync(join(tmpdir(), 'command-kickback-'));
 const source = join(workspace, 'add.mjs');
@@ -195,16 +195,16 @@ const review = (name: string, summary: string) =>
 
 export const commandKickback = dag({
   name: 'command-kickback',
-  maxKickbacks: 1,
   nodes: {
     implement: {
       desc: 'Write the change.',
       gate: 'The source file exists.',
+      refine: buildReview({ rounds: 1 }),
       job: implement,
     },
     test: {
       needs: 'implement',
-      acceptsKickbackTo: ['implement'],
+      sendsBackTo: ['implement'],
       desc: 'Run the tests; a red run goes back to implement with the output.',
       gate: 'The test command exits 0.',
       job: test,

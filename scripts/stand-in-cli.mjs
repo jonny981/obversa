@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// One stand-in CLI installed by host proofs under three names: claude, codex
-// and opencode. It reads its role from the name it was invoked as, answers
+// One stand-in CLI installed by host proofs under four names: claude, codex,
+// opencode and grok. It reads its role from the name it was invoked as, answers
 // --version with the string the real adapter pins, and for a model call
 // reads its script from a file named .obversa-stand-in.json in its working
 // directory, so no environment variable has to survive the adapter's clean
@@ -8,8 +8,8 @@
 // { "writes": { "path": "content" }, "deletes": ["path"], "reply": "text" }.
 // It writes and deletes the files in its cwd, prints the reply in that role's
 // line protocol, appends one line per call to .obversa-stand-in-calls.log
-// beside the script, with the prompt it read on stdin, and exits 0. Past the
-// end of the list it repeats the last entry.
+// beside the script, with the prompt it read on stdin or in --prompt-file,
+// and exits 0. Past the end of the list it repeats the last entry.
 import { appendFileSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { text } from 'node:stream/consumers';
@@ -20,6 +20,7 @@ const VERSIONS = {
   claude: '2.1.261 (Claude Code)\n',
   codex: 'codex-cli 0.153.2\n',
   opencode: '1.18.23\n',
+  grok: 'grok 1.0.44\n',
 };
 const scriptPath = join(process.cwd(), '.obversa-stand-in.json');
 const callsLog = join(process.cwd(), '.obversa-stand-in-calls.log');
@@ -62,8 +63,12 @@ if (args.length === 1 && args[0] === '--version') {
   process.exit(0);
 }
 
-// Every adapter writes the prompt to stdin and closes it.
-const prompt = process.stdin.isTTY ? '' : await text(process.stdin);
+// Every adapter writes the prompt to stdin and closes it; Grok names a
+// --prompt-file instead.
+const promptFile = args.indexOf('--prompt-file');
+const prompt = promptFile !== -1
+  ? readFileSync(args[promptFile + 1], 'utf8')
+  : process.stdin.isTTY ? '' : await text(process.stdin);
 const entry = withCallsLock(() => {
   const chosen = call();
   appendFileSync(callsLog, `${JSON.stringify({
@@ -97,6 +102,26 @@ if (role === 'claude') {
   process.stdout.write(`${JSON.stringify({
     type: 'turn.completed',
     usage: { input_tokens: 42, cached_input_tokens: 30, output_tokens: 7 },
+  })}\n`);
+} else if (role === 'grok') {
+  // Grok's streaming-messages-json: an init frame reporting the model and
+  // the declared tools, an assistant frame with the reply, and a result
+  // frame closing the call. The tools it reports are the --tools list less
+  // the --disallowed-tools (a no-tool call passes and then disallows one).
+  const model = args[args.indexOf('--model') + 1];
+  const allowed = args[args.indexOf('--tools') + 1].split(',');
+  const disallowed = (args[args.indexOf('--disallowed-tools') + 1] ?? '').split(',');
+  const tools = allowed.filter((tool) => !disallowed.includes(tool));
+  process.stdout.write(`${JSON.stringify({
+    type: 'system', session_id: 'stand-in-session', model, tools, mcp_servers: [],
+  })}\n`);
+  process.stdout.write(`${JSON.stringify({
+    type: 'assistant', parent_tool_use_id: null,
+    message: { model, content: [{ type: 'text', text: entry.reply }] },
+  })}\n`);
+  process.stdout.write(`${JSON.stringify({
+    type: 'result', subtype: 'success', is_error: false, result: entry.reply,
+    usage: { input_tokens: 4, output_tokens: 2 },
   })}\n`);
 } else {
   // OpenCode's stream: a wrapper frame per event with the part inside it,

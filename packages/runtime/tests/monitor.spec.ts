@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { agentJob, approval, createCallbackClient, createCallbackGate, dag, fnJob, formatEvent, humanReview, judge, kickback, pipeline, revisionRequest, run } from '../src/api.ts';
+import { agentJob, approval, createCallbackClient, createCallbackGate, dag, fnJob, formatEvent, humanReview, judge, kickback, pipeline, review, revisionRequest, run } from '../src/api.ts';
 import type { InteractionBinding, JsonObject, LoopEvent, MonitorState, Outcome, RunResult } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 
@@ -160,13 +160,15 @@ function productDecisionReview(prompts: string[], interaction?: InteractionBindi
   const judgeEngine = new MockEngine(() => JSON.stringify({ stop_reason: { choice: judged++ === 0 ? 'product_decision' : 'holds' } }));
   return dag({
     name: 'product-review',
-    maxKickbacks: { write: judge({ engine: judgeEngine, identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge-mock', model: 'judge-mock', tools: [] } }, interaction ? { interaction } : {}) },
     nodes: {
-      write: agentJob({
-        label: 'write', model: 'writer-mock', prompt: 'Write the page.', consumeFeedback: true,
-        engine: new MockEngine((request) => { prompts.push(request.prompt); return 'wrote the page'; }),
-      }),
-      review: { needs: ['write'], acceptsKickbackTo: ['write'], job: fnJob('review', () => revisionRequest({
+      write: {
+        refine: review({ judge: judge({ engine: judgeEngine, identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge-mock', model: 'judge-mock', tools: [] } }, interaction ? { interaction } : {}) }),
+        job: agentJob({
+          label: 'write', model: 'writer-mock', prompt: 'Write the page.', consumeFeedback: true,
+          engine: new MockEngine((request) => { prompts.push(request.prompt); return 'wrote the page'; }),
+        }),
+      },
+      review: { needs: ['write'], sendsBackTo: ['write'], job: fnJob('review', () => revisionRequest({
         target: 'write', reason: 'Choose the audience', findings: [{ severity: 'should-fix', evidence: 'The page must choose one audience.' }],
       })) },
     },
@@ -403,12 +405,11 @@ describe('the run monitor', () => {
     let reviews = 0;
     const result = await run(dag({
       name: 'returned',
-      maxKickbacks: 1,
       nodes: {
-        implement: fnJob('implement', () => 'wrote it'),
+        implement: { refine: review({ rounds: 1 }), job: fnJob('implement', () => 'wrote it') },
         review: {
           needs: 'implement',
-          acceptsKickbackTo: ['implement'],
+          sendsBackTo: ['implement'],
           job: fnJob('review', (): Outcome => (reviews++ === 0 ? kickback('implement', 'missing header') : { status: 'pass', summary: 'fine' })),
         },
       },

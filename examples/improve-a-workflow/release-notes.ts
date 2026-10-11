@@ -4,7 +4,7 @@
  * function that follows its brief to the letter: it writes upgrade steps only
  * when the brief or a finding asks for them.
  */
-import { fnJob, kickback, pipeline, type Job } from '@obversa/runtime';
+import { fnJob, kickback, pipeline, review, type Job } from '@obversa/runtime';
 
 const brief = 'Write the release notes for version 2.0, one line per change.';
 
@@ -21,7 +21,15 @@ export function releaseNotes(): Job {
     ? 'the notes have upgrade steps'
     : kickback('write', 'the notes have no upgrade steps')));
   return pipeline('release-notes', [
-    { name: 'write', job: write },
-    { name: 'check', job: check, acceptsKickbackTo: ['write'] },
-  ], { maxKickbacks: 2 });
+    {
+      name: 'write',
+      refine: review({ rounds: 2 }),
+      job: write,
+    },
+    {
+      name: 'check',
+      job: check,
+      sendsBackTo: ['write'],
+    },
+  ]);
 }

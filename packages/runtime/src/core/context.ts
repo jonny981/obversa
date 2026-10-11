@@ -6,9 +6,15 @@
 
 import type {
   ConditionResult,
+  GoalRequirement,
   GraphPosition,
+  InteractionResponse,
   JobContext,
+  JudgeCheck,
+  JudgeRound,
+  JudgeWork,
   Outcome,
+  SkippedFinding,
   Workspace,
 } from './types.js';
 import type { EnvHandle } from '../env/environment.js';
@@ -68,6 +74,48 @@ export function rebuildUntil(ctx: object): number {
   return (ctx as { [REBUILD_UNTIL]?: number })[REBUILD_UNTIL] ?? 0;
 }
 
+/**
+ * Internal context key: what a graph keeps, for one run, about the rounds of
+ * the node it runs. A node that runs its own review rounds (a refined `dag()`
+ * node, a reviewed `workflow()` stage) reads and adds to it, so its own
+ * reviews and the send-backs to it share one count of builds and one judge
+ * history. Not exported from the package.
+ */
+export const TARGET_ROUNDS = Symbol('obversa:target-rounds');
+
+/** One node's rounds in one run of a graph, under `TARGET_ROUNDS`. */
+export interface TargetRounds {
+  /** The node's builds after its first, in this run. */
+  builds: number;
+  /**
+   * The node's pre-review send-backs — a failed check or a missing file — in
+   * this run, bounded by its refine's `checkRounds`.
+   */
+  checkBacks: number;
+  /**
+   * The results of the node's own checks this round (its refine's `checks`);
+   * a judge of the node reads them ahead of the graph's check steps.
+   */
+  checks: readonly JudgeCheck[];
+  /**
+   * Save the rounds so far between two of the node's own rounds, with the
+   * feedback its next build reads. A resume that runs the node again starts
+   * from that build.
+   */
+  save(feedback: Outcome): void;
+  rounds: readonly JudgeRound[];
+  skipped: readonly SkippedFinding[];
+  productFeedback: readonly InteractionResponse[];
+  /** The node's file as its judge last read it. */
+  previousDraft: string | undefined;
+  /** What the node's judge reads about the work. */
+  readonly work: JudgeWork;
+  /** The goal check's latest verdicts on the node's work, when it has a goal check. */
+  goal: readonly GoalRequirement[] | undefined;
+  /** This round's evidence for the node's judge: its own checks, the graph's check steps, and goal verdicts. */
+  evidence(): { readonly checks: readonly JudgeCheck[]; readonly goal: readonly GoalRequirement[] };
+}
+
 export interface ContextOverride {
   depth: number;
   path: readonly string[];
@@ -106,7 +154,7 @@ export interface ContextOverride {
   maxOutputBytes?: number;
 }
 
-/** Resolve the criterion for the reviewer context currently being evaluated. */
+/** Resolve the criterion for the reviewer context currently being evaluated. @internal */
 export function criterionFor(
   ctx: Pick<JobContext, 'reviewerGate' | 'stageGate' | 'graph'>,
 ): string | undefined {
@@ -118,7 +166,7 @@ export function criterionFor(
 export function childContext(
   parent: JobContext,
   over: ContextOverride,
-): JobContext & { [NODE_FILE]?: string; [ROUNDS]: Rounds; [STALE_UNTIL]: number; [REBUILD_UNTIL]: number } {
+): JobContext & { [NODE_FILE]?: string; [TARGET_ROUNDS]?: TargetRounds; [ROUNDS]: Rounds; [STALE_UNTIL]: number; [REBUILD_UNTIL]: number } {
   const rounds: Record<number, number> = { ...roundsOf(parent) };
   if (over.round !== undefined) {
     if (over.round > 1) rounds[over.path.length - 1] = over.round;
@@ -126,6 +174,10 @@ export function childContext(
   }
   return {
     [NODE_FILE]: (parent as JobContext & { [NODE_FILE]?: string })[NODE_FILE],
+    // The node rounds the parent runs under, so a node's checks and send-back
+    // limits reach the jobs inside its rounds; a nested dag's node ctx sets
+    // its own.
+    [TARGET_ROUNDS]: (parent as JobContext & { [TARGET_ROUNDS]?: TargetRounds })[TARGET_ROUNDS],
     [ROUNDS]: rounds,
     [STALE_UNTIL]: Math.max(staleUntil(parent), over.staleUntil ?? 0),
     [REBUILD_UNTIL]: rebuildUntil(parent),

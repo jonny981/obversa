@@ -141,7 +141,8 @@ describe('declarative teams', () => {
     expect(nodeMeta(nodes[2]!.job).kind).toBe('gate');
     expect(nodeMeta(nodes[3]!.job).kind).toBe('reviewPanel');
     expect(nodeMeta(nodes[4]!.job).kind).toBe('approval');
-    expect(meta.maxKickbacks).toEqual({ implement: 3 });
+    expect(nodes[1]!.refine).toBe('rounds 3');
+    expect(nodes[3]!.sendsBackTo).toEqual(['implement']);
     expect(nodes[0]!.timeoutMs).toBe(600_000);
   });
 
@@ -391,10 +392,12 @@ describe('declarative teams', () => {
     const nodes = (nodeMeta(job).nodes ?? []) as Array<Record<string, unknown>>;
     const reviewed = nodeMeta(nodes[0]!.job);
 
-    expect(reviewed.max).toBe(4);
+    // The loop's bound: a first build, the declared refinements, and the
+    // check budget (checkRounds, 3) that a missing write or red check draws on.
+    expect(reviewed.max).toBe(7);
   });
 
-  it('defaults a reviewed stage to one refinement: two builds', () => {
+  it('defaults a reviewed stage to one refinement plus the check budget', () => {
     const input = workflowInput();
     const job = workflow('default-review-refine', {
       ...input,
@@ -407,7 +410,8 @@ describe('declarative teams', () => {
     const node = ((nodeMeta(job).nodes ?? []) as Array<Record<string, unknown>>)[0]!;
     const reviewed = nodeMeta(node.job);
 
-    expect(reviewed.max).toBe(2);
+    // One refinement plus the check budget (checkRounds, 3) of headroom.
+    expect(reviewed.max).toBe(5);
     expect(reviewed.maxReviewRestarts).toBeUndefined();
   });
 

@@ -60,7 +60,7 @@ await withExample({
   },
   seats: {
     claude: [
-      { reply: proposals },
+      { writes: { 'proposals.json': proposals }, reply: pass('3 proposals') },
       { writes: { 'answers/q-1.md': answer }, reply: pass('answered from two vault passages') },
     ],
   },

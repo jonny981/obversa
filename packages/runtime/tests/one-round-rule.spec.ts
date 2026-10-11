@@ -1,6 +1,6 @@
 /**
  * The same intent, written as a reviewed `workflow()` stage, as a `dag()`
- * (a writer node, a review node and `maxKickbacks`) and, where it applies, as
+ * (a writer node with its `refine` and a review node that sends back) and, where it applies, as
  * a `loop()` with a graph body, behaves the same: the same outcome, the same
  * number of builds, the same judge consultations and the same judge input.
  */
@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { agentJob, approval, commandJob, createStoredCallbackClient, dag, exitCodeFor, fnJob, goalCheck, judge, kickback, loop, LoopError, person, reviewPanel, revisionRequest, run, stage, workflow } from '../src/api.ts';
+import { agentJob, approval, commandJob, createStoredCallbackClient, dag, exitCodeFor, fnJob, goalCheck, judge, kickback, loop, LoopError, person, review as buildReview, reviewPanel, revisionRequest, run, stage, workflow } from '../src/api.ts';
 import type { AgentRequest, InteractionBinding, InteractionResponse, Job, LoopEvent, Outcome, RunResult, StoredCallbackClient, TeamSeat, WorkflowRole } from '../src/api.ts';
 import { outcomeFromAgentText } from '../src/workflow-agent-response.ts';
 import { MockEngine } from '../src/testing.ts';
@@ -228,26 +228,26 @@ function build(form: Form, intent: Intent): Built {
       name: 'page',
       brief: BRIEF,
       useCase: 'a reader gets a clear, short page.',
-      maxKickbacks: { write: refine },
       nodes: {
         ...(intent.lint ? { lint: commandJob('lint', intent.lint) } : {}),
         write: {
+          refine: buildReview(typeof refine === 'number' ? { rounds: refine } : { judge: refine }),
           job: writer,
           file: 'page.md',
           ...(intent.lint ? { needs: 'lint' } : {}),
           ...(intent.desc !== undefined ? { desc: intent.desc } : {}),
           ...(intent.gate !== undefined ? { gate: intent.gate } : {}),
         },
-        ...(goalSeat ? { goal: { needs: 'write', job: goalCheck(goalSeat, { target: 'write', text: BRIEF }), acceptsKickbackTo: ['write'] } } : {}),
+        ...(goalSeat ? { goal: { needs: 'write', job: goalCheck(goalSeat, { target: 'write', text: BRIEF }), sendsBackTo: ['write'] } } : {}),
         review: {
           needs: goalSeat ? 'goal' : 'write',
           job: review,
-          acceptsKickbackTo: ['write'],
+          sendsBackTo: ['write'],
           ...(intent.timeoutMs !== undefined ? { timeoutMs: intent.timeoutMs } : {}),
         },
-        ...(intent.approve ? { approve: { needs: 'review', job: approve, acceptsKickbackTo: ['write'] } } : {}),
-        ...(intent.check ? { check: { needs: intent.approve ? 'approve' : 'review', job: commandJob('check', intent.check, { target: 'write' }), acceptsKickbackTo: ['write'] } } : {}),
-        ...(intent.secondCheck ? { 'second-check': { needs: 'check', job: commandJob('second-check', intent.secondCheck, { target: 'write' }), acceptsKickbackTo: ['write'] } } : {}),
+        ...(intent.approve ? { approve: { needs: 'review', job: approve, sendsBackTo: ['write'] } } : {}),
+        ...(intent.check ? { check: { needs: intent.approve ? 'approve' : 'review', job: commandJob('check', intent.check, { target: 'write' }), sendsBackTo: ['write'] } } : {}),
+        ...(intent.secondCheck ? { 'second-check': { needs: 'check', job: commandJob('second-check', intent.secondCheck, { target: 'write' }), sendsBackTo: ['write'] } } : {}),
       },
     }),
   };
@@ -791,14 +791,13 @@ describe('what the judge reads, the same in every form', () => {
             name: 'pages',
             brief: BRIEF,
             useCase: 'a reader gets a clear, short page.',
-            maxKickbacks: { intro: judge(judgeSeat), page: judge(judgeSeat) },
             nodes: {
-              intro: { job: writer('intro.md'), file: 'intro.md' },
-              'intro-goal': { needs: 'intro', job: goalCheck(goalSeat(intro), { target: 'intro', text: BRIEF }), acceptsKickbackTo: ['intro'] },
-              'intro-review': { needs: 'intro-goal', job: panel('intro'), acceptsKickbackTo: ['intro'] },
-              page: { needs: 'intro-review', job: writer('page.md'), file: 'page.md' },
-              'page-goal': { needs: 'page', job: goalCheck(goalSeat(page), { target: 'page', text: BRIEF }), acceptsKickbackTo: ['page'] },
-              'page-review': { needs: 'page-goal', job: panel('page'), acceptsKickbackTo: ['page'] },
+              intro: { refine: buildReview({ judge: judge(judgeSeat) }), job: writer('intro.md'), file: 'intro.md' },
+              'intro-goal': { needs: 'intro', job: goalCheck(goalSeat(intro), { target: 'intro', text: BRIEF }), sendsBackTo: ['intro'] },
+              'intro-review': { needs: 'intro-goal', job: panel('intro'), sendsBackTo: ['intro'] },
+              page: { needs: 'intro-review', refine: buildReview({ judge: judge(judgeSeat) }), job: writer('page.md'), file: 'page.md' },
+              'page-goal': { needs: 'page', job: goalCheck(goalSeat(page), { target: 'page', text: BRIEF }), sendsBackTo: ['page'] },
+              'page-review': { needs: 'page-goal', job: panel('page'), sendsBackTo: ['page'] },
             },
           });
         })();
@@ -935,12 +934,11 @@ describe('what one run keeps to itself', () => {
     let builds = 0;
     const result = await run(dag({
       name: 'page',
-      maxKickbacks: { write: judge(seat(new MockEngine((req) => JSON.stringify(perFinding()(req.prompt))), 'judge-mock')) },
       nodes: {
-        write: fnJob('write', () => { builds += 1; return `draft ${builds}`; }),
+        write: { refine: buildReview({ judge: judge(seat(new MockEngine((req) => JSON.stringify(perFinding()(req.prompt))), 'judge-mock')) }), job: fnJob('write', () => { builds += 1; return `draft ${builds}`; }) },
         a: {
           needs: 'write',
-          acceptsKickbackTo: ['write'],
+          sendsBackTo: ['write'],
           job: fnJob('a', (ctx) => {
             seen.a!.push(ctx.skippedFindings);
             return builds === 1 ? revisionRequest({ target: 'write', reason: 'two findings', findings: [REAL, TASTE] }) : 'clean';
@@ -948,7 +946,7 @@ describe('what one run keeps to itself', () => {
         },
         b: {
           needs: 'write',
-          acceptsKickbackTo: ['write'],
+          sendsBackTo: ['write'],
           job: fnJob('b', (ctx) => { seen.b!.push(ctx.skippedFindings); return 'clean'; }),
         },
       },
@@ -965,17 +963,16 @@ describe('what one run keeps to itself', () => {
     let builds = 0;
     const result = await run(dag({
       name: 'page',
-      maxKickbacks: { write: judge(seat(scripted([{ stop_reason: { choice: 'holds' } }, { stop_reason: { choice: 'continue' } }], judged), 'judge-mock'), { cap: 1 }) },
       nodes: {
-        write: fnJob('write', () => { builds += 1; return `draft ${builds}`; }),
+        write: { refine: buildReview({ judge: judge(seat(scripted([{ stop_reason: { choice: 'holds' } }, { stop_reason: { choice: 'continue' } }], judged), 'judge-mock'), { cap: 1 }) }), job: fnJob('write', () => { builds += 1; return `draft ${builds}`; }) },
         style: {
           needs: 'write',
-          acceptsKickbackTo: ['write'],
+          sendsBackTo: ['write'],
           job: fnJob('style', () => (builds === 1 ? revisionRequest({ target: 'write', reason: 'tone', findings: [TASTE] }) : 'clean')),
         },
         facts: {
           needs: 'style',
-          acceptsKickbackTo: ['write'],
+          sendsBackTo: ['write'],
           job: fnJob('facts', () => (builds === 1 ? revisionRequest({ target: 'write', reason: 'audience', findings: [REAL] }) : 'clean')),
         },
       },
@@ -993,18 +990,17 @@ describe('what one run keeps to itself', () => {
     let finals = 0;
     const result = await run(dag({
       name: 'page',
-      maxKickbacks: { plan: 1, write: 1 },
       nodes: {
-        plan: fnJob('plan', () => 'planned'),
-        write: { needs: 'plan', job: fnJob('write', (ctx) => { feedback.push(ctx.lastReview?.summary); return 'wrote'; }) },
+        plan: { refine: buildReview({ rounds: 1 }), job: fnJob('plan', () => 'planned') },
+        write: { needs: 'plan', refine: buildReview({ rounds: 1 }), job: fnJob('write', (ctx) => { feedback.push(ctx.lastReview?.summary); return 'wrote'; }) },
         check: {
           needs: 'write',
-          acceptsKickbackTo: ['write'],
+          sendsBackTo: ['write'],
           job: fnJob('check', () => (checks++ === 0 ? kickback('write', 'fix the title') : 'checked')),
         },
         final: {
           needs: 'check',
-          acceptsKickbackTo: ['plan'],
+          sendsBackTo: ['plan'],
           job: fnJob('final', () => (finals++ === 0 ? kickback('plan', 'plan for new users') : 'done')),
         },
       },
@@ -1021,9 +1017,8 @@ describe('what one run keeps to itself', () => {
     let checks = 0;
     const result = await run(dag({
       name: 'page',
-      maxKickbacks: { write: 1 },
       nodes: {
-        write: fnJob('write', () => `wrote ${++writes}`),
+        write: { refine: buildReview({ rounds: 1 }), job: fnJob('write', () => `wrote ${++writes}`) },
         lint: dag({
           name: 'lint',
           nodes: {
@@ -1033,7 +1028,7 @@ describe('what one run keeps to itself', () => {
         }),
         check: {
           needs: ['write', 'lint'],
-          acceptsKickbackTo: ['write'],
+          sendsBackTo: ['write'],
           job: fnJob('check', () => (checks++ === 0 ? kickback('write', 'fix the title') : 'checked')),
         },
       },
@@ -1062,18 +1057,20 @@ describe.each(['workflow', 'dag'] as const)('a person reviewer with a judge acro
     // A resume builds the job again, as a fresh worker would.
     const job = (): Job => form === 'dag' ? dag({
       name: 'page',
-      maxKickbacks: { write: refine },
       nodes: {
-        write: agentJob({
-          label: 'write',
-          engine: writerEngine,
-          model: 'writer-mock',
-          workspaceMode: 'write',
-          consumeFeedback: true,
-          prompt: 'Write page.md.',
-          outcome: (text) => outcomeFromAgentText(text),
-        }),
-        review: { needs: 'write', acceptsKickbackTo: ['write'], job: approval('review', { question: 'Is the page ready?', target: 'write' }) },
+        write: {
+          refine: buildReview(typeof refine === 'number' ? { rounds: refine } : { judge: refine }),
+          job: agentJob({
+            label: 'write',
+            engine: writerEngine,
+            model: 'writer-mock',
+            workspaceMode: 'write',
+            consumeFeedback: true,
+            prompt: 'Write page.md.',
+            outcome: (text) => outcomeFromAgentText(text),
+          }),
+        },
+        review: { needs: 'write', sendsBackTo: ['write'], job: approval('review', { question: 'Is the page ready?', target: 'write' }) },
       },
     }) : workflow('page', {
       brief: BRIEF,
@@ -1202,23 +1199,23 @@ describe('the goal check\'s verdicts across a resume', () => {
         name: 'page',
         brief: BRIEF,
         useCase: 'a reader gets a clear, short page.',
-        maxKickbacks: { write: judge(judgeSeat) },
         nodes: {
           write: {
+            refine: buildReview({ judge: judge(judgeSeat) }),
             job: agentJob({ label: 'write', engine: writerEngine, model: 'writer-mock', workspaceMode: 'write', consumeFeedback: true, prompt: 'Write page.md.', outcome: (text) => outcomeFromAgentText(text) }),
             file: 'page.md',
           },
-          goal: { needs: 'write', job: goalCheck(goalSeat, { target: 'write', text: BRIEF }), acceptsKickbackTo: ['write'] },
+          goal: { needs: 'write', job: goalCheck(goalSeat, { target: 'write', text: BRIEF }), sendsBackTo: ['write'] },
           review: {
             needs: 'goal',
-            acceptsKickbackTo: ['write'],
+            sendsBackTo: ['write'],
             job: reviewPanel({
               label: 'write',
               target: 'write',
               reviewers: [{ name: 'write-1', job: agentJob({ label: 'write-1', engine: reviewerEngine, model: 'reviewer-1', workspaceMode: 'read', tools: ['Read'], prompt: 'Review page.md.', outcome: (text) => outcomeFromAgentText(text) }) }],
             }),
           },
-          approve: { needs: 'review', acceptsKickbackTo: ['write'], job: approval('approve', { question: 'Is the page ready?', target: 'write' }) },
+          approve: { needs: 'review', sendsBackTo: ['write'], job: approval('approve', { question: 'Is the page ready?', target: 'write' }) },
         },
       });
       const recordTo = join(cwd, 'record.jsonl');
@@ -1285,21 +1282,23 @@ describe.each([
       stages: [stage('write', { agent: 'writer', writes: 'page.md', reviewedBy: 'reviewer', refine, ...(goalSeat ? { goal: goalSeat } : {}) })],
     }) : dag({
       name: 'page',
-      maxKickbacks: { write: refine },
       nodes: {
-        write: agentJob({
-          label: 'write',
-          engine: writerEngine,
-          model: 'writer-mock',
-          workspaceMode: 'write',
-          consumeFeedback: true,
-          prompt: 'Write page.md.',
-          outcome: (text) => outcomeFromAgentText(text),
-        }),
-        ...(goalSeat ? { goal: { needs: 'write', job: goalCheck(goalSeat, { target: 'write', text: BRIEF }), acceptsKickbackTo: ['write'] } } : {}),
+        write: {
+          refine: buildReview(typeof refine === 'number' ? { rounds: refine } : { judge: refine }),
+          job: agentJob({
+            label: 'write',
+            engine: writerEngine,
+            model: 'writer-mock',
+            workspaceMode: 'write',
+            consumeFeedback: true,
+            prompt: 'Write page.md.',
+            outcome: (text) => outcomeFromAgentText(text),
+          }),
+        },
+        ...(goalSeat ? { goal: { needs: 'write', job: goalCheck(goalSeat, { target: 'write', text: BRIEF }), sendsBackTo: ['write'] } } : {}),
         review: {
           needs: goalSeat ? 'goal' : 'write',
-          acceptsKickbackTo: ['write'],
+          sendsBackTo: ['write'],
           job: reviewPanel({
             label: 'write',
             target: 'write',
@@ -1416,24 +1415,24 @@ describe('a resume that reuses the saved rounds', () => {
         name: 'page',
         brief: BRIEF,
         useCase: 'a reader gets a clear, short page.',
-        maxKickbacks: { write: judge(judgeSeat) },
         nodes: {
           write: {
+            refine: buildReview({ judge: judge(judgeSeat) }),
             job: agentJob({ label: 'write', engine: writerEngine, model: 'writer-mock', workspaceMode: 'write', consumeFeedback: true, prompt: 'Write page.md.', outcome: (text) => outcomeFromAgentText(text) }),
             file: 'page.md',
           },
           review: {
             needs: 'write',
-            acceptsKickbackTo: ['write'],
+            sendsBackTo: ['write'],
             job: reviewPanel({
               label: 'write',
               target: 'write',
               reviewers: [{ name: 'write-1', job: agentJob({ label: 'write-1', engine: reviewerEngine, model: 'reviewer-1', workspaceMode: 'read', tools: ['Read'], prompt: 'Review page.md.', outcome: (text) => outcomeFromAgentText(text) }) }],
             }),
           },
-          check: { needs: 'review', acceptsKickbackTo: ['write'], job: commandJob('check', check, { target: 'write' }) },
+          check: { needs: 'review', sendsBackTo: ['write'], job: commandJob('check', check, { target: 'write' }) },
           approve: { needs: 'check', job: approval('approve', { question: 'Is the page ready?' }) },
-          'second-check': { needs: 'approve', acceptsKickbackTo: ['write'], job: commandJob('second-check', secondCheck, { target: 'write' }) },
+          'second-check': { needs: 'approve', sendsBackTo: ['write'], job: commandJob('second-check', secondCheck, { target: 'write' }) },
         },
       });
       const recordTo = join(cwd, 'record.jsonl');
@@ -1473,12 +1472,14 @@ describe('the check for unchanged work in a git workspace', () => {
     });
     const result = await run(dag({
       name: 'page',
-      maxKickbacks: { write: 2 },
       nodes: {
-        write: agentJob({ label: 'write', engine: writerEngine, model: 'writer-mock', workspaceMode: 'write', consumeFeedback: true, prompt: 'Write page.md.', outcome: (text) => outcomeFromAgentText(text) }),
+        write: {
+          refine: buildReview({ rounds: 2 }),
+          job: agentJob({ label: 'write', engine: writerEngine, model: 'writer-mock', workspaceMode: 'write', consumeFeedback: true, prompt: 'Write page.md.', outcome: (text) => outcomeFromAgentText(text) }),
+        },
         review: {
           needs: 'write',
-          acceptsKickbackTo: ['write'],
+          sendsBackTo: ['write'],
           job: fnJob('review', () => (builds === 1 ? revisionRequest({ target: 'write', reason: 'one finding', findings: [FINDING] }) : 'clean')),
         },
       },
@@ -1512,12 +1513,11 @@ describe('the check for unchanged work in a git workspace', () => {
     const writer = agentJob({ label: 'write', engine: writerEngine, model: 'writer-mock', workspaceMode: 'write', consumeFeedback: true, prompt: 'Write page.md.', outcome: (text) => outcomeFromAgentText(text) });
     const result = await run(dag({
       name: 'page',
-      maxKickbacks: { write: 3 },
       nodes: {
-        write: { job: inner(writer), file: 'page.md' },
+        write: { refine: buildReview({ rounds: 3 }), job: inner(writer), file: 'page.md' },
         review: {
           needs: 'write',
-          acceptsKickbackTo: ['write'],
+          sendsBackTo: ['write'],
           job: fnJob('review', () => (builds === 1 ? revisionRequest({ target: 'write', reason: 'one finding', findings: [FINDING] }) : 'clean')),
         },
       },
@@ -1557,7 +1557,7 @@ describe('send-back targets in workflow()', () => {
     expect(result.outcome.status).toBe('fail');
     expect((result.outcome.data as Record<string, Outcome>).check).toMatchObject({
       status: 'fail',
-      summary: 'dag "page": node "check" sent work back to "plan", which it does not declare in acceptsKickbackTo',
+      summary: 'dag "page": node "check" sent work back to "plan", which it does not declare in sendsBackTo',
     });
   });
 

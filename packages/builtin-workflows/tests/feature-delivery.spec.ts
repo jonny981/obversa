@@ -7,6 +7,7 @@ import { jobMeta, run } from '@obversa/runtime';
 
 import { featureDelivery } from '../src/index.js';
 import { assertTeamInput, requireNoFiles } from '../src/team-utils.js';
+import type { FeatureDeliveryConfig } from '../src/types.js';
 import { pass, scriptedEngine, seat } from './scripted-engine.js';
 
 const testCommand = {
@@ -123,6 +124,20 @@ describe('featureDelivery', () => {
   it('rejects test files outside the complete file list', () => {
     const config = baseConfig('/tmp/obversa-teams-feature');
     expect(() => featureDelivery({ ...config, testFiles: ['test/other.test.mjs'] })).toThrow(/also be listed/i);
+  });
+
+  it('refuses the old maxKickbacks field, naming refine', () => {
+    const config = baseConfig('/tmp/obversa-teams-feature');
+    expect(() => featureDelivery({ ...config, maxKickbacks: 3 } as FeatureDeliveryConfig))
+      .toThrow('maxKickbacks is now refine');
+  });
+
+  it('refuses a refine map key that takes no send-backs', () => {
+    const config = baseConfig('/tmp/obversa-teams-feature');
+    expect(() => featureDelivery({ ...config, refine: { plann: 3 } }))
+      .toThrow('refine names a target that takes no send-backs: plann');
+    expect(() => featureDelivery({ ...config, refine: { implement: 3 } }))
+      .toThrow('refine names a target that takes no send-backs: implement');
   });
 
   it('rejects team output notes as expected files', () => {

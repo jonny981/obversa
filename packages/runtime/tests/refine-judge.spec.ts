@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { dag, fnJob, judge, run, stage, stopQuestions, workflow } from '../src/api.ts';
+import { dag, fnJob, judge, review, run, stage, stopQuestions, workflow } from '../src/api.ts';
 import type { AgentRequest, JudgeQuestions, LoopEvent, Outcome, TeamSeat } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 
@@ -128,10 +128,12 @@ describe('refine: judge()', () => {
     const graph: LoopEvent[] = [];
     const sendsBack = dag({
       name: 'judged-send-back',
-      maxKickbacks: { draft: judge(seat(new MockEngine(() => JSON.stringify({ stop_reason: { choice: 'holds' } })), 'judge-mock')) },
       nodes: {
-        draft: fnJob('draft', () => 'drafted'),
-        check: { needs: 'draft', acceptsKickbackTo: ['draft'], job: fnJob('check', () => 'checked') },
+        draft: {
+          refine: review({ judge: judge(seat(new MockEngine(() => JSON.stringify({ stop_reason: { choice: 'holds' } })), 'judge-mock')) }),
+          job: fnJob('draft', () => 'drafted'),
+        },
+        check: { needs: 'draft', sendsBackTo: ['draft'], job: fnJob('check', () => 'checked') },
       },
     });
     expect((await run(sendsBack, { cwd: workDir(), onEvent: (event) => graph.push(event) })).outcome.status).toBe('pass');

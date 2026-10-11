@@ -22,6 +22,7 @@ import {
   loop,
   never,
   person,
+  review,
   revisionRequest,
   run,
   stage,
@@ -267,12 +268,11 @@ describe('totals', () => {
     let reviewRuns = 0;
     const job = dag({
       name: 'judged-review',
-      maxKickbacks: { implement: judge(judgeSeat, { cap: 2 }) },
       nodes: {
-        implement: fnJob('implement', () => 'built'),
+        implement: { refine: review({ judge: judge(judgeSeat, { cap: 2 }) }), job: fnJob('implement', () => 'built') },
         review: {
           needs: 'implement',
-          acceptsKickbackTo: ['implement'],
+          sendsBackTo: ['implement'],
           job: fnJob('review', async (ctx) => {
             reviewRuns += 1;
             ctx.emit({ kind: 'engine:usage', ts: Date.now(), path: [...ctx.path], model: SONNET, usage: reportedUsage({ inputTokens: 10, outputTokens: 5 }), cost: { kind: 'reported', usd: 2 } });
@@ -565,9 +565,8 @@ describe('totals', () => {
     let checks = 0;
     const job = dag({
       name: 'build-and-check',
-      maxKickbacks: 1,
       nodes: {
-        implement: fnJob('implement', async (ctx) => {
+        implement: { refine: review({ rounds: 1 }), job: fnJob('implement', async (ctx) => {
           builds += 1;
           ctx.emit({
             kind: 'engine:usage', ts: Date.now(), path: [...ctx.path], model: SONNET,
@@ -576,10 +575,10 @@ describe('totals', () => {
           });
           await new Promise((resolve) => setTimeout(resolve, 30));
           return 'built';
-        }),
+        }) },
         check: {
           needs: 'implement',
-          acceptsKickbackTo: ['implement'],
+          sendsBackTo: ['implement'],
           job: fnJob('check', () => (checks++ === 0
             ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
             : 'green')),
@@ -612,9 +611,9 @@ describe('totals', () => {
     let checks = 0;
     const job = dag({
       name: 'build-and-check',
-      maxKickbacks: 1,
       nodes: {
         implement: {
+          refine: review({ rounds: 1 }),
           file: 'out.txt',
           retrySafe: true,
           job: fnJob('implement', (ctx) => {
@@ -630,7 +629,7 @@ describe('totals', () => {
         },
         check: {
           needs: 'implement',
-          acceptsKickbackTo: ['implement'],
+          sendsBackTo: ['implement'],
           job: fnJob('check', () => (checks++ === 0
             ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
             : 'green')),
@@ -652,9 +651,8 @@ describe('totals', () => {
     let checks = 0;
     const job = dag({
       name: 'build-and-check',
-      maxKickbacks: 1,
       nodes: {
-        implement: fnJob('implement', (ctx) => {
+        implement: { refine: review({ rounds: 1 }), job: fnJob('implement', (ctx) => {
           builds += 1;
           ctx.emit({
             kind: 'engine:usage', ts: Date.now(), path: [...ctx.path], model: SONNET,
@@ -662,10 +660,10 @@ describe('totals', () => {
             cost: { kind: 'reported', usd: builds },
           });
           return 'built';
-        }),
+        }) },
         check: {
           needs: 'implement',
-          acceptsKickbackTo: ['implement'],
+          sendsBackTo: ['implement'],
           job: fnJob('check', () => (checks++ === 0
             ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
             : 'green')),
@@ -728,9 +726,9 @@ describe('totals', () => {
     let checks = 0;
     const job = dag({
       name: 'build-and-check',
-      maxKickbacks: 1,
       nodes: {
         implement: {
+          refine: review({ rounds: 1 }),
           retrySafe: true,
           job: fnJob('implement', (ctx) => {
             builds += 1;
@@ -744,7 +742,7 @@ describe('totals', () => {
         },
         check: {
           needs: 'implement',
-          acceptsKickbackTo: ['implement'],
+          sendsBackTo: ['implement'],
           job: fnJob('check', () => (checks++ === 0
             ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
             : 'green')),
@@ -1296,15 +1294,14 @@ describe('what each round changed', () => {
     const events: LoopEvent[] = [];
     await run(dag({
       name: 'build-and-check',
-      maxKickbacks: 1,
       nodes: {
-        implement: fnJob('implement', (ctx) => {
+        implement: { refine: review({ rounds: 1 }), job: fnJob('implement', (ctx) => {
           builds += 1;
           writeFileSync(join(ctx.workspace.dir, 'add.js'), builds === 1 ? 'return 0\n' : 'return a + b\n');
-        }),
+        }) },
         check: {
           needs: 'implement',
-          acceptsKickbackTo: ['implement'],
+          sendsBackTo: ['implement'],
           job: fnJob('check', () => (checks++ === 0
             ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
             : 'green')),
@@ -1326,16 +1323,15 @@ describe('what each round changed', () => {
     await run(dag({
       name: 'build-and-check',
       isolation: 'worktree',
-      maxKickbacks: 1,
       nodes: {
-        implement: fnJob('implement', (ctx) => {
+        implement: { refine: review({ rounds: 1 }), job: fnJob('implement', (ctx) => {
           builds += 1;
           writeFileSync(join(ctx.workspace.dir, 'add.js'), builds === 1 ? 'return 0\n' : 'return a + b\n');
           return builds === 1 ? 'built' : { status: 'fail', summary: 'still red' };
-        }),
+        }) },
         check: {
           needs: 'implement',
-          acceptsKickbackTo: ['implement'],
+          sendsBackTo: ['implement'],
           job: fnJob('check', () => (checks++ === 0
             ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
             : 'green')),
@@ -1355,17 +1351,16 @@ describe('what each round changed', () => {
     const events: LoopEvent[] = [];
     await run(dag({
       name: 'build-and-check',
-      maxKickbacks: 1,
       nodes: {
-        implement: async (ctx) => {
+        implement: { refine: review({ rounds: 1 }), job: async (ctx) => {
           builds += 1;
           writeFileSync(join(ctx.workspace.dir, 'add.js'), builds === 1 ? 'return 0\n' : 'return a + b\n');
           if (builds === 2) throw new Error('crashed after the edit');
           return { status: 'pass', summary: 'built' };
-        },
+        } },
         check: {
           needs: 'implement',
-          acceptsKickbackTo: ['implement'],
+          sendsBackTo: ['implement'],
           job: fnJob('check', () => (checks++ === 0
             ? revisionRequest({ target: 'implement', reason: 'red', findings: [{ evidence: 'add(2, 2) returned 0' }] })
             : 'green')),

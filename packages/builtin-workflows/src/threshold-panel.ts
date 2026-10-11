@@ -2,11 +2,12 @@ import { reviewPanel } from '@obversa/runtime';
 
 import {
   assertDistinctSeats,
-  assertKickbacks,
+  assertRefineBudget,
   assertReviewers,
   assertTeamInput,
   dag,
   expectedFilesPrompt,
+  nodeRefine,
   panelReviewers,
   requireNonEmptyFiles,
   teamAgent,
@@ -18,8 +19,8 @@ export function thresholdPanel(config: PanelConfig) {
   assertTeamInput(config);
   assertReviewers(config.reviewers, config.threshold);
   assertDistinctSeats([config.implement, ...config.reviewers.map(({ seat }) => seat)]);
-  const maxKickbacks = config.maxKickbacks ?? 1;
-  assertKickbacks(maxKickbacks);
+  const refineBudget = config.refine ?? 1;
+  assertRefineBudget(refineBudget, ['implement']);
   const implement = teamAgent(
     'implement',
     config.implement,
@@ -44,13 +45,13 @@ export function thresholdPanel(config: PanelConfig) {
   return dag({
     name: 'threshold-panel',
     stopOnError: true,
-    maxKickbacks,
     nodes: {
       implement: {
         job: checkedImplement,
         desc: 'Write the code and its test from the brief.',
         gate: 'The files named in the brief exist in the workspace.',
         needs: [],
+        refine: nodeRefine(refineBudget, 'implement'),
       },
       test: {
         job: test,
@@ -63,7 +64,7 @@ export function thresholdPanel(config: PanelConfig) {
         desc: 'Have every reviewer read the change at the same time and count the acceptances.',
         gate: 'At least the threshold number of reviewers have accepted.',
         needs: ['test'],
-        acceptsKickbackTo: ['implement'],
+        sendsBackTo: ['implement'],
       },
     },
   });

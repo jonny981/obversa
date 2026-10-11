@@ -51,19 +51,28 @@ request under `asked`, so the record shows every step that asked.
 
 A no needs a home and a budget. With `target`, the refusal goes to that
 step as a revision request with the note as its one finding. The approval
-step must list that target in `acceptsKickbackTo`, and the graph's
-`maxKickbacks` must allow it, or the run fails with the note instead. Without a target, a refusal fails the step with the note as its
+step must list that target in `sendsBackTo`, and the target must declare
+a `refine` of its own: `dag()` refuses a graph whose send-back target has
+none. When the target's refinement budget is already spent, the run fails
+with the note instead. Without a target, a refusal fails the step with the note as its
 summary:
 
-```ts examples/approval.ts (excerpt) {6,8}
+```ts examples/approval.ts (excerpt) {5-14}
 export const shipIt = pipeline(
   'ship-it',
   [
     { name: 'analyse', job: analyse },
-    { name: 'implement', job: implement },
-    { name: 'approve', job: approve, acceptsKickbackTo: ['implement'] },
+    {
+      name: 'implement',
+      refine: review({ rounds: 1 }),
+      job: implement,
+    },
+    {
+      name: 'approve',
+      job: approve,
+      sendsBackTo: ['implement'],
+    },
   ],
-  { maxKickbacks: 1 },
 );
 ```
 
@@ -122,7 +131,7 @@ question.
  * no network: the writer is a small function that leaves the header row out
  * once, and the person answers from this file.
  */
-import { approval, fnJob, pipeline, run, type CallbackRequest } from '@obversa/runtime';
+import { approval, fnJob, pipeline, review, run, type CallbackRequest } from '@obversa/runtime';
 
 const analyse = fnJob('analyse', () => 'the ticket asks for a report export with a header row');
 
@@ -155,10 +164,17 @@ export const shipIt = pipeline(
   'ship-it',
   [
     { name: 'analyse', job: analyse },
-    { name: 'implement', job: implement },
-    { name: 'approve', job: approve, acceptsKickbackTo: ['implement'] },
+    {
+      name: 'implement',
+      refine: review({ rounds: 1 }),
+      job: implement,
+    },
+    {
+      name: 'approve',
+      job: approve,
+      sendsBackTo: ['implement'],
+    },
   ],
-  { maxKickbacks: 1 },
 );
 
 const result = await run(shipIt);
@@ -191,4 +207,4 @@ if (faults.length) {
   bytes as the last of seven steps, before the change lands.
 - [Callback gates](/reviewing/callback-gates): the client, the routers and
   the stored history the step is built on.
-- [Runtime](/packages/runtime): `approval`, `pipeline` and `maxKickbacks`.
+- [Runtime](/packages/runtime): `approval`, `pipeline` and `review`.

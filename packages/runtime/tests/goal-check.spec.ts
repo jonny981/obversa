@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createStoredCallbackClient, dag, fnJob, goalCheck, judge, revisionRequest, run, stage, workflow } from '../src/api.ts';
+import { createStoredCallbackClient, dag, fnJob, goalCheck, judge, review, revisionRequest, run, stage, workflow } from '../src/api.ts';
 import type { AgentRequest, LoopEvent, Outcome, TeamSeat } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 import { createStoredRunFixture, type StoredRunFixture } from './stored-run-fixture.ts';
@@ -62,7 +62,7 @@ function scriptedTeam(opts: {
   const writer = new MockEngine((req) => {
     writerCalls.push(req);
     // A revised draft differs from the one reviewed, even from a fresh worker.
-    const draft = `draft ${writerCalls.length}${req.prompt.includes('Previous review') ? ' (revised)' : ''}`;
+    const draft = `draft ${writerCalls.length}${req.prompt.includes('## Feedback to address') ? ' (revised)' : ''}`;
     if (!(opts.skipFirstWrite && writerCalls.length === 1)) writeFileSync(join(req.cwd!, 'page.md'), draft);
     return JSON.stringify({ status: 'pass', summary: 'wrote it' });
   });
@@ -257,12 +257,11 @@ describe('goalCheck(): the dag() helper', () => {
     const events: LoopEvent[] = [];
     const graph = dag({
       name: 'goal-dag',
-      maxKickbacks: 1,
       nodes: {
-        build: { job: fnJob('build', (ctx) => { builds.push(ctx.lastReview); return 'built'; }) },
+        build: { refine: review({ rounds: 1 }), job: fnJob('build', (ctx) => { builds.push(ctx.lastReview); return 'built'; }) },
         goal: {
           needs: 'build',
-          acceptsKickbackTo: ['build'],
+          sendsBackTo: ['build'],
           job: goalCheck(seat(goalEngine, 'goal-mock', ['Read']), {
             target: 'build',
             text: 'Write a welcome page that lists the opening hours.',
@@ -292,18 +291,20 @@ describe('goalCheck(): the dag() helper', () => {
     let reviews = 0;
     const graph = dag({
       name: 'goal-dag-judged',
-      maxKickbacks: { build: judge(seat(judgeEngine, 'judge-mock'), { cap: 2 }) },
       nodes: {
-        build: { job: fnJob('build', () => { builds += 1; return 'built'; }) },
+        build: {
+          refine: review({ judge: judge(seat(judgeEngine, 'judge-mock'), { cap: 2 }) }),
+          job: fnJob('build', () => { builds += 1; return 'built'; }),
+        },
         goal: {
           needs: 'build',
-          acceptsKickbackTo: ['build'],
+          sendsBackTo: ['build'],
           job: goalCheck(seat(goalEngine, 'goal-mock', ['Read']), {
             target: 'build',
             text: 'Write a welcome page that lists the opening hours.',
           }),
         },
-        review: { needs: 'goal', acceptsKickbackTo: ['build'], job: async () => { reviews += 1; return revisionRequest({ target: 'build', findings: [{ severity: 'should-fix', evidence: 'REVIEW: the title is vague' }] }); } },
+        review: { needs: 'goal', sendsBackTo: ['build'], job: async () => { reviews += 1; return revisionRequest({ target: 'build', findings: [{ severity: 'should-fix', evidence: 'REVIEW: the title is vague' }] }); } },
       },
     });
     const result = await run(graph, { cwd: workDir() });

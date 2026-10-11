@@ -12,7 +12,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { dag, fnJob, goalCheck, run, stage, workflow, type LoopEvent, type TeamSeat } from '@obversa/runtime';
+import { dag, fnJob, goalCheck, review, run, stage, workflow, type LoopEvent, type TeamSeat } from '@obversa/runtime';
 import { MockEngine } from '@obversa/runtime/testing';
 
 const brief = 'Write a welcome page for new staff. It must say who it is for and list the opening hours.';
@@ -78,9 +78,9 @@ const staged = await run(welcome, { cwd: mkdtempSync(join(tmpdir(), 'goal-check-
 let builds = 0;
 const graph = dag({
   name: 'welcome-page-dag',
-  maxKickbacks: 1,
   nodes: {
     build: {
+      refine: review({ rounds: 1 }),
       job: fnJob('build', (ctx) => {
         builds += 1;
         const hours = builds > 1 ? '\nOpen 9:00 to 17:00, Monday to Friday.' : '';
@@ -88,7 +88,11 @@ const graph = dag({
         return `wrote draft ${builds}`;
       }),
     },
-    goal: { needs: 'build', acceptsKickbackTo: ['build'], job: goalCheck(checker, { target: 'build', text: brief }) },
+    goal: {
+      needs: 'build',
+      sendsBackTo: ['build'],
+      job: goalCheck(checker, { target: 'build', text: brief }),
+    },
     review: { needs: 'goal', job: fnJob('review', () => 'reads well') },
   },
 });

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { agentJob, jobMeta, reviewPanel, run } from '@obversa/runtime';
 
 import { outcomeFromAgentText, thresholdPanel } from '../src/index.js';
+import type { PanelConfig } from '../src/types.js';
 import { pass, revise, scriptedEngine, seat } from './scripted-engine.js';
 
 const testCommand = {
@@ -102,7 +103,7 @@ describe('thresholdPanel', () => {
         implement: seat(implement, 'implement'),
         reviewers: reviewers.map(({ name, seat: reviewerSeat }) => ({ name, seat: reviewerSeat })),
         threshold: 3,
-        maxKickbacks: 1,
+        refine: 1,
       });
       const meta = jobMeta(job);
       const nodes = (meta?.nodes as Array<Record<string, unknown>>) ?? [];
@@ -136,5 +137,35 @@ describe('thresholdPanel', () => {
       reviewers: [{ name: 'reviewer', seat: seat(reviewer, 'same-family') }],
       threshold: 1,
     })).toThrow(/model family/i);
+  });
+
+  it('refuses the old maxKickbacks field, naming refine', () => {
+    const implement = scriptedEngine('implement', [async () => pass('unused')]);
+    const reviewer = scriptedEngine('reviewer', [async () => pass('unused')]);
+    expect(() => thresholdPanel({
+      brief: 'Write a module.',
+      workspace: '/tmp/obversa-teams-panel',
+      files: ['src/result.mjs'],
+      test: testCommand,
+      implement: seat(implement, 'implement'),
+      reviewers: [{ name: 'reviewer', seat: seat(reviewer, 'reviewer') }],
+      threshold: 1,
+      maxKickbacks: 3,
+    } as PanelConfig)).toThrow('maxKickbacks is now refine');
+  });
+
+  it('refuses a refine map key that takes no send-backs', () => {
+    const implement = scriptedEngine('implement', [async () => pass('unused')]);
+    const reviewer = scriptedEngine('reviewer', [async () => pass('unused')]);
+    expect(() => thresholdPanel({
+      brief: 'Write a module.',
+      workspace: '/tmp/obversa-teams-panel',
+      files: ['src/result.mjs'],
+      test: testCommand,
+      implement: seat(implement, 'implement'),
+      reviewers: [{ name: 'reviewer', seat: seat(reviewer, 'reviewer') }],
+      threshold: 1,
+      refine: { impl: 3 },
+    })).toThrow('refine names a target that takes no send-backs: impl');
   });
 });

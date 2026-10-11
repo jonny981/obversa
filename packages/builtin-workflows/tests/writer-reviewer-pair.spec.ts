@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { jobMeta, run } from '@obversa/runtime';
 
 import { writerReviewerPair } from '../src/index.js';
-import type { TeamSeat } from '../src/types.js';
+import type { PairConfig, TeamSeat } from '../src/types.js';
 import { pass, revise, scriptedEngine, seat } from './scripted-engine.js';
 
 const testCommand = {
@@ -233,5 +233,33 @@ describe('writerReviewerPair', () => {
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
+  });
+
+  it('refuses the old maxKickbacks field, naming refine', () => {
+    const writer = scriptedEngine('writer', [async () => pass('unused')]);
+    const reviewer = scriptedEngine('reviewer', [async () => pass('unused')]);
+    expect(() => writerReviewerPair({
+      brief: 'Write a module.',
+      workspace: '/tmp/obversa-teams-pair',
+      files: ['src/result.mjs'],
+      test: testCommand,
+      writer: seat(writer, 'writer'),
+      reviewer: seat(reviewer, 'reviewer'),
+      maxKickbacks: 3,
+    } as PairConfig)).toThrow('maxKickbacks is now refine');
+  });
+
+  it('refuses a refine map key that takes no send-backs', () => {
+    const writer = scriptedEngine('writer', [async () => pass('unused')]);
+    const reviewer = scriptedEngine('reviewer', [async () => pass('unused')]);
+    expect(() => writerReviewerPair({
+      brief: 'Write a module.',
+      workspace: '/tmp/obversa-teams-pair',
+      files: ['src/result.mjs'],
+      test: testCommand,
+      writer: seat(writer, 'writer'),
+      reviewer: seat(reviewer, 'reviewer'),
+      refine: { writr: 3 },
+    })).toThrow('refine names a target that takes no send-backs: writr');
   });
 });

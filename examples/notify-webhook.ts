@@ -17,7 +17,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { webhookNotifier, type WebhookMessage } from '@obversa/notify-webhook';
-import { dag, fnJob, run, type LoopEvent } from '@obversa/runtime';
+import { dag, fnJob, review as buildReview, run, type LoopEvent } from '@obversa/runtime';
 
 /** Stands in for the channel. In a real run this is Slack, and you own the URL. */
 const delivered: WebhookMessage[] = [];
@@ -46,10 +46,20 @@ const review = fnJob('review', () => (drafts === 1
 
 const brief = dag({
   name: 'brief',
-  maxKickbacks: 1,
   nodes: {
-    draft: { desc: 'Write the brief.', gate: 'A draft exists.', job: draft },
-    review: { needs: 'draft', acceptsKickbackTo: ['draft'], desc: 'Check every claim carries a figure.', gate: 'The review returned a verdict.', job: review },
+    draft: {
+      desc: 'Write the brief.',
+      gate: 'A draft exists.',
+      refine: buildReview({ rounds: 1 }),
+      job: draft,
+    },
+    review: {
+      needs: 'draft',
+      sendsBackTo: ['draft'],
+      desc: 'Check every claim carries a figure.',
+      gate: 'The review returned a verdict.',
+      job: review,
+    },
   },
 });
 

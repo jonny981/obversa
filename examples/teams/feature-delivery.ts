@@ -9,52 +9,52 @@ import { isDeepStrictEqual } from 'node:util';
 import { resolveCommandExecutable } from '@obversa/core/command';
 import { claude } from '@obversa/engine-claude-cli';
 import { codex } from '@obversa/engine-codex-cli';
+import { grok } from '@obversa/engine-grok-cli';
 import { jev } from '@obversa/engine-jev-api';
 import { opencode } from '@obversa/engine-opencode-cli';
 import {
-  agentJob,
   approval,
   briefFromFile,
-  commandJob,
   dag,
   formatEvent,
   goalCheck,
   isolated,
   judge,
-  loop,
-  reviewPanel,
+  review,
   run,
   type BriefSource,
   type Job,
   type TeamSeat,
 } from '@obversa/runtime';
 import { recordedJudge } from '@obversa/runtime/testing';
-import { outcomeFromAgentText } from '@obversa/runtime/workflow-support';
 
 /**
- * A ticket, delivered the way a team delivers a change. One seat builds it.
- * The ticket's tests run, and a red test goes back to the builder with its output.
- * A seat from another model family checks that every requirement in the
- * ticket was met. Three reviewers from three model families review the
- * change at the same time, and their reviews become one list. A judge
- * decides each finding, and the builder gets only the findings it acts on.
- * Attended, a person approves the exact bytes before the change lands;
- * with `--unattended`, it lands without asking. Each ticket runs in its own
- * worktree, and the change lands on the current branch when the run passes.
+ * A ticket, delivered the way a team delivers a change. One seat builds it:
+ * the build node owns the agent, the files it may write, and its refinement.
+ * Each round the ticket's tests run first, and a red one goes back to the
+ * builder with its output. A seat from another model family checks that
+ * every requirement in the ticket was met. Three reviewers from three model
+ * families review the change at the same time, and their reviews become one
+ * list. A judge decides each finding, and the builder gets only the
+ * findings it acts on. Attended, a person approves the exact bytes before
+ * the change lands; with `--unattended`, it lands without asking. Each
+ * ticket runs in its own worktree, and the change lands on the current
+ * branch when the run passes.
  */
 
 // ── The seats ───────────────────────────────────────────────────────────────
 
-// OpenCode's adapter needs an absolute command path.
+// The OpenCode and Grok adapters need an absolute command path.
 const openCode = (model: string) => opencode(model, { executable: resolveCommandExecutable('opencode') });
+const grokSeat = (model: string) => grok(model, { executable: resolveCommandExecutable('grok') });
 
 const builder = claude('claude-sonnet-4-5');
 const goalSeat = codex('gpt-5.6-luna');
-const reviewers: Record<string, TeamSeat> = {
-  claude: claude('claude-sonnet-4-5'),
+const reviewers = {
   codex: codex('gpt-5.6-luna'),
   gemini: openCode('google/gemini-2.5-pro'),
-};
+  grok: grokSeat('grok-4'),
+} satisfies Record<string, TeamSeat>;
 
 // Offline, recorded answers stand in for Jev so the example runs with no
 // key: judge.json holds one answer object per call, and the last one
@@ -66,40 +66,6 @@ const judgeSeat = process.env.JEV === 'live' ? jev() : recordedJudge('judge.json
 const attended = !process.argv.includes('--unattended');
 
 // ── The steps ───────────────────────────────────────────────────────────────
-
-/** Build, then run the ticket's tests. A red test goes back to the builder with its output, up to three tries each time this step runs. */
-const build = (ticket: string, files: readonly string[], tests: readonly string[]): Job => loop({
-  name: 'build',
-  body: agentJob({
-    label: 'build', engine: builder.engine, model: builder.identity.model,
-    tools: [...builder.identity.tools], allowedTools: [...builder.identity.tools], workspaceMode: 'write',
-    consumeFeedback: true,
-    prompt: `${ticket}\n\nMake the change in ${files.join(', ')}. Do not change ${tests.join(', ')}.`,
-  }),
-  review: commandJob('test', ['node', '--test', ...tests]),
-  max: 3,
-});
-
-/** One reviewer. It reads the change and writes nothing. */
-const reviewer = (name: string, seat: TeamSeat, ticket: string, files: readonly string[]) => ({
-  name,
-  seat,
-  job: agentJob({
-    label: `review-${name}`, engine: seat.engine, model: seat.identity.model,
-    tools: [...seat.identity.tools], allowedTools: [...seat.identity.tools], workspaceMode: 'read', leaf: true,
-    prompt: `${ticket}\n\nReview ${files.join(', ')} against this ticket. Change nothing. Reply as one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"severity":"block"|"should-fix"|"nice-to-have","evidence":"...","recommendation":"..."}]}`,
-    outcome: (text) => outcomeFromAgentText(text),
-  }),
-});
-
-/** The review battery: all three at the same time, their reviews merged into one list. */
-const review = (ticket: string, files: readonly string[]): Job => reviewPanel({
-  label: 'review',
-  target: 'build',
-  synthesise: true,
-  context: ticket,
-  reviewers: Object.entries(reviewers).map(([name, seat]) => reviewer(name, seat, ticket, files)),
-});
 
 /** Git's answer in the worktree, one entry per path. */
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).split(/[\0\n]/).filter(Boolean);
@@ -154,15 +120,32 @@ export function featureTeam(ticket: BriefSource): Job {
     const [start] = git(ctx.workspace.dir, 'rev-parse', 'HEAD');
     return dag({
       name: 'feature-delivery',
+      brief: ticket.brief,
       nodes: {
-        build: { job: build(ticket.brief, files, tests) },
-        goal: { needs: 'build', acceptsKickbackTo: ['build'], job: goalCheck(goalSeat, { target: 'build', text: ticket.brief }) },
-        review: { needs: 'goal', acceptsKickbackTo: ['build'], job: review(ticket.brief, files) },
-        ...(attended ? { approve: { needs: 'review', job: approve(start!) } } : {}),
+        build: {
+          desc: `Make the change in ${files.join(', ')}. Do not change ${tests.join(', ')}.`,
+          gate: 'The ticket is met and its tests pass.',
+          agent: builder,
+          writes: files,
+          // The node's own refinement, each round: the ticket's tests first,
+          // a red one goes straight back with its output; then the goal
+          // check; then the three reviewers as one panel; then Jev decides
+          // each kept finding, a block included, with no cap.
+          refine: review({
+            checks: [['node', '--test', ...tests]],
+            goal: goalCheck(goalSeat, { target: 'build', text: ticket.brief }),
+            reviewers: [
+              { name: 'codex', seat: reviewers.codex },
+              { name: 'gemini', seat: reviewers.gemini },
+              { name: 'grok', seat: reviewers.grok },
+            ],
+            // The merge asks for no tools, a call Codex refuses; Grok takes it.
+            synthesise: reviewers.grok,
+            judge: judge(judgeSeat),
+          }),
+        },
+        ...(attended ? { approve: { needs: 'build', job: approve(start!) } } : {}),
       },
-      // Jev decides each finding the review sends back, a block included,
-      // with no cap. An unmet requirement goes back without it.
-      maxKickbacks: { build: judge(judgeSeat) },
     })(ctx);
   }, { label: 'feature' });
 }

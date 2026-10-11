@@ -150,7 +150,7 @@ shape-up-cycle · node shaping: start
 shape-up-cycle › shaping › shaping workflow:start
 shape-up-cycle › shaping › shaping ▸ dag (1 nodes)
 shape-up-cycle › shaping › shaping · node pitch: start
-shape-up-cycle › shaping › shaping › pitch › pitch-review ▸ loop (max 3)
+shape-up-cycle › shaping › shaping › pitch › pitch-review ▸ loop (max 6)
 shape-up-cycle › shaping › shaping › pitch › pitch-review · iteration 1
 shape-up-cycle › shaping › shaping › pitch › pitch-review • pitch
 shape-up-cycle › shaping › shaping › pitch › pitch-review engine:text
@@ -185,40 +185,40 @@ shape-up-cycle · node shaping: done (pass)
 shape-up-cycle · node table: start
 shape-up-cycle › table › betting-table ▸ dag (18 nodes)
 shape-up-cycle › table › betting-table · node view-r-1-claude: start
-shape-up-cycle › table › betting-table › view-r-1-claude • view-claude
+shape-up-cycle › table › betting-table › view-r-1-claude • view-r-1-claude
 shape-up-cycle › table › betting-table › view-r-1-claude engine:text
 shape-up-cycle › table › betting-table › view-r-1-claude   stand-in: 3/1 tok
-shape-up-cycle › table › betting-table › view-r-1-claude • view-claude: pass
+shape-up-cycle › table › betting-table › view-r-1-claude • view-r-1-claude: pass
 shape-up-cycle › table › betting-table · node view-r-1-codex: start
-shape-up-cycle › table › betting-table › view-r-1-codex • view-codex
+shape-up-cycle › table › betting-table › view-r-1-codex • view-r-1-codex
 shape-up-cycle › table › betting-table · node view-r-1-claude: done (pass)
 shape-up-cycle › table › betting-table › view-r-1-codex engine:text
 shape-up-cycle › table › betting-table › view-r-1-codex   gpt-5.6-luna: 42/7 tok
-shape-up-cycle › table › betting-table › view-r-1-codex • view-codex: pass
+shape-up-cycle › table › betting-table › view-r-1-codex • view-r-1-codex: pass
 shape-up-cycle › table › betting-table · node view-r-1-opencode: start
-shape-up-cycle › table › betting-table › view-r-1-opencode • view-opencode
+shape-up-cycle › table › betting-table › view-r-1-opencode • view-r-1-opencode
 shape-up-cycle › table › betting-table · node view-r-1-codex: done (pass)
 shape-up-cycle › table › betting-table › view-r-1-opencode engine:text
 shape-up-cycle › table › betting-table › view-r-1-opencode   opencode/big-pickle: 6/7 tok
-shape-up-cycle › table › betting-table › view-r-1-opencode • view-opencode: pass
+shape-up-cycle › table › betting-table › view-r-1-opencode • view-r-1-opencode: pass
 shape-up-cycle › table › betting-table · node view-r-2-claude: start
-shape-up-cycle › table › betting-table › view-r-2-claude • view-claude
+shape-up-cycle › table › betting-table › view-r-2-claude • view-r-2-claude
 shape-up-cycle › table › betting-table · node view-r-1-opencode: done (pass)
 shape-up-cycle › table › betting-table › view-r-2-claude engine:text
 shape-up-cycle › table › betting-table › view-r-2-claude   stand-in: 3/1 tok
-shape-up-cycle › table › betting-table › view-r-2-claude • view-claude: pass
+shape-up-cycle › table › betting-table › view-r-2-claude • view-r-2-claude: pass
 shape-up-cycle › table › betting-table · node view-r-2-codex: start
-shape-up-cycle › table › betting-table › view-r-2-codex • view-codex
+shape-up-cycle › table › betting-table › view-r-2-codex • view-r-2-codex
 shape-up-cycle › table › betting-table · node view-r-2-claude: done (pass)
 shape-up-cycle › table › betting-table › view-r-2-codex engine:text
 shape-up-cycle › table › betting-table › view-r-2-codex   gpt-5.6-luna: 42/7 tok
-shape-up-cycle › table › betting-table › view-r-2-codex • view-codex: pass
+shape-up-cycle › table › betting-table › view-r-2-codex • view-r-2-codex: pass
 shape-up-cycle › table › betting-table · node view-r-2-opencode: start
-shape-up-cycle › table › betting-table › view-r-2-opencode • view-opencode
+shape-up-cycle › table › betting-table › view-r-2-opencode • view-r-2-opencode
 shape-up-cycle › table › betting-table · node view-r-2-codex: done (pass)
 shape-up-cycle › table › betting-table › view-r-2-opencode engine:text
 shape-up-cycle › table › betting-table › view-r-2-opencode   opencode/big-pickle: 6/7 tok
-shape-up-cycle › table › betting-table › view-r-2-opencode • view-opencode: pass
+shape-up-cycle › table › betting-table › view-r-2-opencode • view-r-2-opencode: pass
 shape-up-cycle › table › betting-table · node check-r-1-claude: start
 shape-up-cycle › table › betting-table › check-r-1-claude • check-claude
 shape-up-cycle › table › betting-table · node view-r-2-opencode: done (pass)
@@ -288,7 +288,7 @@ shape-up-cycle · node build-r-1: start
 shape-up-cycle › build-r-1 › build-r-1 workflow:start
 shape-up-cycle › build-r-1 › build-r-1 ▸ dag (3 nodes)
 shape-up-cycle › build-r-1 › build-r-1 · node build: start
-shape-up-cycle › build-r-1 › build-r-1 › build › build-review ▸ loop (max 3)
+shape-up-cycle › build-r-1 › build-r-1 › build › build-review ▸ loop (max 6)
 shape-up-cycle › build-r-1 › build-r-1 › build › build-review · iteration 1
 shape-up-cycle › build-r-1 › build-r-1 › build › build-review • build
 shape-up-cycle › build-r-1 › build-r-1 › build › build-review engine:text
@@ -395,7 +395,7 @@ The betting table is a graph of its own. For each pitch, three seats write
 a view, a typed check reads each view, a function reads the checks, and an
 uncertain table sends the pitch to research before the person's bet:
 
-```ts examples/use-cases/product/shape-up-cycle.ts (excerpt) {3-4,14,20-21,33-38}
+```ts examples/use-cases/product/shape-up-cycle.ts (excerpt) {3-4,14,20-21,29-32}
   nodes[`route-${pitch}`] = {
     needs: Object.keys(seats).map((seat) => `check-${pitch}-${seat}`),
     desc: `Uphill: read the checks on ${pitch} and decide whether the table needs research.`,
@@ -416,13 +416,9 @@ uncertain table sends the pitch to research before the person's bet:
   nodes[`research-${pitch}`] = {
     needs: `route-${pitch}`,
     when: predicate((ctx) => (ctx.needs?.[`route-${pitch}`]?.data as { uncertain: boolean }).uncertain, 'a check was uncertain'),
-    desc: `Uphill: research what the table should know about ${pitch}.`,
-    job: agentJob({
-      label: `research-${pitch}`,
-      engine: 'claude',
-      model: seats.claude!.identity.model,
-      prompt: `The table was not sure about pitches/${pitch}.md. Read the pitch and the views in table/${pitch}/ and write table/${pitch}/research.md: what the table should know, from the pitch's own material, in under 120 words.`,
-    }),
+    desc: `Uphill: the table was not sure about pitches/${pitch}.md: read the pitch and the views in table/${pitch}/ and write table/${pitch}/research.md, what the table should know, from the pitch's own material, in under 120 words.`,
+    agent: seats.claude!,
+    writes: `table/${pitch}/research.md`,
   };
   const decision = bets[pitch];
   const question = `Bet on ${pitch} this cycle? The views, their checks and any research are in table/${pitch}/.`;
@@ -679,13 +675,9 @@ function tableFor(request: Request): Record<string, DagNode> {
   for (const seat of Object.keys(seats)) {
     const view = `table/${pitch}/${seat}.md`;
     nodes[`view-${pitch}-${seat}`] = {
-      desc: `Uphill: the ${seat} seat's view on ${pitch}.`,
-      job: agentJob({
-        label: `view-${seat}`,
-        engine: seat,
-        model: seats[seat]!.identity.model,
-        prompt: `Read pitches/${pitch}.md and write your view to ${view} as briefs/table.md says.`,
-      }),
+      desc: `Uphill: the ${seat} seat's view on ${pitch}: read pitches/${pitch}.md and write ${view} as briefs/table.md says.`,
+      agent: seats[seat]!,
+      writes: view,
     };
     nodes[`check-${pitch}-${seat}`] = {
       needs: `view-${pitch}-${seat}`,
@@ -733,13 +725,9 @@ function tableFor(request: Request): Record<string, DagNode> {
   nodes[`research-${pitch}`] = {
     needs: `route-${pitch}`,
     when: predicate((ctx) => (ctx.needs?.[`route-${pitch}`]?.data as { uncertain: boolean }).uncertain, 'a check was uncertain'),
-    desc: `Uphill: research what the table should know about ${pitch}.`,
-    job: agentJob({
-      label: `research-${pitch}`,
-      engine: 'claude',
-      model: seats.claude!.identity.model,
-      prompt: `The table was not sure about pitches/${pitch}.md. Read the pitch and the views in table/${pitch}/ and write table/${pitch}/research.md: what the table should know, from the pitch's own material, in under 120 words.`,
-    }),
+    desc: `Uphill: the table was not sure about pitches/${pitch}.md: read the pitch and the views in table/${pitch}/ and write table/${pitch}/research.md, what the table should know, from the pitch's own material, in under 120 words.`,
+    agent: seats.claude!,
+    writes: `table/${pitch}/research.md`,
   };
   const decision = bets[pitch];
   const question = `Bet on ${pitch} this cycle? The views, their checks and any research are in table/${pitch}/.`;
@@ -841,7 +829,7 @@ const onEvent = (event: LoopEvent): void => {
 };
 
 const result = await run(cycle, {
-  engines: { ...Object.fromEntries(Object.entries(seats).map(([name, seat]) => [name, seat.engine])), jev: check },
+  engines: { jev: check },
   recordTo: 'records/shape-up-cycle.jsonl',
   runId: 'shape-up-cycle',
   onEvent,

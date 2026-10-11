@@ -19,11 +19,11 @@ provider, and a person for the last word:
 ```ts examples/teams/feature-delivery.ts (excerpt)
 const builder = claude('claude-sonnet-4-5');
 const goalSeat = codex('gpt-5.6-luna');
-const reviewers: Record<string, TeamSeat> = {
-  claude: claude('claude-sonnet-4-5'),
+const reviewers = {
   codex: codex('gpt-5.6-luna'),
   gemini: openCode('google/gemini-2.5-pro'),
-};
+  grok: grokSeat('grok-4'),
+} satisfies Record<string, TeamSeat>;
 ```
 
 Seven steps follow, from a ticket to a change that lands. One seat builds

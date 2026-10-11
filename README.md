@@ -102,7 +102,7 @@ purpose of the work and the revisions so far. `judge()` from
 `@obversa/runtime` sets that stopping rule inside a `dag()` workflow:
 
 ```ts examples/teams/feature-delivery.ts (excerpt)
-      maxKickbacks: { build: judge(judgeSeat) },
+            judge: judge(judgeSeat),
 ```
 
 Here Jev makes the judgement, and the returns to the builder end when Jev
@@ -235,10 +235,29 @@ The feature team takes a ticket through seven steps:
 
 ```ts examples/teams/feature-delivery.ts (excerpt)
       nodes: {
-        build: { job: build(ticket.brief, files, tests) },
-        goal: { needs: 'build', acceptsKickbackTo: ['build'], job: goalCheck(goalSeat, { target: 'build', text: ticket.brief }) },
-        review: { needs: 'goal', acceptsKickbackTo: ['build'], job: review(ticket.brief, files) },
-        ...(attended ? { approve: { needs: 'review', job: approve(start!) } } : {}),
+        build: {
+          desc: `Make the change in ${files.join(', ')}. Do not change ${tests.join(', ')}.`,
+          gate: 'The ticket is met and its tests pass.',
+          agent: builder,
+          writes: files,
+          // The node's own refinement, each round: the ticket's tests first,
+          // a red one goes straight back with its output; then the goal
+          // check; then the three reviewers as one panel; then Jev decides
+          // each kept finding, a block included, with no cap.
+          refine: review({
+            checks: [['node', '--test', ...tests]],
+            goal: goalCheck(goalSeat, { target: 'build', text: ticket.brief }),
+            reviewers: [
+              { name: 'codex', seat: reviewers.codex },
+              { name: 'gemini', seat: reviewers.gemini },
+              { name: 'grok', seat: reviewers.grok },
+            ],
+            // The merge asks for no tools, a call Codex refuses; Grok takes it.
+            synthesise: reviewers.grok,
+            judge: judge(judgeSeat),
+          }),
+        },
+        ...(attended ? { approve: { needs: 'build', job: approve(start!) } } : {}),
       },
 ```
 

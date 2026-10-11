@@ -179,13 +179,15 @@ export async function workspaceFingerprint(
  * changed them. Git's own records do not count: staging or committing the
  * same files leaves the hash as it was. With `paths`, only those files
  * (and the files under those directories) count, even when Git ignores
- * them, so a change anywhere else leaves the hash as it was. Otherwise, in
- * a git workspace the files are the ones Git tracks or would track; any
- * other directory hashes every file under it. `.git` and `excludePaths`
- * aside. Undefined when the workspace cannot be read.
+ * them, so a change anywhere else leaves the hash as it was. `extraPaths`
+ * adds to whichever set counts, so a named file counts even when Git
+ * ignores it. Otherwise, in a git workspace the files are the ones Git
+ * tracks or would track; any other directory hashes every file under it.
+ * `.git` and `excludePaths` aside. Undefined when the workspace cannot be
+ * read.
  */
 export async function workspaceContent(
-  opts: GitOpts & { readonly paths?: readonly string[] },
+  opts: GitOpts & { readonly paths?: readonly string[]; readonly extraPaths?: readonly string[] },
 ): Promise<string | undefined> {
   try {
     const excluded = (opts.excludePaths ?? []).map((p) => resolve(opts.cwd, p));
@@ -212,6 +214,7 @@ export async function workspaceContent(
     } else {
       await add(resolve(opts.cwd));
     }
+    for (const path of opts.extraPaths ?? []) await add(resolve(opts.cwd, path));
     const hash = createHash('sha256');
     for (const path of [...files].sort()) {
       hash.update(relative(opts.cwd, path));

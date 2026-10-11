@@ -76,7 +76,8 @@ With no cap, the rounds end when the judge stops them or the reader finds
 nothing that fails. A reader that tags every finding block does not decide
 alone how long the run goes on, because the judge still weighs each block.
 A block is sent back without a judge only when there is no judge: a plain
-number on `refine` or `maxKickbacks`.
+`refine` number on a `workflow()` stage, or `rounds` in a `dag()` node's
+`review()`.
 
 When the stage also sets `goal`, a goal check runs before the reader,
 every round. A requirement of the brief that it finds unmet goes straight
@@ -99,8 +100,12 @@ list, with who raised it and how the others voted.
 
 To bound the rounds as well, pass a cap: `judge(judgeSeat, { cap: 3 })`.
 A cap of 3 allows three [refinements](/concepts/feedback-loops#counting-rounds):
-the first draft and three more, four builds in all. It means the same on a
-`workflow()` stage's `refine` and on a `dag()`'s `maxKickbacks`.
+the first draft and three more, four builds the reviews paid for. It means
+the same on a `workflow()` stage's `refine` and in a `dag()` node's
+`review({ judge })`.
+A failed check or a declared file left missing sends the work back on the
+check budget, not the cap: up to `checkRounds` more builds (3 by default,
+and on a `workflow()` stage a panel reviews).
 
 When the review of the last build does not pass, the judge is asked about
 it too and told that this is the last round. Its answer decides the outcome:
@@ -213,11 +218,13 @@ answer follows the round answer: it goes back when that answer is
 `continue`, and it is skipped when that answer is `holds` or
 `over_polishing`.
 
-A `dag()` takes the same `judge()` value on `maxKickbacks`. The target that
-the work goes back to gets only the findings the judge acts on, and a stop
-means the same thing at both levels. The judge runs as part of the node that
-sent the work back, inside that node's time limit. The unmet requirements a
-`goalCheck()` node sends back go to the target without the judge.
+A `dag()` node takes the same `judge()` value in `review({ judge })` on its
+`refine`, which covers the node's own reviews and the send-backs other
+nodes aim at it. The node the work goes back to gets only the findings the
+judge acts on, and a stop means the same thing in both places. The judge
+runs as part of the node that sent the work back, inside that node's time
+limit. The unmet requirements a `goalCheck()` node sends back go to the
+target without the judge.
 
 A stage a person reviews takes the same judge. Each refusal goes to the
 judge with the person's note as a finding, as a reviewer's findings do.

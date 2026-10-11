@@ -10,7 +10,7 @@
  * no network: the writer is a small function that leaves the header row out
  * once, and the person answers from this file.
  */
-import { approval, fnJob, pipeline, run, type CallbackRequest } from '@obversa/runtime';
+import { approval, fnJob, pipeline, review, run, type CallbackRequest } from '@obversa/runtime';
 
 const analyse = fnJob('analyse', () => 'the ticket asks for a report export with a header row');
 
@@ -43,10 +43,17 @@ export const shipIt = pipeline(
   'ship-it',
   [
     { name: 'analyse', job: analyse },
-    { name: 'implement', job: implement },
-    { name: 'approve', job: approve, acceptsKickbackTo: ['implement'] },
+    {
+      name: 'implement',
+      refine: review({ rounds: 1 }),
+      job: implement,
+    },
+    {
+      name: 'approve',
+      job: approve,
+      sendsBackTo: ['implement'],
+    },
   ],
-  { maxKickbacks: 1 },
 );
 
 const result = await run(shipIt);

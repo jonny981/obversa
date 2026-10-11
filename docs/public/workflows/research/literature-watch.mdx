@@ -19,10 +19,10 @@ else, naming the paper behind every point.
 Obversa keeps the person between the harvest and the memory. A Claude seat
 summarises every supplied paper. Your decision on each summary is a step:
 a yes files it into memory, a no records your reason and files nothing.
-Then a question is answered from the kept notes, read into the prompt
-through `ground`, so the answer can only cite what you kept. This file is
-one run of three parts, harvest, curate and answer, with the person's
-decisions in the middle.
+Then a question is answered from the kept notes, grounded through `ground`
+into a context file the answering seat reads, so the answer can only cite
+what you kept. This file is one run of three parts, harvest, curate and
+answer, with the person's decisions in the middle.
 
 ## Run it
 
@@ -41,7 +41,7 @@ in for the models, so the words are the script's and the shape is the run's.
 
 ```text Output, from the offline proof
 ▸ run
-literature-watch ▸ dag (6 nodes)
+literature-watch ▸ dag (7 nodes)
 literature-watch · node harvest: start
 literature-watch › harvest • harvest
 literature-watch › harvest engine:text
@@ -64,6 +64,10 @@ literature-watch · node file: start
 literature-watch › file • file
 literature-watch › file • file: pass
 literature-watch · node file: done (pass)
+literature-watch · node context: start
+literature-watch › context • context
+literature-watch › context • context: pass
+literature-watch · node context: done (pass)
 literature-watch · node answer: start
 literature-watch › answer • answer
 literature-watch › answer engine:text
@@ -119,9 +123,9 @@ the claim in one line, the method in two, what it would change for a lab
 working on low-power sensing in one line, and the paper's own stated
 limits. Quote nothing that is not in the file. Invent no citation.
 
-**Answer.** When asked a question, answer only from the notes you are given
-in the prompt. Name the paper each point comes from. If the notes don't
-settle the question, say so rather than guessing.
+**Answer.** When asked a question, answer only from the notes in the
+context file the task names. Name the paper each point comes from. If the
+notes don't settle the question, say so rather than guessing.
 
 A person decides which summaries enter the lab's memory. You never write
 to memory yourself.
@@ -147,9 +151,10 @@ const curate: Record<string, DagNode> = Object.fromEntries(papers.map((paper) =>
 ```
 
 `file` reads which decision steps passed and creates one memory file per
-kept summary. `answer` grounds the question on those files alone:
+kept summary. `context` grounds those files into one prompt file, and
+`answer` reads it:
 
-```ts examples/use-cases/research/literature-watch.ts (excerpt) {8-9,11-12,25-26}
+```ts examples/use-cases/research/literature-watch.ts (excerpt) {8,19,22,29-30}
     file: {
       needs: Object.keys(curate),
       job: fnJob('file', async (ctx): Promise<Outcome> => {
@@ -164,39 +169,42 @@ kept summary. `answer` grounds the question on those files alone:
         return { status: 'pass', summary: `${kept.length} of ${papers.length} summaries kept`, data: { kept } };
       }),
     },
-    answer: {
+    context: {
       needs: 'file',
-      job: agentJob({
-        label: 'answer',
-        engine: 'lab',
-        prompt: async (ctx) => {
-          const { kept } = ctx.needs?.file?.data as { kept: string[] };
-          const grounded = await ground(ctx.memory!, { sources: kept.map((paper) => ({ path: memoryPath(paper) })) });
-          if (!grounded.ok) throw new Error(grounded.error.message);
-          const question = questions[0]!;
-          return `${grounded.value.prompt}\n\nAnswer as briefs/literature.md says and write answers/${question.id}.md.\n\nQuestion: ${question.text}`;
-        },
+      job: fnJob('context', async (ctx): Promise<Outcome> => {
+        const { kept } = ctx.needs?.file?.data as { kept: string[] };
+        const grounded = await ground(ctx.memory!, { sources: kept.map((paper) => ({ path: memoryPath(paper) })) });
+        if (!grounded.ok) throw new Error(grounded.error.message);
+        await mkdir('context', { recursive: true });
+        await writeFile(`context/${question.id}.md`, grounded.value.prompt);
+        return { status: 'pass', summary: `${kept.length} notes grounded`, data: { kept } };
       }),
+    },
+    answer: {
+      needs: 'context',
+      desc: `Read the notes in context/${question.id}.md and answer as briefs/literature.md says, writing answers/${question.id}.md.\n\nQuestion: ${question.text}`,
+      agent: seat,
+      writes: `answers/${question.id}.md`,
     },
   },
 ```
 
 `ground` reads the kept notes into one bounded prompt under a warning that
-the content is data, not instructions, and the seat answers from that
-prompt. The memory here is `createSimpleMemory`, which lives in one process;
+the content is data, not instructions, and that prompt lands in
+`context/q-1.md`, the file the answering seat reads. The memory here is
+`createSimpleMemory`, which lives in one process;
 swap in `openGitMemory` from [Git Memory](/packages/memory-git) and the
 kept notes survive to the next session's questions.
 
 <Accordion title="Full file">
 
 ```ts examples/use-cases/research/literature-watch.ts
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 
 import type { MemoryPath } from '@obversa/api';
 import { claude } from '@obversa/engine-claude-cli';
 import { createSimpleMemory } from '@obversa/memory-simple';
 import {
-  agentJob,
   approval,
   dag,
   fnJob,
@@ -212,9 +220,9 @@ import { ground } from '@obversa/runtime/memory';
  * A literature watch for one lab. A Claude seat summarises each supplied
  * paper. A person decides, paper by paper, which summaries enter the lab's
  * memory; a refused one is recorded with the reason and enters nothing.
- * Then a question is answered from the kept notes alone, read into the
- * prompt through `ground`, so the answer can only cite what the person
- * kept.
+ * Then a question is answered from the kept notes alone, grounded through
+ * `ground` into a context file the answering seat reads, so the answer can
+ * only cite what the person kept.
  */
 
 interface Question {
@@ -224,7 +232,7 @@ interface Question {
 
 const papers = (await readdir('papers')).filter((name) => name.endsWith('.md')).map((name) => name.slice(0, -3)).sort();
 const curation = JSON.parse(await readFile('curation.json', 'utf8')) as Record<string, ApprovalAnswer | string>;
-const questions = JSON.parse(await readFile('questions.json', 'utf8')) as Question[];
+const question = (JSON.parse(await readFile('questions.json', 'utf8')) as Question[])[0]!;
 const memory = createSimpleMemory({ scope: 'literature-watch' });
 const seat = claude('claude-sonnet-4-5');
 const memoryPath = (paper: string): MemoryPath => `/memories/papers/${paper}.md` as MemoryPath;
@@ -245,11 +253,11 @@ const curate: Record<string, DagNode> = Object.fromEntries(papers.map((paper) =>
 const watch = dag({
   name: 'literature-watch',
   nodes: {
-    harvest: agentJob({
-      label: 'harvest',
-      engine: 'lab',
-      prompt: `Summarise every paper in papers/ as briefs/literature.md says: ${papers.join(', ')}. Write one file per paper under summaries/.`,
-    }),
+    harvest: {
+      desc: `Summarise every paper in papers/ as briefs/literature.md says: ${papers.join(', ')}. Write one file per paper under summaries/.`,
+      agent: seat,
+      writes: 'workspace',
+    },
     ...curate,
     file: {
       needs: Object.keys(curate),
@@ -265,25 +273,27 @@ const watch = dag({
         return { status: 'pass', summary: `${kept.length} of ${papers.length} summaries kept`, data: { kept } };
       }),
     },
-    answer: {
+    context: {
       needs: 'file',
-      job: agentJob({
-        label: 'answer',
-        engine: 'lab',
-        prompt: async (ctx) => {
-          const { kept } = ctx.needs?.file?.data as { kept: string[] };
-          const grounded = await ground(ctx.memory!, { sources: kept.map((paper) => ({ path: memoryPath(paper) })) });
-          if (!grounded.ok) throw new Error(grounded.error.message);
-          const question = questions[0]!;
-          return `${grounded.value.prompt}\n\nAnswer as briefs/literature.md says and write answers/${question.id}.md.\n\nQuestion: ${question.text}`;
-        },
+      job: fnJob('context', async (ctx): Promise<Outcome> => {
+        const { kept } = ctx.needs?.file?.data as { kept: string[] };
+        const grounded = await ground(ctx.memory!, { sources: kept.map((paper) => ({ path: memoryPath(paper) })) });
+        if (!grounded.ok) throw new Error(grounded.error.message);
+        await mkdir('context', { recursive: true });
+        await writeFile(`context/${question.id}.md`, grounded.value.prompt);
+        return { status: 'pass', summary: `${kept.length} notes grounded`, data: { kept } };
       }),
+    },
+    answer: {
+      needs: 'context',
+      desc: `Read the notes in context/${question.id}.md and answer as briefs/literature.md says, writing answers/${question.id}.md.\n\nQuestion: ${question.text}`,
+      agent: seat,
+      writes: `answers/${question.id}.md`,
     },
   },
 });
 
 const result = await run(watch, {
-  engines: { lab: seat.engine },
   memory,
   recordTo: 'records/literature-watch.jsonl',
   runId: 'literature-watch',
@@ -299,7 +309,7 @@ console.log(JSON.stringify({
   papers,
   kept: (nodes.file?.data as { kept: string[] } | undefined)?.kept ?? [],
   refused,
-  answered: nodes.answer?.status === 'pass' ? questions.map((question) => question.id) : [],
+  answered: nodes.answer?.status === 'pass' ? [question.id] : [],
 }, null, 2));
 ```
 
@@ -313,14 +323,16 @@ flowchart LR
   harvest -.-> curate{{"curate: a person, one decision per paper"}}
   curate -->|kept| file[["file: into memory"]]
   curate -->|"refused, with a note"| refused((recorded))
-  file --> answer["answer: Claude, grounded on the kept notes"]
+  file --> context["context: the kept notes as one file"]
+  context --> answer["answer: Claude, grounded on the kept notes"]
 ```
 
 ## What the run did
 
 The proof runs the file against a scripted seat and checks what the page
 describes: three summaries on disk, two memory files, one refusal with its
-note, and an answer that cites the kept papers and not the refused one.
+note, a context file holding the kept notes and not the refused one, and
+an answer that cites the kept papers and not the refused one.
 Obversa recorded the run as one event log, so the record shows the harvest,
 the three decisions with their outcomes, the filing, and the answer in
 order.

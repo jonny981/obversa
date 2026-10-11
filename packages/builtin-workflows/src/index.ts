@@ -20,6 +20,7 @@ export type {
   ImproveWorkflowConfig,
   PairConfig,
   PanelConfig,
+  RefineBudget,
   ReviewerSeat,
   TeamInput,
   TestCommand,

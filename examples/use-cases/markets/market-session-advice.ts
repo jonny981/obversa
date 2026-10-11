@@ -120,35 +120,39 @@ function observationRun(observation: Observation, policy: Policy) {
   return dag({
     name: `observation-${observation.id}`,
     nodes: {
-      assess: agentJob({
-        label: 'assess',
-        engine: 'assess',
-        workspaceMode: 'none',
-        tools: [],
-        leaf: true,
-        prompt: () => assessmentPrompt(observation),
-      }),
+      assess: {
+        desc: `The three typed questions on observation ${observation.id} of ${observation.symbol}.`,
+        job: agentJob({
+          label: 'assess',
+          engine: 'assess',
+          workspaceMode: 'none',
+          tools: [],
+          leaf: true,
+          prompt: () => assessmentPrompt(observation),
+        }),
+      },
+      // The typed answers stay on the record as data and land in a file the
+      // research seat can read when it runs.
       validate: {
         needs: 'assess',
-        job: fnJob('validate', (ctx): Outcome => {
+        job: fnJob('validate', async (ctx): Promise<Outcome> => {
           const assessment = readAssessment(String(ctx.needs?.assess?.data ?? ''), policy);
+          await mkdir('advice', { recursive: true });
+          await writeFile(`advice/${observation.id}-assessment.json`, `${JSON.stringify(assessment, null, 2)}\n`);
           return { status: 'pass', summary: `${assessment.advice} at ${assessment.confidence}`, data: assessment };
         }),
       },
       research: {
         needs: 'validate',
         when: predicate((ctx) => assessmentOf(ctx).uncertain, 'the assessment is uncertain'),
-        job: agentJob({
-          label: 'research',
-          engine: 'research',
-          prompt: (ctx) => [
-            `Observation ${observation.id} of ${observation.symbol} at ${observation.observedAt}:`,
-            `price ${observation.change.pricePercent}%, volume ${observation.change.volumeRatio}x the usual.`,
-            `The assessment was uncertain and named "${assessmentOf(ctx).researchCategory}" as the evidence to read first.`,
-            `Read only these files: ${observation.evidence.join(', ')}.`,
-            `Follow briefs/market-session.md and write ${researchNote}.`,
-          ].join('\n'),
-        }),
+        desc: [
+          `Observation ${observation.id} of ${observation.symbol} at ${observation.observedAt}:`,
+          `price ${observation.change.pricePercent}%, volume ${observation.change.volumeRatio}x the usual.`,
+          `The assessment in advice/${observation.id}-assessment.json was uncertain and names the evidence to read first.`,
+          `Read only these files, as briefs/market-session.md says: ${observation.evidence.join(', ')}.`,
+        ].join('\n'),
+        agent: researchSeat,
+        writes: researchNote,
       },
       record: {
         needs: ['validate', 'research'],
@@ -182,7 +186,7 @@ const policy = await readJson<Policy>('policy.json');
 
 // The assessment seat is Jev when configured, and otherwise replays the
 // assessment recorded with each observation, so the file runs offline.
-const research = claude('claude-sonnet-4-5');
+const researchSeat = claude('claude-sonnet-4-5');
 let current: Observation | undefined;
 const assess = process.env.MARKET_ASSESS_ENGINE === 'jev'
   ? jev().engine
@@ -222,7 +226,7 @@ for (const session of calendar.sessions) {
     }
     current = observation;
     const result = await run(observationRun(observation, policy), {
-      engines: { assess, research: research.engine },
+      engines: { assess },
       recordTo: `records/${observation.id}.jsonl`,
       runId: observation.id,
       onEvent: (event) => console.log(formatEvent(event)),

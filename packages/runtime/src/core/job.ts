@@ -115,11 +115,12 @@ export interface AgentJobConfig {
   /**
    * Files the turn is declared to write. When given, the check for unchanged
    * work reads only these files, even when Git ignores them: a change to any
-   * other file does not count as a change to the work. Without it, a turn
-   * that a dag node with a `file` runs reads that file alone.
+   * other file does not count as a change to the work. `'workspace'` reads
+   * the whole workspace. Without it, a turn that a dag node with a `file`
+   * runs reads that file alone.
    * @internal
    */
-  writes?: readonly string[];
+  writes?: 'workspace' | readonly string[];
   /**
    * Mark this turn a leaf: forbid spawning sub-agents (the engine disallows the sub-agent
    * tool), so a branch bottoms out here. Falls back to the agent def's `leaf`.
@@ -364,6 +365,17 @@ async function runAdvisorConsult(
   return { reply, model: result.effective.model ?? undefined };
 }
 
+/** The workspace snapshot one send-back is measured against, held on the run
+ * context so the two asks of a decision retry share it. */
+const REVIEWED_CONTENT = Symbol('obversa:reviewed-content');
+
+interface ReviewedContent {
+  readonly lastReview: unknown;
+  readonly cwd: string | undefined;
+  readonly paths: string;
+  readonly content: string | undefined;
+}
+
 /** Run one fresh agent turn through whichever engine is selected. */
 export function agentJob(config: AgentJobConfig): Job {
   const job: Job = async (ctx) => {
@@ -383,11 +395,31 @@ export function agentJob(config: AgentJobConfig): Job {
     // workspace after its turn fails the step, whichever form sent it back.
     const cwd = config.cwd ?? ctx.workspace.dir;
     const nodeFile = (ctx as JobContext & { [NODE_FILE]?: string })[NODE_FILE];
-    const paths = config.writes ?? (nodeFile === undefined ? undefined : [nodeFile]);
-    const contentOpts = { cwd, signal: ctx.signal, excludePaths: ctx.fingerprintExcludePaths, paths };
-    const reviewed = config.workspaceMode === 'write' && ctx.lastReview !== undefined && ctx.lastReview.status !== 'pass'
-      ? await workspaceContent(contentOpts)
-      : undefined;
+    // 'workspace' is an explicit whole-workspace scope, not an omitted one:
+    // it must not fall back to the node's file the way undeclared writes do.
+    const paths = config.writes === 'workspace'
+      ? undefined
+      : (config.writes ?? (nodeFile === undefined ? undefined : [nodeFile]));
+    // The whole-workspace snapshot lists only what Git tracks or would
+    // track; the node's declared file still counts when Git ignores it.
+    const extraPaths = config.writes === 'workspace' && nodeFile !== undefined ? [nodeFile] : undefined;
+    const contentOpts = { cwd, signal: ctx.signal, excludePaths: ctx.fingerprintExcludePaths, paths, extraPaths };
+    // The snapshot lives on the context because a decision retry's second
+    // ask must measure the files against before the FIRST ask: a seat that
+    // repaired the work but replied in prose must not fail its valid retry
+    // on files it already changed.
+    let reviewed: string | undefined;
+    if (config.workspaceMode === 'write' && ctx.lastReview !== undefined && ctx.lastReview.status !== 'pass') {
+      const slot = ctx as JobContext & { [REVIEWED_CONTENT]?: ReviewedContent };
+      const held = slot[REVIEWED_CONTENT];
+      const pathsKey = JSON.stringify(paths ?? null);
+      if (held !== undefined && held.lastReview === ctx.lastReview && held.cwd === cwd && held.paths === pathsKey) {
+        reviewed = held.content;
+      } else {
+        reviewed = await workspaceContent(contentOpts);
+        slot[REVIEWED_CONTENT] = { lastReview: ctx.lastReview, cwd, paths: pathsKey, content: reviewed };
+      }
+    }
 
     const userPrompt =
       typeof config.prompt === 'function'

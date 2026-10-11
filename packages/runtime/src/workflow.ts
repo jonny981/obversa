@@ -1,35 +1,38 @@
 import { createHash } from 'node:crypto';
 
-import { modelIdentity, type TeamSeat } from '@obversa/api';
+import { type TeamSeat } from '@obversa/api';
 import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { agentJob, fnJob, RECORDED_ENGINE_USAGE, type RecordedEngineUsage } from './core/job.js';
+import { agentJob, fnJob } from './core/job.js';
 import { approval } from './core/approval-job.js';
 import { commandJob, predicate } from './core/condition.js';
 import { copyJobMeta, declareWrites } from './core/describe.js';
-import { dag, JUDGED_NODES, TARGET_ROUNDS, type TargetRounds } from './core/dag.js';
+import { dag } from './core/dag.js';
+import { TARGET_ROUNDS, type TargetRounds } from './core/context.js';
 import { RESUME_IDENTITY } from './core/resume.js';
-import { roundRule } from './core/rounds.js';
 import { LoopError } from './core/errors.js';
 import { loop } from './core/loop.js';
 import { kickback, revisionFromOutcome } from './core/feedback.js';
-import { answeredFindingIds, watchRoundChange } from './core/round-change.js';
 import { reviewPanel } from './core/synthesis.js';
-import { consultJudge, goalVerdicts, isJudge, judgedFindings, judgeRound, judgeState, lastRoundAnswered, productDecisionFeedback, readJudgedWork, type JudgeState } from './core/judge.js';
-import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
-import { checkpointInteraction, hasSavedInteraction, humanReview, interactionIdentity, jsonSnapshot, outcomeSnapshot, requestInteraction, savedInteraction, type InteractionBinding } from './core/interaction.js';
-
-import { goalCheckJob } from './goal.js';
-import { outcomeFromAgentText } from './workflow-agent-response.js';
+import { isJudge } from './core/judge.js';
 import {
   assertDistinctSeats,
-  panelReviewers,
+  recordedFamilyGate,
+  recordRoundChange,
+  refinedRounds,
   requireNoFiles,
   requireNonEmptyFiles,
+  review,
   seatIdentity,
-} from './workflow-support.js';
+} from './core/refine.js';
+import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
+import { checkpointInteraction, humanReview, interactionIdentity, jsonSnapshot, requestInteraction, type InteractionBinding } from './core/interaction.js';
+
+import { goalCheckJob } from './goal.js';
+import { outcomeFromAgentText, withDecisionRetry } from './workflow-agent-response.js';
+import { panelReviewers } from './workflow-support.js';
 import type { ReviewerSeat, TeamInput } from './workflow-support.js';
 
 export interface BriefSource {
@@ -56,9 +59,13 @@ export interface WorkflowStageBase {
   /**
    * How many refinements a reviewed stage or a send-back target gets: rounds
    * of rework after the first build. `refine: N` allows N refinements, so
-   * N+1 builds in all; `refine: 0` is one build. Default 1. A reviewed stage
-   * that is also a send-back target has one count: its own reviews and the
-   * send-backs to it share the N refinements in a run. Or `judge(seat)`
+   * N+1 builds the reviews paid for in all; `refine: 0` is one build.
+   * Default 1. On a stage a panel reviews, a declared file the build left
+   * missing sends the work back on a check budget instead, which can add up
+   * to 3 more builds; on a stage a person reviews it spends a refinement. A
+   * reviewed stage that is also a send-back target has one count: its own
+   * reviews and the send-backs to it share the N refinements in a run. Or
+   * `judge(seat)`
    * to let a seat decide between a review's verdict and the send-back. With
    * no cap, the rounds end when the judge stops them or the review passes.
    * `judge(seat, { cap: N })` allows at most N refinements, and the judge's
@@ -363,153 +370,6 @@ function seatRole(roles: WorkflowConfig['roles'], name: string): TeamSeat {
   return seat;
 }
 
-/**
- * The family a recorded answer belongs to, read through the one derivation
- * every harness that runs other providers' models shares. A model string the
- * derivation refuses (no family, or the `unknown` placeholder) is unreadable
- * here, and an unreadable family refuses the review rather than passing it.
- */
-function recordedFamilyOf(model: string): string | undefined {
-  try {
-    return modelIdentity(model).modelFamily;
-  } catch {
-    return undefined;
-  }
-}
-
-function recordedUsage(ctx: JobContext): readonly RecordedEngineUsage[] {
-  const value = ctx.state[RECORDED_ENGINE_USAGE];
-  return Array.isArray(value) ? value as readonly RecordedEngineUsage[] : [];
-}
-
-/** Refuse a panel when a recorded answer contradicts the distinct-family
- * requirement: an answer whose recorded family equals a family it must
- * differ from, or an answer whose family cannot be read at all. Every
- * recorded answer up to the panel is read, never the first per seat. The
- * refusal names the seats, their declared families and the answers, so a
- * reader can act on it without reading source. Fail closed on identity,
- * never pass in silence. */
-function assertRecordedFamilies(
-  records: readonly RecordedEngineUsage[],
-  opposing: readonly { readonly label: string; readonly family: string }[],
-): void {
-  const declared = opposing.map((seat) => `${seat.label} declares ${seat.family}`).join('; ');
-  for (const record of records) {
-    const family = recordedFamilyOf(record.model);
-    if (family === undefined) {
-      throw new LoopError({
-        code: 'BODY',
-        phase: 'review',
-        message: `recorded model family is unknown: the answer ${record.model} carries no readable family, and ${declared}; a panel that requires distinct families refuses an unreadable answer`,
-      });
-    }
-    const collision = opposing.find((seat) => seat.family === family);
-    if (collision !== undefined) {
-      throw new LoopError({
-        code: 'BODY',
-        phase: 'review',
-        message: `recorded model family collision: the answer ${record.model} belongs to the family ${family}, and ${collision.label} declares ${collision.family}; the panel requires the recorded answers to differ from it (${declared})`,
-      });
-    }
-  }
-}
-
-/** The gate around a panel stage: before the reviewers run, every recorded
- * answer from the stages this panel must differ from is compared against
- * the reviewers' declared families; after the reviewers run, their own
- * recorded answers are compared against the families they must differ
- * from. Tagged writer and reviewer answers are checked; untagged advisor
- * and agentCheck answers are outside this gate. An unreadable family on
- * either tagged side is a refusal, never a pass. */
-function recordedFamilyGate(
-  panel: Job,
-  reviewers: readonly TeamSeat[],
-  writerStageNames: readonly string[],
-  writerFamilies: readonly string[],
-  writerRunsInsidePanel: boolean,
-): Job {
-  const reviewerDeclarations = reviewers.map((seat) => ({
-    label: `reviewer seat ${seatIdentity(seat).model}`,
-    family: seatIdentity(seat).modelFamily,
-  }));
-  const writerDeclarations = writerStageNames.map((name, index) => ({
-    label: `writer stage ${name}`,
-    family: writerFamilies[index] ?? '',
-  })).filter((entry) => entry.family !== '');
-  return async (ctx) => {
-    try {
-      const all = recordedUsage(ctx);
-      const beforeLength = all.length;
-      // A resume that continues the stage from its saved rounds may not run
-      // the writer again: its recorded answers came back with the rounds.
-      const resumingInteraction = hasSavedInteraction(ctx, ctx.path, true);
-      const writerSide = (records: readonly RecordedEngineUsage[]) => records.filter(
-        (record) => record.role === 'writer'
-          && record.stage !== undefined
-          && writerStageNames.includes(record.stage),
-      );
-      const panelStage = ctx.graph?.node ?? ctx.path.at(-1) ?? 'panel';
-      // Every recorded writer answer up to the panel keeps the reviewers'
-      // declared difference. Records are compared by role and stage, never
-      // by path.
-      const beforeWriters = writerSide(all.slice(0, beforeLength));
-      assertRecordedFamilies(beforeWriters, reviewerDeclarations);
-      const outcome = await panel(ctx);
-      if (outcome.status !== 'pass') return outcome;
-      const current = recordedUsage(ctx);
-      const after = current.slice(beforeLength);
-      const afterWriters = writerSide(after);
-      if (writerRunsInsidePanel && afterWriters.length === 0 && !resumingInteraction) {
-        throw new LoopError({
-          code: 'BODY',
-          phase: 'review',
-          message: `recorded model family missing: writer stage ${writerStageNames.join(', ')} has no recorded answer in stage ${panelStage}`,
-        });
-      }
-      assertRecordedFamilies(afterWriters, reviewerDeclarations);
-      const reviewerSide = (resumingInteraction ? current : after).filter((record) => record.role === 'reviewer' && record.stage === panelStage);
-      if (reviewerSide.length === 0) {
-        throw new LoopError({
-          code: 'BODY',
-          phase: 'review',
-          message: `recorded model family missing: reviewer stage ${panelStage} has no recorded answer`,
-        });
-      }
-      assertRecordedFamilies(reviewerSide, writerDeclarations);
-      // The two recorded sides themselves must be disjoint: two declared
-      // differences mean nothing when one family answered both.
-      const writerAnswerFamilies = new Set(
-        writerSide(current).map((record) => recordedFamilyOf(record.model)).filter(
-          (family): family is string => family !== undefined,
-        ),
-      );
-      for (const record of reviewerSide) {
-        const family = recordedFamilyOf(record.model);
-        if (family === undefined) {
-          throw new LoopError({
-            code: 'BODY',
-            phase: 'review',
-            message: `recorded model family is unknown: the answer ${record.model} carries no readable family, and the panel requires the two recorded sides to differ`,
-          });
-        }
-        if (writerAnswerFamilies.has(family)) {
-          throw new LoopError({
-            code: 'BODY',
-            phase: 'review',
-            message: `recorded model family collision: the answer ${record.model} belongs to the family ${family}, and a writer stage's recorded answer belongs to the same family; the panel requires the two recorded sides to be disjoint`,
-          });
-        }
-      }
-      return outcome;
-    } catch (error) {
-      if (error instanceof LoopError && error.message.startsWith('recorded model family')) {
-        return { status: 'fail' as const, summary: error.message, error };
-      }
-      throw error;
-    }
-  };
-}
-
 function panelRole(roles: WorkflowConfig['roles'], name: string): readonly TeamSeat[] {
   const value = role(roles, name);
   if (!Array.isArray(value) || !value.length) throw new TypeError(`role ${name} must be a non-empty reviewer panel`);
@@ -546,6 +406,7 @@ function agentPrompt(
   named: NamedStage,
   files: readonly string[],
   writes: readonly string[],
+  again = false,
 ): (ctx: JobContext) => string {
   return (ctx) => [
     `Work brief:\n${brief.brief}`,
@@ -554,8 +415,8 @@ function agentPrompt(
     named.config.gate ? `Gate: ${named.config.gate}` : undefined,
     `Workflow files: ${files.join(', ') || 'none'}`,
     `This stage may write only: ${writes.join(', ') || 'no files'}. Do not write any other declared workflow file.`,
-    ctx.lastReview ? `Previous review:\n${ctx.lastReview.summary ?? ctx.lastReview.status}` : undefined,
-    'Return one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}',
+    again ? 'Your previous response was not a valid decision. Return only the required JSON object.' : undefined,
+    'Return one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"...","severity":"block|should-fix|nice-to-have"}]}',
   ].filter((line): line is string => line !== undefined).join('\n\n');
 }
 
@@ -569,10 +430,9 @@ function guardedAgent(
   const writes = writesOf(named.config);
   if (!writes.length) throw new TypeError(`agent stage ${named.name} must declare writes`);
   const target = named.config.sendsBackTo;
-  const reviewedBy = 'reviewedBy' in named.config ? named.config.reviewedBy : undefined;
   const effort = 'effort' in named.config ? named.config.effort : undefined;
   const identity = seatIdentity(seat);
-  const agent = agentJob({
+  const ask = (again: boolean) => agentJob({
     label: named.name,
     engine: seat.engine,
     model: identity.model,
@@ -581,11 +441,13 @@ function guardedAgent(
     allowedTools: [...identity.tools],
     workspaceMode: 'write',
     writes,
-    consumeFeedback: target !== undefined || reviewedBy !== undefined,
-    prompt: agentPrompt(brief, named, files, writes),
+    consumeFeedback: true,
+    prompt: agentPrompt(brief, named, files, writes, again),
     outcome: (textValue) => outcomeFromAgentText(textValue, target),
     recordAs: { role: 'writer', stage: named.name },
   });
+  // A reply in prose is not a failed round: the seat is asked once more.
+  const agent = withDecisionRetry(ask(false), ask(true));
   return async (ctx) => {
     const required = requireNonEmptyFiles(named.name, agent, ctx.workspace.dir, writes);
     const forbidden = declaredFiles.filter((file) => !writes.includes(file));
@@ -620,220 +482,26 @@ function guardedFn(fn: Job, named: NamedStage, declaredFiles: readonly string[])
   };
 }
 
-/**
- * Why a judged review stopped the rounds, by the error it threw to end its
- * loop: the review's failure, with its findings and the judge's reason.
- */
-const judgeStops = new WeakMap<LoopError, Outcome>();
-
-/**
- * What one run of a judged stage keeps between its rounds. The graph keeps
- * the count of builds, the judge's history and the draft the last round
- * reviewed, shared with the send-backs to the stage.
- */
-interface JudgedRun {
-  readonly shared: TargetRounds;
-  /** The stage's builds after its first, before this run of it. */
-  readonly base: number;
-}
-
-/** A refine loop's build round, followed by a record of what it changed. */
-function recordRoundChange(job: Job): Job {
-  return copyJobMeta(async (ctx) => {
-    const recordChange = await watchRoundChange(ctx);
-    const outcome = await job(ctx);
-    await recordChange?.({ path: ctx.path, round: ctx.iteration, findings: answeredFindingIds(ctx.lastReview) });
-    return outcome;
-  }, job);
-}
-
 /** The brief's `Use case:` paragraph, on one line. */
 function briefUseCase(brief: BriefSource): string | undefined {
   return /^Use case:\s*([\s\S]*?)\n\s*\n/m.exec(brief.brief)?.[1]?.replace(/\s+/g, ' ').trim();
 }
 
-/**
- * A review with a judge between its verdict and the send-back, for every
- * finding, a block included. The judge's history, the findings it skipped
- * and a person's product answers live in `run`, which belongs to one run of
- * the workflow. The judge reads what the graph gives a judge of this stage
- * (`shared.work`: the brief, the use case, the stage's `desc` and `gate`,
- * its file and the workspace when the work began), this round's checks
- * and goal check verdicts (`shared.evidence()`), the latest findings, the
- * findings it skipped before, and every round so far. Its answer either lets the review
- * stand (a synthesised pass), sends it back with its reasoning folded into
- * the existing rejection, or stops the rounds with the review's failure.
- * When it decides each finding, the send-back carries only the findings it
- * acts on, and the findings it skips go to the next round's reviewers as
- * `ctx.skippedFindings`. `before`, when set, runs ahead of the review each
- * round, and a result that is not a pass is the round's outcome with no
- * review and no judge.
- */
-function judgedReview(brief: BriefSource, named: NamedStage, cfgJudge: Judge, review: Job, run: JudgedRun, before?: Job): Job {
-  const config = named.config;
-  const shared = run.shared;
-  const work = shared.work;
-  const identity = interactionIdentity({ brief, config, cfgJudge });
-  return async (ctx) => {
-    const checkpointPath = [...ctx.path, '@judge-review'];
-    let saved = savedInteraction(ctx, checkpointPath, identity);
-    const { draft, changedLines, tree } = await readJudgedWork(ctx.workspace.dir, work, { draft: shared.previousDraft, tree: shared.rounds.at(-1)?.tree }, ctx.fingerprintExcludePaths);
-    if (saved && (saved.state as unknown as JudgeState).draft !== draft) saved = undefined;
-    if (saved) {
-      shared.rounds = (saved.state as unknown as JudgeState).rounds;
-      shared.productFeedback = (saved.state as unknown as JudgeState).productFeedback ?? [];
-      shared.skipped = (saved.state as unknown as JudgeState).skipped ?? [];
-    }
-    // A saved question means `before` passed in this round: it does not run again.
-    if (!saved && before) {
-      const checked = await before(ctx);
-      if (checked.status !== 'pass') return checked;
-      shared.goal = goalVerdicts(checked);
-    }
-    const reviewOutcome: Outcome = saved ? saved.panel as unknown as Outcome : await review({
-      ...ctx,
-      ...(shared.skipped.length ? { skippedFindings: shared.skipped } : {}),
-    });
-    // Only a refusal goes to the judge: a pass stands, and a review still
-    // waiting for a person pauses the run before the judge is asked.
-    if (reviewOutcome.status !== 'fail') return reviewOutcome;
-    const findings = revisionFromOutcome(reviewOutcome)?.findings ?? [];
-    // The round is the stage's build in this run: its builds before this
-    // run of it, and the loop's iteration in this one.
-    const round = roundRule(run.base + ctx.iteration, cfgJudge.cap);
-    const state: JudgeState = saved ? saved.state as unknown as JudgeState : judgeState({
-      work, draft, tree, ...shared.evidence(), productFeedback: shared.productFeedback, latestFindings: findings, skipped: shared.skipped, rounds: shared.rounds, round: round.judge,
-    });
-    const result = await consultJudge(cfgJudge, state, ctx, ctx.path, {
-      target: named.name, identity, pending: saved !== undefined,
-      save: (questionState) => checkpointInteraction(ctx, checkpointPath, identity, jsonSnapshot({ state: questionState, panel: outcomeSnapshot(reviewOutcome) })),
-    });
-    if ('paused' in result) return result.paused;
-    checkpointInteraction(ctx, checkpointPath, identity, null);
-    shared.productFeedback = result.state.productFeedback ?? [];
-    shared.rounds = [...shared.rounds, judgeRound(state, changedLines, result)];
-    shared.previousDraft = draft;
-    // The review's failure stands, with its findings and why the rounds
-    // stopped. A thrown error is the only way a review ends a loop with a
-    // fail; the stage reads the outcome back from `judgeStops`.
-    const stop = (why: string): never => {
-      const revision = revisionFromOutcome(reviewOutcome);
-      const summary = `${reviewOutcome.summary ?? revision?.reason ?? 'the review did not pass'} (${why})`;
-      const error = new LoopError({ code: 'VALIDATION', phase: 'review', path: ctx.path, message: summary });
-      judgeStops.set(error, {
-        status: 'fail',
-        summary,
-        ...(revision ? { revision: { ...revision, reason: `${revision.reason} (${why})` } } : {}),
-      });
-      throw error;
-    };
-    // A person's answer goes back to the builder as the next round; the
-    // judge sees the result only after that round has been reviewed.
-    if ('answer' in result) {
-      // No build round is left for the answer: the stage stops here.
-      if (round.lastRound) stop(lastRoundAnswered(result.state, result.answer));
-      // The judge decided each finding before asking: the answer goes with the acted ones only.
-      const answered = judgedFindings(findings, { findings: result.state.decided }, result.state.skipped ?? [], state.round);
-      shared.skipped = answered.skipped;
-      return productDecisionFeedback(result.answer, answered.acted);
-    }
-    const { decision } = result;
-    const judged = judgedFindings(findings, decision, result.state.skipped ?? [], state.round);
-    shared.skipped = judged.skipped;
-    if (!decision.again) {
-      // Not converging, or any answer but a ship after the last round the
-      // cap allows: the stage stops here, and the review's failure stands.
-      if (decision.stop === 'fail') stop(decision.reason);
-      return {
-        status: 'pass', confidence: reviewOutcome.confidence, summary: decision.reason, data: reviewOutcome.data,
-        ...(round.lastRound ? { openFindings: findings } : {}),
-      };
-    }
-    // The review's own summary lists every finding; when the judge decided
-    // each one, the one-line reason stands in for it so the builder reads
-    // only the findings it acts on.
-    const revision = revisionFromOutcome(reviewOutcome);
-    return {
-      ...reviewOutcome,
-      summary: `${decision.findings && revision ? revision.reason : reviewOutcome.summary} (${decision.reason})`,
-      ...(revision ? { revision: { ...revision, findings: judged.acted } } : {}),
-    };
+/** What one run of `refinedRounds` knows about a reviewed stage. */
+function stageWork(brief: BriefSource, named: NamedStage): {
+  readonly name: string;
+  readonly brief: BriefSource;
+  readonly config: WorkflowStage;
+  readonly writes: readonly string[];
+  readonly refine: number | Judge;
+} {
+  return {
+    name: named.name,
+    brief,
+    config: named.config,
+    writes: writesOf(named.config),
+    refine: refineOf(named.config),
   };
-}
-
-/**
- * A reviewed stage's rounds. Its own reviews and the send-backs to it from
- * later stages share one count of builds and one judge history for the run:
- * the graph keeps both, so a send-back after the stage's own reviews gets
- * only the refinements left, and a judge reads every round so far. `before`,
- * when set, runs ahead of the review each round, and a result that is not a
- * pass is the round's outcome with no review. A stop the judge decides
- * becomes the stage's outcome. The builds this run of the stage started
- * from are saved whenever anything in the stage pauses for a person or its
- * rounds advance, and a resume starts from them. Each rejected round that another build follows
- * saves the rounds so far with its feedback, so a resume after a pause, an
- * abort or a crash runs the stage again from the next round, with the
- * judge's history, the findings it skipped and the draft it last read.
- */
-function stageRounds(
-  rounds: (body: Job, review: Job, max: number | undefined) => Job,
-  body: Job,
-  brief: BriefSource,
-  named: NamedStage,
-  review: Job,
-  before?: Job,
-): Job {
-  const refine = refineOf(named.config);
-  const refinements = refineCap(refine);
-  const plain: Job = before === undefined ? review : async (ctx) => {
-    const checked = await before(ctx);
-    return checked.status === 'pass' ? review(ctx) : checked;
-  };
-  const identity = interactionIdentity({ brief, config: named.config, cfgJudge: refine });
-  return copyJobMeta(async (ctx: JobContext) => {
-    const shared = (ctx as JobContext & { [TARGET_ROUNDS]: TargetRounds })[TARGET_ROUNDS];
-    const checkpointPath = [...ctx.path, '@judge-rounds'];
-    const saved = savedInteraction(ctx, checkpointPath, identity) as { base?: number } | undefined;
-    // A run resumed from a pause counts from the builds it started with.
-    const base = saved?.base ?? shared.builds;
-    const run: JudgedRun = { shared, base };
-    // The latest round this run of the stage reached, a resumed one included.
-    let latest = 0;
-    const counted = (job: Job): Job => copyJobMeta(async (roundCtx: JobContext) => {
-      latest = Math.max(latest, roundCtx.iteration);
-      return job(roundCtx);
-    }, job);
-    // A rejected round that another build follows, an unmet requirement
-    // included: the graph saves the rounds so far, so a resume after a pause,
-    // an abort or a crash builds the next round with this feedback.
-    const saveRejected = (job: Job): Job => copyJobMeta(async (roundCtx: JobContext) => {
-      const outcome = await job(roundCtx);
-      const round = base + roundCtx.iteration;
-      if (outcome.status === 'fail' && roundRule(round, refinements).another) {
-        shared.builds = round;
-        shared.save(outcome);
-      }
-      return outcome;
-    }, job);
-    const max = refinements === undefined ? undefined : refinements + 1 - base;
-    let checkpointed = saved !== undefined;
-    const outcome = await rounds(declareWrites(counted(body), writesOf(named.config)), counted(saveRejected(isJudge(refine) ? judgedReview(brief, named, refine, review, run, before) : plain)), max)({
-      ...ctx,
-      interactionCheckpoint(progress) {
-        ctx.interactionCheckpoint?.(progress);
-        checkpointed = true;
-        checkpointInteraction(ctx, checkpointPath, identity, jsonSnapshot({ base }), progress === true);
-      },
-    });
-    if (outcome.status === 'paused' || outcome.status === 'aborted') return outcome;
-    // A stage that passed keeps the builds it started from, so a resume that
-    // runs it again, because its file is gone, can build the round it passed
-    // in again.
-    if (checkpointed) checkpointInteraction(ctx, checkpointPath, identity, outcome.status === 'pass' ? jsonSnapshot({ base }) : null, outcome.status === 'pass');
-    shared.builds = base + latest - 1;
-    const stop = outcome.status === 'fail' && outcome.error ? judgeStops.get(outcome.error) : undefined;
-    return stop ? { ...outcome, ...stop } : outcome;
-  }, rounds(body, plain, refinements === undefined ? undefined : refinements + 1));
 }
 
 function stageJob(
@@ -861,7 +529,7 @@ function stageJob(
       });
       // `max` counts builds: the first, and one per refinement left.
       const rounds = (body: Job, stageReview: Job, max: number | undefined) => loop({ name: `${named.name}-review`, body, max, review: stageReview });
-      return stageRounds(rounds, built, brief, named, review);
+      return refinedRounds(rounds, built, stageWork(brief, named), review);
     }
     const reviewers = panelRole(roles, config.reviewedBy);
     const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, undefined, undefined, config.agree, config.synthesise);
@@ -887,13 +555,24 @@ function stageJob(
       ...(config.gate === undefined ? {} : { gate: config.gate }),
       work: reviewTarget(named),
     }, undefined, (ctx) => ctx.iteration);
-    const goalGate: Job | undefined = goal === undefined ? undefined : async (ctx) => {
+    // A declared file the build left missing or empty sends the work back
+    // ahead of the panel, the way a dag() node's missing `file` does. With
+    // a goal it runs after the goal check, whose verdicts already say what
+    // is not there.
+    const artifactGate: Job = async (ctx) => {
+      const missing = await missingWrites(ctx.workspace.dir);
+      return missing.length > 0
+        ? { status: 'fail' as const, summary: `${named.name} did not write: ${missing.join(', ')}` }
+        : { status: 'pass' as const };
+    };
+    const goalGate: Job = goal === undefined ? artifactGate : async (ctx) => {
       const goalCtx = { ...ctx, depth: ctx.depth + 1, path: [...ctx.path, 'goal-check'] };
       const checked = await requireNoFiles(`${named.name}-goal`, goal, ctx.workspace.dir, declaredFiles)(goalCtx);
       if (checked.status !== 'pass') return checked;
-      const missing = await missingWrites(ctx.workspace.dir);
-      if (missing.length > 0) return { status: 'fail', summary: `${named.name} did not write: ${missing.join(', ')}` };
-      return checked;
+      const missing = await artifactGate(ctx);
+      // The passing outcome stays the goal check's: its verdicts are the
+      // evidence a judge of this stage reads.
+      return missing.status === 'pass' ? checked : missing;
     };
     // Review events use a child path. The jobs' role tags, not their paths,
     // separate the recorded sides. The outcome passes through.
@@ -905,17 +584,24 @@ function stageJob(
     const rounds = (body: Job, stageReview: Job, max: number | undefined) => loop({
       name: `${named.name}-review`,
       body,
-      until: predicate(
-        async (ctx) => goal !== undefined || (await missingWrites(ctx.workspace.dir)).length === 0,
-        `${named.name} writes`,
-      ),
       review: stageReview,
+      // A stopped body reaches the file check and the goal check when the
+      // declared files are what it left missing, or when a goal check
+      // stands to name what the work lacks. Any other retryable failure
+      // retries the body, unanswered by the round's gates.
+      until: predicate(async (ctx, last) =>
+        last?.status === 'pass'
+        || (last?.status === 'fail' && (config.goal !== undefined
+          || (await missingWrites(ctx.workspace.dir)).length > 0)),
+        `${named.name} writes`),
       max,
     });
     // The goal check runs ahead of the panel each round. With a judge, it
     // runs inside the judge's round, so a run that resumes at the judge's
-    // question does not check the goal again.
-    const reviewLoop = stageRounds(rounds, built, brief, named, reviewed, goalGate);
+    // question does not check the goal again. The stage's write files draw
+    // on the same check budget a dag() node's review() gives (checkRounds,
+    // 3); an unmet goal counts as a review round, as in every form.
+    const reviewLoop = refinedRounds(rounds, built, stageWork(brief, named), reviewed, goalGate, 3);
     return copyJobMeta(
       recordedFamilyGate(
         reviewLoop,
@@ -1124,21 +810,6 @@ export function workflow(name: string, config: WorkflowConfig): Job {
     }
   }
   const timeoutMs = duration(config.options?.timeout);
-  // Per target, not per sender: `refine` lives on the target's own config, so
-  // every sender to the same target resolves the exact same value here. A
-  // judge is used as-is (dag() consults it); a plain count keeps the prior
-  // max-of-candidates behaviour, though it is always the same number too.
-  const maxKickbacks: Record<string, number | Judge> = {};
-  for (const named of config.stages) {
-    if (named.config.sendsBackTo !== undefined) {
-      const target = config.stages.find((candidate) => candidate.name === named.config.sendsBackTo)!;
-      const refine = refineOf(target.config);
-      const existing = maxKickbacks[named.config.sendsBackTo];
-      maxKickbacks[named.config.sendsBackTo] = isJudge(refine)
-        ? refine
-        : Math.max(isJudge(existing) ? 0 : (existing ?? 0), refine);
-    }
-  }
   const stageJobIdentity = resumeIdentity(workflowName, config);
   const useCase = briefUseCase(brief);
   const declaredFiles = workflowFiles(brief, config.stages);
@@ -1174,12 +845,23 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       panelFamilyTargets.map((candidate) => seatIdentity(seatRole(config.roles, candidate.config.agent)).modelFamily),
     );
     const file = writesOf(stageConfig)[0];
+    // The stage's own `refine` rides onto its node as the send-back policy:
+    // a reviewed stage's own reviews run inside its job, and the node-level
+    // refine governs the send-backs later stages declare to it. A judge on
+    // it is used as-is (the dag consults it); a plain count is the rounds.
+    // Only a reviewed stage or a send-back target declares one.
+    const reviewed = 'reviewedBy' in stageConfig && stageConfig.reviewedBy !== undefined;
+    const hasRefine = reviewed || incomingTargets.has(named.name);
+    const refine = hasRefine ? refineOf(stageConfig) : undefined;
     return [named.name, {
       job: declareWrites(innerStage, writesOf(stageConfig)),
       ...(file === undefined ? {} : { file }),
       ...(named.config.retrySafe === undefined ? {} : { retrySafe: named.config.retrySafe }),
       needs: stageDependencies(config.stages, index),
-      ...(named.config.sendsBackTo === undefined ? {} : { acceptsKickbackTo: [named.config.sendsBackTo] }),
+      ...(named.config.sendsBackTo === undefined ? {} : { sendsBackTo: named.config.sendsBackTo }),
+      ...(refine === undefined ? {} : {
+        refine: isJudge(refine) ? review({ judge: refine }) : review({ rounds: refine }),
+      }),
       ...(named.config.desc === undefined ? {} : { desc: named.config.desc }),
       ...(named.config.gate === undefined ? {} : { gate: named.config.gate }),
       ...(named.config.when === undefined ? {} : { when: named.config.when }),
@@ -1187,12 +869,10 @@ export function workflow(name: string, config: WorkflowConfig): Job {
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
     }];
   }));
-  const graphConfig: DagConfig & { [RESUME_IDENTITY]: string; [JUDGED_NODES]: readonly string[] } = {
+  const graphConfig: DagConfig & { [RESUME_IDENTITY]: string } = {
     name: workflowName,
     nodes,
     [RESUME_IDENTITY]: stageJobIdentity,
-    [JUDGED_NODES]: config.stages.filter((named) => isJudge(named.config.refine)).map((named) => named.name),
-    ...(Object.keys(maxKickbacks).length ? { maxKickbacks } : {}),
     brief: brief.brief,
     ...(useCase === undefined ? {} : { useCase }),
   };

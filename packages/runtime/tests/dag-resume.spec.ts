@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { execa } from 'execa';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createCallbackClient, dag, fnJob, judge, kickback, loop, predicate, revisionRequest, run, stage, workflow } from '../src/api.ts';
+import { createCallbackClient, dag, fnJob, goalCheck, judge, kickback, loop, predicate, review, revisionRequest, run, stage, workflow } from '../src/api.ts';
 import type { AgentRequest, CallbackRequest, DagNode, Job, LoopEvent, RunCallbacks, RunOptions, RunResult } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 import { tmpRepo, cleanupRepos } from './git-helpers.ts';
@@ -145,6 +145,92 @@ describe('dag resume', () => {
     expect(new Set(events.filter(isAnchor).map((event) => event.identity)).size).toBe(2);
   });
 
+  it('runs a finished node again when the brief, its desc, its gate or the use case changes', async () => {
+    let builds = 0;
+    const build = (task: { brief?: string; desc?: string; gate?: string; useCase?: string } = {}) =>
+      dag({
+        name: 'trio',
+        ...(task.brief === undefined ? {} : { brief: task.brief }),
+        ...(task.useCase === undefined ? {} : { useCase: task.useCase }),
+        nodes: {
+          write: {
+            desc: task.desc ?? 'Write the page.',
+            gate: task.gate ?? 'The page has a title.',
+            job: fnJob('write', (ctx) => {
+              builds += 1;
+              writeFileSync(join(ctx.workspace.dir, 'page.md'), `draft ${builds}\n`);
+            }),
+          },
+          ship: { needs: 'write', job: fnJob('ship', () => {}) },
+        },
+      });
+    const path = recordTo();
+    const again = async (task: { brief?: string; desc?: string; gate?: string; useCase?: string } = {}) => {
+      const resumed = await result(build(task), { recordTo: path, resume: true });
+      expect(resumed.outcome.status).toBe('pass');
+    };
+    expect((await result(build(), { recordTo: path })).outcome.status).toBe('pass');
+    expect(builds).toBe(1);
+
+    // The same task reuses the finished write; each task field that changes
+    // runs it again, because the saved work stands for the task it answered.
+    await again();
+    expect(builds).toBe(1);
+    const newTask = {
+      desc: 'Write the landing page.',
+      gate: 'The page fits one screen.',
+      useCase: 'A landing page for readers.',
+      brief: 'The launch is on Monday.',
+    };
+    await again({ desc: newTask.desc });
+    expect(builds).toBe(2);
+    await again({ desc: newTask.desc, gate: newTask.gate });
+    expect(builds).toBe(3);
+    await again({ desc: newTask.desc, gate: newTask.gate, useCase: newTask.useCase });
+    expect(builds).toBe(4);
+    await again(newTask);
+    expect(builds).toBe(5);
+  });
+
+  it('runs a finished node again when its goal check\'s text or target changes', async () => {
+    const met = { requirements: [{ requirement: 'The page has a title', verdict: 'met', evidence: 'page.md:1 names it' }] };
+    const seat = () => ({
+      engine: new MockEngine(() => JSON.stringify(met)),
+      identity: { adapter: 'mock', provider: 'mock', modelFamily: 'goal-mock', model: 'goal-mock', tools: ['Read'] },
+    });
+    let builds = 0;
+    const build = (goal: { target: string; text: string }) => dag({
+      name: 'goal-resume',
+      nodes: {
+        write: {
+          job: fnJob('write', (ctx) => {
+            builds += 1;
+            writeFileSync(join(ctx.workspace.dir, 'page.md'), `draft ${builds}\n`);
+          }),
+          file: 'page.md',
+          refine: review({ goal: goalCheck(seat(), goal), rounds: 1 }),
+        },
+      },
+    });
+    const path = recordTo();
+    const first = { target: 'write', text: 'The page names its title.' };
+    const second = { target: 'write', text: 'The page names its title and its author.' };
+    expect((await result(build(first), { recordTo: path })).outcome.status).toBe('pass');
+    expect(builds).toBe(1);
+
+    // The same declared goal reuses the finished write; a goal check's job
+    // source stays the same whatever its requirements say, so the identity
+    // reads what the job declared: its text, its target, its seat.
+    expect((await result(build(first), { recordTo: path, resume: true })).outcome.status).toBe('pass');
+    expect(builds).toBe(1);
+    expect((await result(build(second), { recordTo: path, resume: true })).outcome.status).toBe('pass');
+    expect(builds).toBe(2);
+    expect((await result(build(second), { recordTo: path, resume: true })).outcome.status).toBe('pass');
+    expect(builds).toBe(2);
+    expect((await result(build({ ...second, target: 'other' }), { recordTo: path, resume: true })).outcome.status).toBe('pass');
+    expect(builds).toBe(3);
+  });
+
   it('pauses on an interrupted node unless it is retrySafe', async () => {
     const { counts, node } = counters();
     const build = (retrySafe = false) => dag({
@@ -190,10 +276,9 @@ describe('dag resume', () => {
     let sendBack = true;
     const build = (retrySafe = false) => dag({
       name: 'trio',
-      maxKickbacks: { two: 2 },
       nodes: {
         one: node('one'),
-        two: { ...node('two'), needs: 'one', retrySafe },
+        two: { ...node('two'), needs: 'one', retrySafe, refine: review({ rounds: 2 }) },
         three: {
           job: fnJob('three', () => {
             counts.three += 1;
@@ -204,7 +289,7 @@ describe('dag resume', () => {
             return { status: 'pass', summary: 'done' };
           }),
           needs: 'two',
-          acceptsKickbackTo: ['two'],
+          sendsBackTo: ['two'],
         },
       },
     });
@@ -446,20 +531,22 @@ describe('dag resume', () => {
     const judgeRounds: { round: number; rounds: unknown[] }[] = [];
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: {
-        write: judge({
-          engine: new MockEngine((request) => {
-            const { when } = (JSON.parse(request.prompt) as { state: { when: { round: number; rounds: unknown[] } } }).state;
-            judgeRounds.push({ round: when.round, rounds: when.rounds });
-            return JSON.stringify({ stop_reason: { choice: 'continue' } });
-          }),
-          identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
-        }, { cap: 1 }),
-      },
       nodes: {
-        write: { job: fnJob('write', () => { builds += 1; }) },
+        write: {
+          job: fnJob('write', () => { builds += 1; }),
+          refine: review({
+            judge: judge({
+              engine: new MockEngine((request) => {
+                const { when } = (JSON.parse(request.prompt) as { state: { when: { round: number; rounds: unknown[] } } }).state;
+                judgeRounds.push({ round: when.round, rounds: when.rounds });
+                return JSON.stringify({ stop_reason: { choice: 'continue' } });
+              }),
+              identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
+            }, { cap: 1 }),
+          }),
+        },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          needs: 'write', sendsBackTo: ['write'], retrySafe: true,
           job: fnJob('review', () => revisionRequest({ target: 'write', reason: 'not yet', findings: [{ evidence: 'x', severity: 'should-fix' }] })),
         },
       },
@@ -498,16 +585,15 @@ describe('dag resume', () => {
       identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
     }, { cap: 2 });
     const reviewOf = (target: string): DagNode => ({
-      needs: target, acceptsKickbackTo: [target], retrySafe: true,
+      needs: target, sendsBackTo: [target], retrySafe: true,
       job: fnJob(`review-${target}`, () => revisionRequest({ target, reason: 'not yet', findings: [{ evidence: 'x', severity: 'should-fix' }] })),
     });
     const build = () => dag({
       name: 'rounds',
       stopOnError: false,
-      maxKickbacks: { a: judgeFor('a'), b: judgeFor('b') },
       nodes: {
-        a: { job: fnJob('a', () => undefined) },
-        b: { job: fnJob('b', () => undefined) },
+        a: { job: fnJob('a', () => undefined), refine: review({ judge: judgeFor('a') }) },
+        b: { job: fnJob('b', () => undefined), refine: review({ judge: judgeFor('b') }) },
         'review-a': reviewOf('a'),
         'review-b': reviewOf('b'),
       },
@@ -530,11 +616,10 @@ describe('dag resume', () => {
     let builds = 0;
     const inner = dag({
       name: 'rounds',
-      maxKickbacks: 1,
       nodes: {
-        write: { job: fnJob('write', () => { builds += 1; }) },
+        write: { refine: review({ rounds: 1 }), job: fnJob('write', () => { builds += 1; }) },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          needs: 'write', sendsBackTo: ['write'], retrySafe: true,
           job: fnJob('review', () => revisionRequest({ target: 'write', reason: 'not yet' })),
         },
       },
@@ -585,11 +670,10 @@ describe('dag resume', () => {
     const feedback: (string | undefined)[] = [];
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 1 },
       nodes: {
-        write: { job: fnJob('write', (ctx) => { builds += 1; feedback.push(ctx.lastReview?.summary); }) },
+        write: { refine: review({ rounds: 1 }), job: fnJob('write', (ctx) => { builds += 1; feedback.push(ctx.lastReview?.summary); }) },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          needs: 'write', sendsBackTo: ['write'], retrySafe: true,
           job: fnJob('review', () => kickback('write', 'not yet')),
         },
       },
@@ -622,11 +706,10 @@ describe('dag resume', () => {
     let checkFails = true;
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 1 },
       nodes: {
-        write: { job: fnJob('write', () => { runs.write += 1; }) },
+        write: { refine: review({ rounds: 1 }), job: fnJob('write', () => { runs.write += 1; }) },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'],
+          needs: 'write', sendsBackTo: ['write'],
           job: fnJob('review', () => { runs.review += 1; return runs.review === 1 ? kickback('write', 'not yet') : undefined; }),
         },
         check: {
@@ -662,11 +745,10 @@ describe('dag resume', () => {
     let checkFails = true;
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 1 },
       nodes: {
-        write: { job: fnJob('write', () => { runs.write += 1; }) },
+        write: { refine: review({ rounds: 1 }), job: fnJob('write', () => { runs.write += 1; }) },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'],
+          needs: 'write', sendsBackTo: ['write'],
           job: fnJob('review', () => { runs.review += 1; return runs.review === 1 ? kickback('write', 'not yet') : undefined; }),
         },
         extra: { needs: 'review', when: () => extraWanted, job: fnJob('extra', () => { runs.extra += 1; }) },
@@ -704,12 +786,11 @@ describe('dag resume', () => {
     const createdAt = new Date('2026-01-02T03:04:05.000Z');
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 1 },
       nodes: {
         lookup: { job: fnJob('lookup', () => ({ status: 'pass' as const, summary: 'found', data: { createdAt } })) },
-        write: { needs: 'lookup', job: fnJob('write', () => { builds += 1; }) },
+        write: { needs: 'lookup', refine: review({ rounds: 1 }), job: fnJob('write', () => { builds += 1; }) },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'],
+          needs: 'write', sendsBackTo: ['write'],
           job: fnJob('review', () => { reviews += 1; return reviews === 1 ? kickback('write', 'not yet') : undefined; }),
         },
       },
@@ -731,11 +812,10 @@ describe('dag resume', () => {
     const controller = new AbortController();
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 1 },
       nodes: {
-        write: { job: fnJob('write', () => { builds += 1; }) },
+        write: { refine: review({ rounds: 1 }), job: fnJob('write', () => { builds += 1; }) },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          needs: 'write', sendsBackTo: ['write'], retrySafe: true,
           job: fnJob('review', () => {
             reviews += 1;
             if (reviews === 2) {
@@ -764,11 +844,10 @@ describe('dag resume', () => {
     let reviews = 0;
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 1 },
       nodes: {
-        write: { job: fnJob('write', () => { builds += 1; }) },
+        write: { refine: review({ rounds: 1 }), job: fnJob('write', () => { builds += 1; }) },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          needs: 'write', sendsBackTo: ['write'], retrySafe: true,
           job: fnJob('review', () => { reviews += 1; return kickback('write', 'not yet'); }),
         },
       },
@@ -794,11 +873,10 @@ describe('dag resume', () => {
       until: predicate(() => false, 'never met'),
       body: dag({
         name: 'rounds',
-        maxKickbacks: { write: 1 },
-        nodes: {
-          write: { job: fnJob('write', () => { builds += 1; }) },
+          nodes: {
+          write: { refine: review({ rounds: 1 }), job: fnJob('write', () => { builds += 1; }) },
           review: {
-            needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+            needs: 'write', sendsBackTo: ['write'], retrySafe: true,
             job: fnJob('review', () => kickback('write', 'not yet')),
           },
         },

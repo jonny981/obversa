@@ -301,8 +301,10 @@ export type {
   LoopConfig,
   RetryPolicy,
   DagConfig,
-  KickbackBudget,
   DagNode,
+  Review,
+  ReviewConfig,
+  ReviewerSeat,
   LoopEvent,
   LogLevel,
   Workspace,
@@ -317,6 +319,7 @@ export type {
 
 export { loop } from './core/loop.js';
 export { dag, sequence, parallel } from './core/dag.js';
+export { review, isReview } from './core/refine.js';
 export { pipeline, type PipelineStage } from './core/pipeline.js';
 export { tournament, type TournamentConfig } from './core/tournament.js';
 export {

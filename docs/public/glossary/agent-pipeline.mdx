@@ -15,27 +15,34 @@ the same shape at a larger scope.
 
 `pipeline()` runs the steps in order, and the review is a step in it:
 
-```ts examples/feature-team.ts (excerpt) {7-8,10}
+```ts examples/feature-team.ts (excerpt) {5-9,11-15}
 export const featureDelivery = pipeline(
   'feature-delivery',
   [
     { name: 'analyse', job: analyse },
-    { name: 'implement', job: implement },
+    {
+      name: 'implement',
+      refine: buildReview({ rounds: 2 }),
+      job: implement,
+    },
     { name: 'test', job: testStage },
-    { name: 'review', job: review, acceptsKickbackTo: ['implement'] },
+    {
+      name: 'review',
+      job: review,
+      sendsBackTo: ['implement'],
+    },
     { name: 'approve', job: approve },
   ],
-  { maxKickbacks: 2 },
 );
 ```
 
 `review` is a panel of three that passes on two and names `implement` as
 its target, so a failing review runs the implementer again with the
-findings. The `review` stage declares that target in `acceptsKickbackTo`. `approve` is a person's question. `maxKickbacks` caps how often
-the review can do that; when the budget runs out, the run fails with the
+findings. The `review` stage declares that target in `sendsBackTo`. `approve` is a person's question. `implement`'s `refine` caps how often
+the review can do that; when the rounds run out, the run fails with the
 last findings instead of looping. The excerpt comes from a scripted test
 of the workflow shape. [Feature delivery](/workflows/feature-team) uses
-Claude, Codex and Gemini for the work.
+Claude, Codex, Gemini and Grok for the work.
 
 ## The three parts
 

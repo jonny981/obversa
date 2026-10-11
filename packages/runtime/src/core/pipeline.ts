@@ -15,13 +15,27 @@ import type {
   Job,
   JobMeta,
 } from './types.js';
+import type { TeamSeat } from '@obversa/api';
 import { dag } from './dag.js';
 import { jobMeta, type NodeMeta } from './describe.js';
 import { LoopError } from './errors.js';
 
 export interface PipelineStage {
   name: string;
-  job: Job;
+  /** What the stage runs: `job` for code, `agent` for a seat that does the work. */
+  job?: Job;
+  /** The seat that does the work (dag's per-node `agent`), exclusive with `job`. */
+  agent?: TeamSeat;
+  /** What the agent may write (dag's per-node `writes`). */
+  writes?: 'workspace' | string | readonly string[];
+  /** The file the stage's judge reads and a resume recovers (dag's per-node `file`). */
+  file?: string;
+  /** The refinement the stage owns (dag's per-node `refine`, from `review()`). */
+  refine?: DagNode['refine'];
+  /** One sentence describing what this stage does (dag's per-node `desc`). */
+  desc?: string;
+  /** The written acceptance criterion for this stage (dag's per-node `gate`). */
+  gate?: string;
   /** Gate (one or many): when unmet the stage is skipped, not failed. */
   when?: ConditionInput;
   /** A failure here does not fail the pipeline, and does not block later stages. */
@@ -34,8 +48,8 @@ export interface PipelineStage {
   needs?: string[];
   /** Per-stage isolation override (dag's per-node `isolate`). */
   isolate?: boolean;
-  /** The stages this stage may send work back to (dag's per-node `acceptsKickbackTo`). */
-  acceptsKickbackTo?: string[];
+  /** The stages this stage may send work back to (dag's per-node `sendsBackTo`). */
+  sendsBackTo?: string | string[];
 }
 
 /** Ordered named stages, auto-chained: stage i needs stage i-1. Sugar over `dag`. */
@@ -62,13 +76,24 @@ export function pipeline(
         code: 'CONFIG',
         message: `pipeline "${name}": duplicate stage name "${stage.name}"`,
       });
+    if ('acceptsKickbackTo' in stage)
+      throw new LoopError({
+        code: 'CONFIG',
+        message: `pipeline "${name}": stage "${stage.name}" takes no acceptsKickbackTo: the send-backs it may make go in sendsBackTo`,
+      });
     nodes[stage.name] = {
       job: stage.job,
+      agent: stage.agent,
+      writes: stage.writes,
+      file: stage.file,
+      refine: stage.refine,
+      desc: stage.desc,
+      gate: stage.gate,
       needs: stage.needs ?? (i > 0 ? [stages[i - 1]!.name] : []),
       when: stage.when,
       optional: stage.optional,
       isolate: stage.isolate,
-      acceptsKickbackTo: stage.acceptsKickbackTo,
+      sendsBackTo: stage.sendsBackTo,
     };
   });
   // A plain dag underneath: meta stays kind:'dag', so renderPlan and host views

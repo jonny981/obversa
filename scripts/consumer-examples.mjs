@@ -122,7 +122,7 @@ export const MASTRA_EXAMPLES = Object.freeze(['engine-mastra.ts']);
  */
 export const REAL_ENGINE_EXAMPLES = Object.freeze([
   { file: 'engine-devin-cli-seat.ts', why: 'a Devin seat answers a read-only question in the folder it runs in; the page carries one real run' },
-  { file: 'feature-delivery.ts', why: 'Claude and Codex run the analysis, implementation and review jobs; the page carries one real run' },
+  { file: 'feature-delivery.ts', why: 'Claude, Codex, OpenCode and Grok seats run the analysis, implementation and review jobs; the page carries one real run' },
   { file: 'judge-stops-the-loop.ts', why: 'a Claude seat rewrites the page and a Codex seat reads it, with Jev or a recorded replay as the judge; the page carries the proof run' },
   { file: 'teams/writer-reviewer-pair.ts', why: 'a Claude seat writes and a Codex seat reviews; the page carries one real run' },
   { file: 'teams/threshold-panel.ts', why: 'Claude implements, Codex and OpenCode review; the page carries one real run' },
@@ -151,7 +151,7 @@ export const PROOF_RUN_EXAMPLES = Object.freeze([
   { file: 'use-cases/ops/approve-the-exact-payload.ts', why: 'runs no engine; approve-the-exact-payload.proof.ts runs it offline with a stand-in for curl' },
   { file: 'engine-mastra.ts', why: 'engine-mastra.proof.ts runs it offline: the Mastra agent\'s model replays recorded turns, a stand-in plays the Codex CLI and the judge replays recorded answers' },
   { file: 'teams/review-battery.ts', why: 'review-battery.proof.ts runs it offline: a stand-in plays the Claude, Codex and OpenCode CLIs and the judge replays recorded answers' },
-  { file: 'teams/feature-delivery.ts', why: 'feature-delivery.proof.ts runs it offline: a stand-in plays the Claude, Codex and OpenCode CLIs, the judge replays recorded answers and the proof answers the approval' },
-  { file: 'teams/feature-team-backlog.ts', why: 'feature-delivery.proof.ts runs it offline over two tickets: a stand-in plays the Claude, Codex and OpenCode CLIs' },
+  { file: 'teams/feature-delivery.ts', why: 'feature-delivery.proof.ts runs it offline: a stand-in plays the Claude, Codex, OpenCode and Grok CLIs, the judge replays recorded answers and the proof answers the approval' },
+  { file: 'teams/feature-team-backlog.ts', why: 'feature-delivery.proof.ts runs it offline over two tickets: a stand-in plays the Claude, Codex, OpenCode and Grok CLIs' },
   { file: 'engine-openai-agents.ts', why: 'engine-openai-agents.proof.ts runs it offline: the agent\'s model replays recorded turns, a stand-in plays the Codex CLI and the judge replays recorded answers' },
 ]);

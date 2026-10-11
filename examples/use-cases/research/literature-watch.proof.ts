@@ -27,7 +27,8 @@ const answer = [
 
 // Three papers, one harvest, three decisions, one question. The person
 // kept two summaries and refused the survey with a note, so memory holds
-// two files and the answer is grounded on those two alone.
+// two files, the context file grounds the answer on those two alone, and
+// the answer cites them.
 await withExample({
   here,
   example: 'literature-watch',
@@ -62,6 +63,8 @@ await withExample({
   assert.deepEqual(printed.answered, ['q-1']);
 
   assert.equal(run.seatCalls.length, 2, 'one harvest, one answer');
+  assert.match(await run.read('context/q-1.md'), /p-101/);
+  assert.doesNotMatch(await run.read('context/q-1.md'), /p-102/, 'the refused paper is not grounded');
   assert.match(await run.read('answers/q-1.md'), /p-101/);
   assert.doesNotMatch(await run.read('answers/q-1.md'), /p-102/, 'the refused paper is not cited');
   for (const paper of printed.papers) {

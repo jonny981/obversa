@@ -120,13 +120,9 @@ function tableFor(request: Request): Record<string, DagNode> {
   for (const seat of Object.keys(seats)) {
     const view = `table/${pitch}/${seat}.md`;
     nodes[`view-${pitch}-${seat}`] = {
-      desc: `Uphill: the ${seat} seat's view on ${pitch}.`,
-      job: agentJob({
-        label: `view-${seat}`,
-        engine: seat,
-        model: seats[seat]!.identity.model,
-        prompt: `Read pitches/${pitch}.md and write your view to ${view} as briefs/table.md says.`,
-      }),
+      desc: `Uphill: the ${seat} seat's view on ${pitch}: read pitches/${pitch}.md and write ${view} as briefs/table.md says.`,
+      agent: seats[seat]!,
+      writes: view,
     };
     nodes[`check-${pitch}-${seat}`] = {
       needs: `view-${pitch}-${seat}`,
@@ -174,13 +170,9 @@ function tableFor(request: Request): Record<string, DagNode> {
   nodes[`research-${pitch}`] = {
     needs: `route-${pitch}`,
     when: predicate((ctx) => (ctx.needs?.[`route-${pitch}`]?.data as { uncertain: boolean }).uncertain, 'a check was uncertain'),
-    desc: `Uphill: research what the table should know about ${pitch}.`,
-    job: agentJob({
-      label: `research-${pitch}`,
-      engine: 'claude',
-      model: seats.claude!.identity.model,
-      prompt: `The table was not sure about pitches/${pitch}.md. Read the pitch and the views in table/${pitch}/ and write table/${pitch}/research.md: what the table should know, from the pitch's own material, in under 120 words.`,
-    }),
+    desc: `Uphill: the table was not sure about pitches/${pitch}.md: read the pitch and the views in table/${pitch}/ and write table/${pitch}/research.md, what the table should know, from the pitch's own material, in under 120 words.`,
+    agent: seats.claude!,
+    writes: `table/${pitch}/research.md`,
   };
   const decision = bets[pitch];
   const question = `Bet on ${pitch} this cycle? The views, their checks and any research are in table/${pitch}/.`;
@@ -282,7 +274,7 @@ const onEvent = (event: LoopEvent): void => {
 };
 
 const result = await run(cycle, {
-  engines: { ...Object.fromEntries(Object.entries(seats).map(([name, seat]) => [name, seat.engine])), jev: check },
+  engines: { jev: check },
   recordTo: 'records/shape-up-cycle.jsonl',
   runId: 'shape-up-cycle',
   onEvent,

@@ -242,7 +242,7 @@ describe('a plain-function stage', () => {
       const result = await run(job, { cwd: directory });
       expect(result.outcome.status).toBe('pass');
       expect(targetCalls).toBe(2);
-      expect(secondPrompt).toContain('Previous review');
+      expect(secondPrompt).toContain('## Feedback to address');
       expect(secondPrompt).toContain('not good yet');
     } finally {
       await rm(directory, { recursive: true, force: true });

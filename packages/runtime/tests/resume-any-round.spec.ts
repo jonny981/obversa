@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { agentJob, createCallbackClient, dag, fnJob, judge, kickback, loop, person, predicate, revisionRequest, run, stage, withEnv, workflow } from '../src/api.ts';
+import { agentJob, createCallbackClient, dag, fnJob, judge, kickback, loop, person, predicate, review, revisionRequest, run, stage, withEnv, workflow } from '../src/api.ts';
 import type { Job, LoopEvent, RunOptions, RunResult } from '../src/api.ts';
 import { makeRecorder, readResumeRecord } from '../src/runtime/persist.ts';
 import { MockEngine, recordedJudge } from '../src/testing.ts';
@@ -47,6 +47,13 @@ const nodeDone = (node: string) => (event: LoopEvent) =>
   event.kind === 'dag:node' && event.node === node && event.phase === 'done';
 const nodeStart = (node: string) => (event: LoopEvent) =>
   event.kind === 'dag:node' && event.node === node && event.phase === 'start';
+
+/** The point a round's build is checked and its review is about to run: the
+ * loop's review-phase checkpoint for that iteration. */
+const reviewPhase = (iteration: number) => (event: LoopEvent) =>
+  event.kind === 'interaction:checkpoint'
+  && (event.data as { phase?: unknown; iteration?: unknown } | undefined)?.phase === 'review'
+  && (event.data as { phase?: unknown; iteration?: unknown } | undefined)?.iteration === iteration;
 
 /** A loop whose body is a graph: a build, then a check that fails until the given round. */
 function roundsOfWork(runs: { build: number; check: number }, passAt = 3, name = 'rounds'): Job {
@@ -146,7 +153,7 @@ describe('a resume in a later round', () => {
     expect({ builds, reviews }).toEqual({ builds: 3, reviews: 3 });
 
     // The worker dies once round 3's build is checked and its review began.
-    await cutAfter(path, (event) => event.kind === 'loop:condition' && event.which === 'until' && event.iteration === 3);
+    await cutAfter(path, reviewPhase(3));
     reviews = 2;
     const resumed = await result(build(), { recordTo: path, resume: true });
     expect(resumed.outcome.status).toBe('pass');
@@ -158,11 +165,11 @@ describe('a resume in a later round', () => {
     const runs = { write: 0, review: 0 };
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 2 },
       nodes: {
-        write: { job: fnJob('write', () => { runs.write += 1; }) },
+        write: {
+              refine: review({ rounds: 2 }), job: fnJob('write', () => { runs.write += 1; }) },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          needs: 'write', sendsBackTo: ['write'], retrySafe: true,
           job: fnJob('review', (ctx) => {
             runs.review += 1;
             return (ctx.graph?.attempt ?? 1) < 3 ? kickback('write', 'not yet') : undefined;
@@ -184,9 +191,9 @@ describe('a resume in a later round', () => {
     const runs = { draft: 0, polish: 0, review: 0 };
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 2 },
       nodes: {
         write: {
+              refine: review({ rounds: 2 }),
           retrySafe: true,
           job: dag({
             name: 'writing',
@@ -197,7 +204,7 @@ describe('a resume in a later round', () => {
           }),
         },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          needs: 'write', sendsBackTo: ['write'], retrySafe: true,
           job: fnJob('review', (ctx) => {
             runs.review += 1;
             return (ctx.graph?.attempt ?? 1) < 3 ? kickback('write', 'not yet') : undefined;
@@ -434,6 +441,43 @@ describe('a recorded step whose file is missing', () => {
               write: { file: 'page.md', retrySafe: true, job: fnJob('write', (ctx) => { runs.write += 1; writeFileSync(join(ctx.workspace.dir, 'page.md'), 'draft'); }) },
             },
           }),
+        },
+        check: {
+          needs: 'inner',
+          job: fnJob('check', () => { runs.check += 1; return checkFails ? { status: 'fail' as const, summary: 'red' } : undefined; }),
+        },
+      },
+    });
+    expect((await result(build(), { recordTo: 'auto', runId: 'compact' })).outcome.status).toBe('fail');
+    const path = join(cwd, '.obversa', 'records', 'compact.jsonl');
+    expect(runs).toEqual({ write: 1, check: 1 });
+
+    await unlink(join(cwd, 'page.md'));
+    checkFails = false;
+    expect((await result(build(), { recordTo: path, resume: true })).outcome.status).toBe('pass');
+    expect(runs).toEqual({ write: 2, check: 2 });
+    expect(existsSync(join(cwd, 'page.md'))).toBe(true);
+  });
+
+  it('runs a finished refined node again when the file its nested graph wrote is gone', async () => {
+    const runs = { write: 0, check: 0 };
+    let checkFails = true;
+    const seat = (model: string) => ({
+      engine: new MockEngine(() => JSON.stringify({ status: 'pass', summary: 'reads well' })),
+      identity: { adapter: 'mock', provider: 'mock', modelFamily: model.split('-', 1)[0]!, model, tools: ['Read'] },
+    });
+    const build = () => dag({
+      name: 'outer',
+      nodes: {
+        inner: {
+          retrySafe: true,
+          job: dag({
+            name: 'inner',
+            nodes: {
+              write: { file: 'page.md', retrySafe: true, job: fnJob('write', (ctx) => { runs.write += 1; writeFileSync(join(ctx.workspace.dir, 'page.md'), 'draft'); }) },
+            },
+          }),
+          refine: review({ checks: [['node', '-e', 'process.exit(0)']], reviewers: [seat('review-mock')], fixer: seat('fix-mock'), rounds: 1 }),
         },
         check: {
           needs: 'inner',
@@ -773,12 +817,12 @@ describe('a recorded step whose file is missing', () => {
     const runs = { write: 0, polish: 0, review: 0 };
     const build = () => dag({
       name: 'outer',
-      maxKickbacks: { polish: 1 },
       nodes: {
         inner: { retrySafe: true, job: innerWrite(runs) },
-        polish: { needs: 'inner', retrySafe: true, job: fnJob('polish', () => { runs.polish += 1; }) },
+        polish: {
+              refine: review({ rounds: 1 }), needs: 'inner', retrySafe: true, job: fnJob('polish', () => { runs.polish += 1; }) },
         review: {
-          needs: 'polish', acceptsKickbackTo: ['polish'], retrySafe: true,
+          needs: 'polish', sendsBackTo: ['polish'], retrySafe: true,
           job: fnJob('review', (ctx) => {
             runs.review += 1;
             return (ctx.graph?.attempt ?? 1) < 2 ? kickback('polish', 'not yet') : undefined;
@@ -1089,14 +1133,14 @@ describe('a recorded step whose file is missing', () => {
           retrySafe: true,
           job: dag({
             name: 'rounds',
-            maxKickbacks: { write: 2 },
             nodes: {
               write: {
+              refine: review({ rounds: 2 }),
                 retrySafe: true,
                 job: fnJob('write', (ctx) => { runs.write += 1; writeFileSync(join(ctx.workspace.dir, 'page.md'), `draft ${ctx.graph?.attempt}`); }),
               },
               review: {
-                needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+                needs: 'write', sendsBackTo: ['write'], retrySafe: true,
                 job: fnJob('review', (ctx) => {
                   runs.review += 1;
                   return (ctx.graph?.attempt ?? 1) < 2 ? kickback('write', 'not yet') : undefined;
@@ -1223,15 +1267,15 @@ describe('a recorded step whose file is missing', () => {
 
   const sentBack =(runs: { write: number; review: number }, retrySafe: boolean) => dag({
     name: 'rounds',
-    maxKickbacks: { write: 2 },
     nodes: {
       write: {
+              refine: review({ rounds: 2 }),
         file: 'page.md',
         retrySafe,
         job: fnJob('write', (ctx) => { runs.write += 1; writeFileSync(join(ctx.workspace.dir, 'page.md'), `draft ${runs.write}`); }),
       },
       review: {
-        needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+        needs: 'write', sendsBackTo: ['write'], retrySafe: true,
         job: fnJob('review', (ctx) => {
           runs.review += 1;
           return (ctx.graph?.attempt ?? 1) < 2 ? kickback('write', 'not yet') : undefined;
@@ -1294,15 +1338,15 @@ describe('a recorded step whose file is missing', () => {
     const runs = { write: 0, review: 0 };
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 2 },
       nodes: {
         write: {
+              refine: review({ rounds: 2 }),
           file: 'page.md',
           retrySafe: true,
           job: fnJob('write', (ctx) => { runs.write += 1; writeFileSync(join(ctx.workspace.dir, 'page.md'), `draft ${ctx.graph?.attempt}`); }),
         },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          needs: 'write', sendsBackTo: ['write'], retrySafe: true,
           job: fnJob('review', (ctx) => {
             runs.review += 1;
             return (ctx.graph?.attempt ?? 1) < 2 ? kickback('write', 'not yet') : undefined;
@@ -1325,15 +1369,15 @@ describe('a recorded step whose file is missing', () => {
     const runs = { write: 0, review: 0 };
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 1 },
       nodes: {
         write: {
+              refine: review({ rounds: 1 }),
           file: 'page.md',
           retrySafe: true,
           job: fnJob('write', (ctx) => { runs.write += 1; writeFileSync(join(ctx.workspace.dir, 'page.md'), `draft ${runs.write}`); }),
         },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          needs: 'write', sendsBackTo: ['write'], retrySafe: true,
           job: fnJob('review', (ctx) => {
             runs.review += 1;
             return readFileSync(join(ctx.workspace.dir, 'page.md'), 'utf8') === 'draft 2' ? undefined : kickback('write', 'not yet');
@@ -1357,15 +1401,15 @@ describe('a recorded step whose file is missing', () => {
     const runs = { write: 0, review: 0 };
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 1 },
       nodes: {
         write: {
+              refine: review({ rounds: 1 }),
           file: 'page.md',
           retrySafe: true,
           job: fnJob('write', (ctx) => { runs.write += 1; writeFileSync(join(ctx.workspace.dir, 'page.md'), `draft ${runs.write}`); }),
         },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          needs: 'write', sendsBackTo: ['write'], retrySafe: true,
           job: fnJob('review', (ctx) => {
             runs.review += 1;
             return readFileSync(join(ctx.workspace.dir, 'page.md'), 'utf8') === 'draft 2' ? undefined : kickback('write', 'not yet');
@@ -1392,9 +1436,9 @@ describe('a recorded step whose file is missing', () => {
   it('rebuilds a passed send-back\'s missing file with the feedback its round read', async () => {
     const build = () => dag({
       name: 'rounds',
-      maxKickbacks: { write: 2 },
       nodes: {
         write: {
+              refine: review({ rounds: 2 }),
           file: 'page.md',
           retrySafe: true,
           job: fnJob('write', (ctx) => {
@@ -1402,7 +1446,7 @@ describe('a recorded step whose file is missing', () => {
           }),
         },
         review: {
-          needs: 'write', acceptsKickbackTo: ['write'], retrySafe: true,
+          needs: 'write', sendsBackTo: ['write'], retrySafe: true,
           job: fnJob('review', (ctx) =>
             (readFileSync(join(ctx.workspace.dir, 'page.md'), 'utf8') === 'corrected draft' ? undefined : kickback('write', 'say who it is for'))),
         },
@@ -1472,7 +1516,7 @@ describe('a recorded step whose file is missing', () => {
     const path = recordTo();
     expect((await result(build(), { recordTo: path })).outcome.status).toBe('pass');
 
-    await cutAfter(path, (event) => event.kind === 'loop:condition' && event.which === 'until' && event.iteration === 2);
+    await cutAfter(path, reviewPhase(2));
     await unlink(join(cwd, 'page.md'));
     reviews = 1;
     const resumed = await result(build(), { recordTo: path, resume: true });
@@ -1508,7 +1552,7 @@ describe('a recorded step whose file is missing', () => {
     expect({ builds, reviews }).toEqual({ builds: 1, reviews: 1 });
 
     // The worker dies once round 1's build is checked and its review began.
-    await cutAfter(path, (event) => event.kind === 'loop:condition' && event.which === 'until' && event.iteration === 1);
+    await cutAfter(path, reviewPhase(1));
     await unlink(join(cwd, 'page.md'));
     expect((await result(build(), { recordTo: path, resume: true })).outcome.status).toBe('pass');
     expect({ builds, reviews }).toEqual({ builds: 2, reviews: 2 });
@@ -1710,9 +1754,9 @@ describe('a resume after a change the record does not match steps by', () => {
   function delivery(rules: string, judgeFile: string, seen: Seen): Job {
     return dag({
       name: 'delivery',
-      maxKickbacks: { build: judge(recordedJudge(judgeFile)) },
       nodes: {
         build: {
+              refine: review({ judge: judge(recordedJudge(judgeFile)) }),
           job: agentJob({
             label: 'build',
             engine: new MockEngine((request) => { seen.builds.push(request.prompt); return 'built'; }),
@@ -1722,7 +1766,7 @@ describe('a resume after a change the record does not match steps by', () => {
         },
         checks: { needs: 'build', job: fnJob('checks', () => { seen.checks += 1; }) },
         review: {
-          needs: ['checks', 'build'], acceptsKickbackTo: ['build'],
+          needs: ['checks', 'build'], sendsBackTo: ['build'],
           job: fnJob('review', () => {
             seen.reviews += 1;
             return seen.reviews < 4

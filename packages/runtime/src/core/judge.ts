@@ -1,7 +1,7 @@
 /**
  * A judge: a seat that answers typed questions about a piece of work and the
  * rounds spent on it so far, in place of a plain review-round count. Used on
- * a `workflow()` stage's `refine` and on a `dag()`'s `maxKickbacks`, between
+ * a `workflow()` stage's `refine` and in a `dag()` node's `review()`, between
  * a review's verdict and the send-back.
  *
  * The default question set and the routing rule below make a loop that was
@@ -20,17 +20,31 @@ import { normalizeFeedbackSeverity, revisionRequest } from './feedback.js';
 import type {
   FeedbackActionSeverity,
   FeedbackFinding,
+  FindingDecision,
   GoalRequirement,
   Job,
   Judge,
   JudgeAnswer,
+  JudgeCheck,
   JudgeQuestions,
   JobContext,
   JudgeQuestion,
+  JudgeRound,
+  JudgeWork,
   SkippedFinding,
 } from './types.js';
 
-export type { Judge, JudgeAnswer, JudgeQuestion, JudgeQuestions, SkippedFinding } from './types.js';
+export type {
+  FindingDecision,
+  Judge,
+  JudgeAnswer,
+  JudgeCheck,
+  JudgeQuestion,
+  JudgeQuestions,
+  JudgeRound,
+  JudgeWork,
+  SkippedFinding,
+} from './types.js';
 
 /**
  * The default question set: does the work hold for this use case, are the
@@ -79,12 +93,16 @@ export function stopQuestions(what = 'the draft'): JudgeQuestions {
 }
 
 /**
- * A judge for `refine` or `maxKickbacks`: `seat` runs with workspace mode
+ * A judge for `refine` or a node's `review()`: `seat` runs with workspace mode
  * none (it reads no file itself; everything it needs rides in the prompt),
  * and `questions` defaults to `stopQuestions()`. With no `cap`, the rounds
  * end when the judge stops them or the review passes. A `cap` is an
  * optional backstop: `cap: N` allows at most N refinements after the first
- * build, so N+1 builds in all. The judge is asked about the review of the
+ * build, so N+1 builds the reviews paid for. A failed check or a missing
+ * file sends the work back on the check budget instead (a `dag()` node's
+ * `checkRounds`; 3 on a `workflow()` stage a panel reviews), which the cap
+ * does not count.
+ * The judge is asked about the review of the
  * last build too, and only a stop that lets the work stand passes. `perFinding`
  * asks the judge to act on or skip each finding as well; it defaults to true
  * with the default questions and to false with a caller's own.
@@ -139,13 +157,6 @@ export function findingQuestions(findings: readonly FeedbackFinding[]): JudgeQue
   return questions;
 }
 
-/** The judge's decision on one finding. */
-export interface FindingDecision {
-  readonly id: string;
-  readonly decision: 'act' | 'skip';
-  readonly reason: string;
-}
-
 export function isJudge(value: unknown): value is Judge {
   return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'judge';
 }
@@ -157,33 +168,6 @@ export function countBySeverity(findings: readonly FeedbackFinding[]): Record<Fe
   const counts = Object.fromEntries(SEVERITIES.map((severity) => [severity, 0])) as Record<FeedbackActionSeverity, number>;
   for (const finding of findings) counts[normalizeFeedbackSeverity(finding.severity)] += 1;
   return counts;
-}
-
-/** One round of the work the judge is watching converge. */
-export interface JudgeRound {
-  readonly round: number;
-  readonly findings: readonly FeedbackFinding[];
-  readonly counts: Readonly<Record<FeedbackActionSeverity, number>>;
-  /**
-   * Lines added or removed since the judge last read the work: in the file,
-   * when the target names one, or else in the git workspace.
-   */
-  readonly changedLines?: number;
-  /** The git workspace's files as the judge read them, when it is a git repository. */
-  readonly tree?: string;
-  /** What the judge decided about this round: its reason, and its decision on each finding when it made one. */
-  readonly judged?: { readonly reason: string; readonly findings?: readonly FindingDecision[] };
-}
-
-/** One check's result in the round the judge reads: a step that ran a command. */
-export interface JudgeCheck {
-  /** The step's name. */
-  readonly name: string;
-  /** The command it ran, when the step is a command. */
-  readonly command?: string;
-  readonly status: Outcome['status'];
-  /** The command's output, when the check did not pass. */
-  readonly output?: string;
 }
 
 /**
@@ -218,20 +202,6 @@ export interface JudgeState {
   readonly cap?: number;
   /** This round's review is the last one the cap allows: no build round follows it. */
   readonly lastRound?: true;
-}
-
-/** What the work under review is for, and the file a judge reads, when there is one. */
-export interface JudgeWork {
-  /** The brief or ticket text the work answers. */
-  readonly brief?: string;
-  readonly useCase?: string;
-  /** The target's own `desc` and `gate`. */
-  readonly desc?: string;
-  readonly gate?: string;
-  /** The file being refined, relative to the workspace. */
-  readonly file?: string;
-  /** The git workspace's files when the work began, when it is a git repository. */
-  readonly base?: string;
 }
 
 /** Lines added or removed between two drafts (a set difference, not a true diff, cheap and enough to show trend). */

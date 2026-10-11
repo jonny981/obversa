@@ -21,6 +21,7 @@ import {
   not,
   passed,
   pipeline,
+  review,
   run,
 } from '../src/api.ts';
 import type { CallbackClient, CallbackRequest, Job, JsonValue, LoopEvent, Outcome, Sha256Digest } from '../src/api.ts';
@@ -192,12 +193,11 @@ describe('commandJob', () => {
     let implementRuns = 0;
     const { outcome } = await run(dag({
       name: 'command-back',
-      maxKickbacks: 1,
       nodes: {
-        implement: fnJob('implement', () => { implementRuns += 1; return `attempt ${implementRuns}`; }),
+        implement: { refine: review({ rounds: 1 }), job: fnJob('implement', () => { implementRuns += 1; return `attempt ${implementRuns}`; }) },
         test: {
           needs: 'implement',
-          acceptsKickbackTo: ['implement'],
+          sendsBackTo: ['implement'],
           job: commandJob(
             'test',
             [node, '-e', `process.exit(process.env.RUNS === '1' ? 1 : 0)`],
@@ -407,10 +407,10 @@ describe('approval', () => {
     const asked: string[] = [];
     let implementRuns = 0;
     const { outcome } = await run(pipeline('ship', [
-      { name: 'implement', job: fnJob('implement', () => { implementRuns += 1; return `report.csv v${implementRuns}`; }) },
+      { name: 'implement', refine: review({ rounds: 1 }), job: fnJob('implement', () => { implementRuns += 1; return `report.csv v${implementRuns}`; }) },
       {
         name: 'approve',
-        acceptsKickbackTo: ['implement'],
+        sendsBackTo: ['implement'],
         job: approval('approve', {
           question: 'Ship this change?',
           target: 'implement',
@@ -421,7 +421,7 @@ describe('approval', () => {
           },
         }),
       },
-    ], { maxKickbacks: 1 }));
+    ]));
     expect(outcome.status).toBe('pass');
     expect(implementRuns).toBe(2);
     expect(new Set(asked).size).toBe(2);
@@ -485,9 +485,9 @@ describe('approval', () => {
     const client = createCallbackClient();
     let implementRuns = 0;
     const ship = pipeline('ship', [
-      { name: 'implement', job: fnJob('implement', () => { implementRuns += 1; return `report.csv v${implementRuns}`; }) },
-      { name: 'approve', acceptsKickbackTo: ['implement'], job: approval('approve', { question: 'Ship this change?', target: 'implement' }) },
-    ], { maxKickbacks: 1 });
+      { name: 'implement', refine: review({ rounds: 1 }), job: fnJob('implement', () => { implementRuns += 1; return `report.csv v${implementRuns}`; }) },
+      { name: 'approve', sendsBackTo: ['implement'], job: approval('approve', { question: 'Ship this change?', target: 'implement' }) },
+    ]);
     const first = await run(ship, { callbacks: client });
     expect(first.outcome.status).toBe('paused');
     const request = client.listPending()[0]!;

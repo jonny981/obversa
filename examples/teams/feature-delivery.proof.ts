@@ -68,35 +68,32 @@ const act = 'A caller needs to know what it passed to fix the call.';
 const skip = 'A comment on a three-line function is taste.';
 
 // The stand-in replays each command line tool's calls in order. Claude is
-// the builder and the first reviewer, so it also merges the reviews; Codex
-// is the goal check and the second reviewer; OpenCode runs Gemini, the
-// third reviewer.
+// the builder. Codex is the goal check, a reviewer and a voter; OpenCode
+// runs Gemini and Grok runs Grok, the other reviewers — and Grok's seat
+// also merges the reviews.
 //
-// Round 1: the first build doubles, the test goes red, and the second
-// build passes the test. The goal check finds the TypeError missing, so
-// the round goes back with no review and no judge.
-// Round 2: the goal check passes. The reviewers review at the same time:
-// Claude and Codex raise the same problem in other words, and Gemini, in
-// a pass, raises a comment. Claude's seat merges the first two; each
+// Round 1: the first build doubles and the test goes red, so the round
+// goes straight back with the test's output.
+// Round 2: the test passes and the goal check finds the TypeError missing,
+// so the round goes back with no review and no judge.
+// Round 3: the goal check passes. The reviewers review at the same time:
+// Codex and Grok raise the same problem in other words, and Gemini, in
+// a pass, raises a comment. Grok's seat merges the first and third; each
 // reviewer votes on what it did not raise. The judge acts on the merged
 // finding and skips the comment.
-// Round 3: the goal check and all three reviewers pass.
+// Round 4: the goal check and all three reviewers pass.
 const featureScript = {
   claude: [
-    { writes: { 'src/triple.mjs': doubles }, reply: 'wrote src/triple.mjs' },
-    { writes: { 'src/triple.mjs': noCheck }, reply: 'fixed the multiplier the test named' },
-    { writes: { 'src/triple.mjs': plainError }, reply: 'added the TypeError' },
-    { reply: reply({ status: 'revise', summary: 'The error message is too thin.', findings: [{ severity: 'should-fix', evidence: message, recommendation: 'Name the value in the message.' }] }) },
-    { reply: reply({ groups: [{ ids: ['f1', 'f2'], evidence: 'f1', fix: 'f2' }] }) },
-    { reply: reply({ votes: [{ id: 'm2', vote: 'disagree', reason: 'The function is three lines; a comment repeats them.' }] }) },
-    { writes: { 'src/triple.mjs': namedError }, reply: 'named the type in the message' },
-    { reply: pass('The change meets the ticket.') },
+    { writes: { 'src/triple.mjs': doubles }, reply: pass('wrote src/triple.mjs') },
+    { writes: { 'src/triple.mjs': noCheck }, reply: pass('fixed the multiplier the test named') },
+    { writes: { 'src/triple.mjs': plainError }, reply: pass('added the TypeError') },
+    { writes: { 'src/triple.mjs': namedError }, reply: pass('named the type in the message') },
   ],
   codex: [
     { reply: reply({ requirements: [triples, { requirement: 'triple throws a TypeError when its input is not a number', verdict: 'unmet', evidence: 'src/triple.mjs has no check on its input' }] }) },
     { reply: reply({ requirements: [triples, throws] }) },
-    { reply: reply({ status: 'revise', summary: 'One gap in the error.', findings: [{ severity: 'should-fix', evidence: messageAgain, recommendation: 'Say what it got: triple expects a number, got string.' }] }) },
-    { reply: reply({ votes: [{ id: 'm2', vote: 'agree', reason: 'A comment helps a new reader.' }] }) },
+    { reply: reply({ status: 'revise', summary: 'One gap in the error.', findings: [{ severity: 'should-fix', evidence: message, recommendation: 'Name the value in the message.' }] }) },
+    { reply: reply({ votes: [{ id: 'm2', vote: 'disagree', reason: 'The function is three lines; a comment repeats them.' }] }) },
     { reply: reply({ requirements: [triples, throws] }) },
     { reply: pass('The change meets the ticket.') },
   ],
@@ -105,9 +102,15 @@ const featureScript = {
     { reply: reply({ votes: [{ id: 'm1', vote: 'agree', reason: 'The message should name what it got.' }] }) },
     { reply: pass('The change meets the ticket.') },
   ],
+  grok: [
+    { reply: reply({ status: 'revise', summary: 'The error message is too thin.', findings: [{ severity: 'should-fix', evidence: messageAgain, recommendation: 'Say what it got: triple expects a number, got string.' }] }) },
+    { reply: reply({ groups: [{ ids: ['f1', 'f3'], evidence: 'f1', fix: 'f3' }] }) },
+    { reply: reply({ votes: [{ id: 'm2', vote: 'agree', reason: 'A comment helps a new reader.' }] }) },
+    { reply: pass('The change meets the ticket.') },
+  ],
 };
 
-// The judge is asked once, after round 2. It decides each finding left
+// The judge is asked once, after round 3. It decides each finding left
 // after the vote, in the order the synthesis lists them.
 const judgeAnswers = [{
   holds: { type: 'noul', noul: 0.3 },
@@ -124,13 +127,14 @@ interface RecordedEvent {
   readonly phase?: string;
   readonly attempt?: number;
   readonly label?: string;
+  readonly path?: readonly string[];
   readonly from?: string;
   readonly to?: string;
   readonly accepted?: boolean;
   readonly requirements?: readonly { requirement: string; verdict: string }[];
   readonly entries?: readonly { result: string; finding: { evidence: string; raisedBy?: readonly string[]; votes?: readonly { reviewer: string; vote: string }[] } }[];
   readonly findings?: readonly { decision: string; reason: string }[];
-  readonly outcome?: { status: string; summary?: string; data?: unknown };
+  readonly outcome?: { status: string; summary?: string; data?: unknown; revision?: unknown };
 }
 
 interface Seeded {
@@ -153,7 +157,7 @@ async function seed(name: string, files: Readonly<Record<string, string>>, scrip
   // The stand-ins sit beside the workspace, not inside it: a read-only
   // reviewer's workspace guard refuses a symlink under the workspace that
   // resolves outside it.
-  for (const tool of ['claude', 'codex', 'opencode']) await symlink(standIn, join(bin, tool));
+  for (const tool of ['claude', 'codex', 'opencode', 'grok']) await symlink(standIn, join(bin, tool));
   // Each ticket runs in a worktree forked from HEAD, so the seats' script
   // has to be committed for the worktree to have it.
   const git = (...args: string[]) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
@@ -196,8 +200,11 @@ function readRecord(dir: string, name: string): RecordedEvent[] {
 /** Where a node's run starts in the record, one index per attempt. */
 const nodeStarts = (record: RecordedEvent[], node: string) =>
   record.flatMap((e, at) => (e.kind === 'dag:node' && e.phase === 'start' && e.node === node ? [at] : []));
+/** Where a job starts in the record, one index per run of it, inside `step` when given. */
+const jobStarts = (record: RecordedEvent[], label: string, step?: string) =>
+  record.flatMap((e, at) => (e.kind === 'job:start' && e.label === label && (step === undefined || e.path?.at(-1) === step) ? [at] : []));
 const reviewerStarts = (record: RecordedEvent[]) =>
-  record.flatMap((e, at) => (e.kind === 'job:start' && e.label?.startsWith('review-') ? [at] : []));
+  record.flatMap((e, at) => (e.kind === 'job:start' && /^build-(codex|gemini|grok)$/.test(e.label ?? '') ? [at] : []));
 
 const sha256 = async (path: string) => createHash('sha256').update(await readFile(path)).digest('hex');
 
@@ -209,17 +216,23 @@ const prompts = (dir: string, role: string) => readFileSync(join(dir, '.obversa-
 /** The seven steps, in order, from the record of one ticket. */
 async function assertSevenSteps(seeded: Seeded, attended: boolean) {
   const record = readRecord(seeded.dir, 'feature-delivery');
-  const builds = nodeStarts(record, 'build');
-  assert.equal(builds.length, 3, 'the builder builds three rounds: the goal check sends one back, the judge one');
+  const builds = jobStarts(record, 'build', 'build-review');
+  assert.equal(builds.length, 4, 'the builder builds four rounds: the red test sends one back, the goal check one, the judge one');
   const roundOf = (at: number) => builds.filter((start) => start < at).length;
 
-  // 1 and 2. Build and checks. In round 1 the test goes red once and the
-  // builder runs again with its output, with no model in between.
-  const tests = record.filter((e) => e.kind === 'job:end' && e.label === 'test');
+  // 1 and 2. Build and checks. The ticket's tests run ahead of everything
+  // else each round; in round 1 the test goes red once and the builder
+  // runs again with its output, with no model in between.
+  const tests = record.filter((e) => e.kind === 'job:end' && e.label === 'build-check-1');
   assert.deepEqual(tests.map((e) => e.outcome!.status), ['fail', 'pass', 'pass', 'pass']);
-  const red = record.filter((e) => e.kind === 'loop:review' && e.outcome!.status !== 'pass');
+  const sendBacks = record.filter((e) => e.kind === 'loop:review' && e.accepted === true);
+  assert.equal(sendBacks.length, 3, 'three send-backs inside the node: the red test, the unmet requirement, the judge');
+  // A red check's outcome carries no revision; the goal's and the judge's do.
+  // Only the red test draws on checkRounds — a review verdict spends a round.
+  const checkBacks = sendBacks.filter((e) => e.outcome!.revision === undefined);
+  assert.equal(checkBacks.length, 1, 'only the red test draws on checkRounds');
+  const red = sendBacks.filter((e) => /exited 1/.test(e.outcome!.summary ?? ''));
   assert.equal(red.length, 1, 'one red test in the whole run');
-  assert.equal(red[0]!.accepted, true, 'the red test goes back to the builder');
   assert.match(red[0]!.outcome!.summary ?? '', /exited 1[\s\S]*command output/, "the builder gets the test's output");
 
   // What the builder was sent each time. The first build has the ticket
@@ -229,33 +242,32 @@ async function assertSevenSteps(seeded: Seeded, attended: boolean) {
   assert.ok(!toBuilder[0]!.includes('Feedback to address'), 'the first build has nothing to address');
   assert.ok(toBuilder[1]!.includes('not ok 1 - triple returns three times its input') && toBuilder[1]!.includes('6 !== 9'), `the retry has the red test's output: ${toBuilder[1]}`);
 
-  // 3. Goal check. It runs every round before any reviewer starts. Round 1
-  // finds the TypeError unmet and no reviewer runs that round.
+  // 3. Goal check. It runs every round after the checks and before any
+  // reviewer starts. Round 2 finds the TypeError unmet and no reviewer
+  // runs that round.
   const goals = record.flatMap((e, at) => (e.kind === 'goal:check' ? [{ at, e }] : []));
-  assert.deepEqual(goals.map(({ at }) => roundOf(at)), [1, 2, 3], 'one goal check per round');
+  assert.deepEqual(goals.map(({ at }) => roundOf(at)), [2, 3, 4], 'one goal check per round after the first');
   assert.deepEqual(goals.map(({ e }) => e.requirements!.map((r) => r.verdict)), [['met', 'unmet'], ['met', 'met'], ['met', 'met']]);
   const reviews = reviewerStarts(record);
-  assert.equal(reviews.filter((at) => roundOf(at) === 1).length, 0, 'no reviewer runs in a round the goal check sends back');
+  assert.equal(reviews.filter((at) => roundOf(at) < 3).length, 0, 'no reviewer runs in a round a check or the goal sends back');
   for (const { at } of goals.slice(1)) {
     const round = reviews.filter((start) => roundOf(start) === roundOf(at));
     assert.equal(round.length, 3, `three reviewers in round ${roundOf(at)}`);
     assert.ok(round.every((start) => start > at), `the goal check ran before the reviews in round ${roundOf(at)}`);
   }
   assert.ok(toBuilder[2]!.includes('triple throws a TypeError when its input is not a number: src/triple.mjs has no check on its input'), `the next round has the unmet requirement: ${toBuilder[2]}`);
-  const kickbacks = record.filter((e) => e.kind === 'dag:kickback');
-  assert.deepEqual(kickbacks.map((e) => [e.from, e.to, e.accepted]), [['goal', 'build', true], ['review', 'build', true]]);
 
-  // 4 and 5. Review battery and synthesis. Claude and Codex named the same
+  // 4 and 5. Review battery and synthesis. Codex and Grok named the same
   // problem, merged into one; Gemini's comment is disputed by the vote.
   const syntheses = record.filter((e) => e.kind === 'review:synthesis');
-  assert.equal(syntheses.length, 1, 'round 3 has no findings to merge');
+  assert.equal(syntheses.length, 1, 'round 4 has no findings to merge');
   const [merged, disputed] = syntheses[0]!.entries!;
   assert.equal(merged!.result, 'kept');
-  assert.deepEqual(merged!.finding.raisedBy, ['claude', 'codex']);
+  assert.deepEqual(merged!.finding.raisedBy, ['codex', 'grok']);
   assert.equal(merged!.finding.evidence, message);
   assert.equal(disputed!.result, 'disputed');
   assert.deepEqual(disputed!.finding.raisedBy, ['gemini']);
-  assert.deepEqual(disputed!.finding.votes!.map((v) => `${v.reviewer} ${v.vote}`), ['claude disagree', 'codex agree']);
+  assert.deepEqual(disputed!.finding.votes!.map((v) => `${v.reviewer} ${v.vote}`), ['codex disagree', 'grok agree']);
 
   // 6. Judge. Asked once, after the synthesis, never about the goal check.
   // It acts on the merged finding and skips the comment.
@@ -270,13 +282,14 @@ async function assertSevenSteps(seeded: Seeded, attended: boolean) {
   const landed = await sha256(join(seeded.dir, 'src/triple.mjs'));
   assert.equal(await readFile(join(seeded.dir, 'src/triple.mjs'), 'utf8'), namedError, 'the round 3 change landed');
   const approve = record.filter((e) => e.kind === 'dag:node' && e.phase === 'done' && e.node === 'approve');
+  const rounds = { builds: builds.length, checkBacks: checkBacks.length, reviewBacks: sendBacks.length - checkBacks.length };
   if (!attended) {
     assert.equal(approve.length, 0, 'unattended, nobody is asked');
-    return { landed };
+    return { landed, rounds };
   }
-  // In rounds 1 and 2 an earlier node failed, so approve ended without asking.
+  // The build node's rounds end once it passes, so approve runs once.
   const approved = approve.filter((e) => e.outcome!.status === 'pass');
-  assert.equal(approved.length, 1, 'the person is asked once, in the last round');
+  assert.equal(approved.length, 1, 'the person is asked once, after the last round');
   assert.equal(nodeStarts(record, 'approve').length, 1, 'approve starts once');
   // The question names every file that landed, the ticket's or not, with
   // its bytes, and every file the run deleted.
@@ -288,7 +301,7 @@ async function assertSevenSteps(seeded: Seeded, attended: boolean) {
   }));
   assert.equal(approved[0]!.outcome!.summary, `approved: Ship these bytes? ${shipped.join(', ')}`, 'the approval names every landed file and its bytes');
   assert.ok(nodeStarts(record, 'approve')[0]! > reviews.at(-1)!, 'the approval comes after the last review');
-  return { landed, question: approved[0]!.outcome!.summary!, approval: approved[0]!.outcome!.data };
+  return { landed, question: approved[0]!.outcome!.summary!, approval: approved[0]!.outcome!.data, rounds };
 }
 
 const root = await mkdtemp(join(tmpdir(), 'obversa-feature-delivery-proof-'));
@@ -386,10 +399,8 @@ try {
     'test/double.test.mjs': nodeTest('double', "test('double returns twice its input', () => assert.equal(double(3), 6));"),
   }, {
     claude: [
-      { writes: { 'src/triple.mjs': namedError }, reply: 'added triple' },
-      { reply: pass('The change meets the ticket.') },
-      { writes: { 'src/double.mjs': namedError.replaceAll('triple', 'double').replace('* 3', '* 2') }, reply: 'added double' },
-      { reply: pass('The change meets the ticket.') },
+      { writes: { 'src/triple.mjs': namedError }, reply: pass('added triple') },
+      { writes: { 'src/double.mjs': namedError.replaceAll('triple', 'double').replace('* 3', '* 2') }, reply: pass('added double') },
     ],
     codex: [
       { reply: reply({ requirements: [triples, throws] }) },
@@ -397,15 +408,16 @@ try {
       { reply: reply({ requirements: [met('double returns twice its input', 'src/double.mjs returns value * 2'), met('double throws a TypeError when its input is not a number', 'src/double.mjs:2 throws one')] }) },
       { reply: pass('The change meets the ticket.') },
     ],
-    opencode: [{ reply: pass('The change meets the ticket.') }],
+    opencode: [{ reply: pass('The change meets the ticket.') }, { reply: pass('The change meets the ticket.') }],
+    grok: [{ reply: pass('The change meets the ticket.') }, { reply: pass('The change meets the ticket.') }],
   });
   const backlogRun = printed(runExample(backlog, 'feature-team-backlog', ['--unattended']).stdout) as { delivered: { ticket: string; status: string }[] };
   assert.deepEqual(backlogRun.delivered.map((d) => [d.ticket, d.status]), [['001-triple.md', 'pass'], ['002-double.md', 'pass']]);
   for (const name of ['001-triple', '002-double']) {
     assert.ok(existsSync(join(backlog.dir, 'backlog/done', `${name}.md`)), `${name} moved to done`);
     const record = readRecord(backlog.dir, name);
-    assert.equal(nodeStarts(record, 'build').length, 1, `${name}: one build`);
-    assert.deepEqual(record.filter((e) => e.kind === 'job:end' && e.label === 'test').map((e) => e.outcome!.status), ['pass'], `${name}: its own test passed the first time`);
+    assert.equal(jobStarts(record, 'build', 'build-review').length, 1, `${name}: one build`);
+    assert.deepEqual(record.filter((e) => e.kind === 'job:end' && e.label === 'build-check-1').map((e) => e.outcome!.status), ['pass'], `${name}: its own test passed the first time`);
     assert.equal(record.filter((e) => e.kind === 'goal:check').length, 1, `${name}: one goal check`);
     assert.equal(record.filter((e) => e.kind === 'run:end').at(-1)?.outcome?.status, 'pass', `${name}: the run passed`);
   }
@@ -415,7 +427,12 @@ try {
 
   console.log(JSON.stringify({
     status: 'pass',
-    rounds: 3,
+    // Four builds: the first, and one per accepted send-back. Only the red
+    // test draws on checkRounds; the unmet goal and the judge's acted
+    // finding are review verdicts, which spend the node's rounds.
+    builds: attendedSteps.rounds.builds,
+    checkBacks: attendedSteps.rounds.checkBacks,
+    reviewBacks: attendedSteps.rounds.reviewBacks,
     goalChecks: ['unmet', 'met', 'met'],
     synthesis: ['kept', 'disputed'],
     judge: ['act', 'skip'],

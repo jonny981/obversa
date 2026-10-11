@@ -61,7 +61,6 @@ describe('an exhausted node in a dag', () => {
     let planned = 0;
     const result = await run(dag({
       name: 'publish',
-      maxKickbacks: 1,
       nodes: {
         plan: fnJob('plan', async () => { planned += 1; return { status: 'pass' }; }),
         draft: {

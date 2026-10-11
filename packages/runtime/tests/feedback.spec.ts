@@ -14,6 +14,7 @@ import {
   reviewContext,
   revisionRequest,
   confidenceCondition,
+  review,
   LoopError,
 } from '../src/api.ts';
 import type { AgentRequest, Condition, RunOptions } from '../src/api.ts';
@@ -109,16 +110,18 @@ describe('feedback protocol', () => {
     const { outcome } = await run(
       dag({
         name: 'ship',
-        maxKickbacks: 1,
         nodes: {
-          implementation: fnJob('implementation', async (ctx) => {
-            seen.push('implementation');
-            implementationFeedback = ctx.lastReview?.revision?.reason;
-            return { status: 'pass' };
-          }),
+          implementation: {
+            refine: review({ rounds: 1 }),
+            job: fnJob('implementation', async (ctx) => {
+              seen.push('implementation');
+              implementationFeedback = ctx.lastReview?.revision?.reason;
+              return { status: 'pass' };
+            }),
+          },
           review: {
             needs: ['implementation'],
-            acceptsKickbackTo: ['implementation'],
+            sendsBackTo: ['implementation'],
             job: fnJob('review', async () => {
               seen.push('review');
               reviewRuns += 1;

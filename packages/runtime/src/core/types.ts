@@ -108,10 +108,11 @@ export interface Outcome {
    * Structured feedback asking an earlier unit of work for another pass, and the
    * single channel for it. When `revision.target` is set, the enclosing `dag`
    * re-runs that node and its transitive dependents with `revision.reason`
-   * threaded in as `lastReview`, bounded by `DagConfig.maxKickbacks` (default
-   * 0 — ignored). The re-run happens in execution only; the graph stays acyclic.
-   * A numeric budget or a judge's `cap` bounds the re-runs; a judge with no
-   * cap re-runs until it stops the rounds or the review passes. Produce one with
+   * threaded in as `lastReview`, bounded by the target node's `refine` and
+   * allowed only where the sender declares it in `sendsBackTo`. The re-run
+   * happens in execution only; the graph stays acyclic. `rounds` or a judge's
+   * `cap` bounds the re-runs; a judge with no cap re-runs until it stops the
+   * rounds or the review passes. Produce one with
    * `revisionRequest({ target, findings })` or `kickback(to, reason)`.
    */
   revision?: RevisionRequest;
@@ -242,6 +243,54 @@ export interface GoalRequirement {
   readonly verdict: 'met' | 'unmet';
   /** For `met`, a file and line or a test that shows it; for `unmet`, what is missing. */
   readonly evidence: string;
+}
+
+/** The judge's decision on one finding. */
+export interface FindingDecision {
+  readonly id: string;
+  readonly decision: 'act' | 'skip';
+  readonly reason: string;
+}
+
+/** One round of the work the judge is watching converge. */
+export interface JudgeRound {
+  readonly round: number;
+  readonly findings: readonly FeedbackFinding[];
+  readonly counts: Readonly<Record<FeedbackActionSeverity, number>>;
+  /**
+   * Lines added or removed since the judge last read the work: in the file,
+   * when the target names one, or else in the git workspace.
+   */
+  readonly changedLines?: number;
+  /** The git workspace's files as the judge read them, when it is a git repository. */
+  readonly tree?: string;
+  /** What the judge decided about this round: its reason, and its decision on each finding when it made one. */
+  readonly judged?: { readonly reason: string; readonly findings?: readonly FindingDecision[] };
+}
+
+/** One check's result in the round the judge reads: a step that ran a command. */
+export interface JudgeCheck {
+  /** The step's name. */
+  readonly name: string;
+  /** The command it ran, when the step is a command. */
+  readonly command?: string;
+  readonly status: Outcome['status'];
+  /** The command's output, when the check did not pass. */
+  readonly output?: string;
+}
+
+/** What the work under review is for, and the file a judge reads, when there is one. */
+export interface JudgeWork {
+  /** The brief or ticket text the work answers. */
+  readonly brief?: string;
+  readonly useCase?: string;
+  /** The target's own `desc` and `gate`. */
+  readonly desc?: string;
+  readonly gate?: string;
+  /** The file being refined, relative to the workspace. */
+  readonly file?: string;
+  /** The git workspace's files when the work began, when it is a git repository. */
+  readonly base?: string;
 }
 
 export type RevisionRerun = 'target-and-dependents';
@@ -560,8 +609,122 @@ export interface LoopConfig {
 // generalised — sequential stages, parallel stages, and arbitrary dependencies
 // are all expressed as nodes + `needs`.
 
+/**
+ * One seat on a review panel: the seat itself, the name its verdicts carry,
+ * and the part of the work it reads when the panel divides the work by scope.
+ */
+export interface ReviewerSeat {
+  readonly name: string;
+  readonly seat: TeamSeat;
+  readonly scope?: string;
+}
+
+/**
+ * What `review()` takes. The node's checks run first each round, in order; a
+ * red one sends the work straight back with no reviewers and no judge that
+ * round. The goal check follows, then the reviewers as one panel, then the
+ * judge between their verdict and the send-back.
+ */
+export interface ReviewConfig {
+  /**
+   * Commands run through `commandJob` as it ships: a string (no shell syntax)
+   * or an argv array. A failed check sends the work back under `checkRounds`
+   * and skips the reviewers for that round; no judge or vote waives it.
+   */
+  readonly checks?: readonly (string | readonly string[])[];
+  /**
+   * The job `goalCheck()` returns, run after the checks and before the
+   * reviewers each round. An unmet requirement sends the work back with its
+   * evidence, and no judge decides it.
+   */
+  readonly goal?: Job;
+  /**
+   * The panel that reviews the work each round. Every reviewer must be a
+   * different model family than the node's agent and each other's, as the
+   * panel rules require.
+   */
+  readonly reviewers?: readonly (TeamSeat | ReviewerSeat)[];
+  /**
+   * How many reviewers must pass for a round to pass: `'all'` (the default)
+   * or a count, as `reviewPanel`'s `pass`.
+   */
+  readonly pass?: 'all' | number;
+  /**
+   * As `reviewPanel`'s `synthesise`: this seat, or with `true` the first
+   * reviewer's, merges the reviews into one before anything reads them.
+   */
+  readonly synthesise?: TeamSeat | true;
+  /**
+   * The value `judge()` returns: a seat asked about each round between the
+   * review's verdict and the send-back. Its own `cap` bounds the rounds; with
+   * none, the rounds end when the judge stops them or the review passes.
+   */
+  readonly judge?: Judge;
+  /**
+   * The most review send-backs after the first build when there is no
+   * judge: `rounds: N` allows N, so the review budget pays for at most N+1
+   * builds. A red check or a missing file can add up to `checkRounds`
+   * more. Required when `judge` is left out, and not allowed with one.
+   */
+  readonly rounds?: number;
+  /**
+   * The most times a failed check sends the work back. Default 3. A red
+   * check draws on this count, not on `rounds` or the judge's cap; an
+   * unmet goal counts as a review round, the same round a send-back from
+   * a standalone goal check counts as.
+   */
+  readonly checkRounds?: number;
+  /**
+   * The seat that repairs the work after a rejected round, on the kept
+   * findings under the node's own `writes` scope. Default the node's `agent`.
+   */
+  readonly fixer?: TeamSeat;
+}
+
+/**
+ * The value `review()` returns: what a `dag()` node's `refine` holds — the
+ * checks, goal check, reviewers, judge and round limits of the refinement the
+ * node owns, including the send-backs later nodes may declare to it.
+ */
+export interface Review {
+  readonly kind: 'review';
+  readonly checks: readonly (string | readonly string[])[];
+  readonly goal?: Job;
+  readonly reviewers?: readonly ReviewerSeat[];
+  readonly pass: 'all' | number;
+  readonly synthesise?: TeamSeat | true;
+  readonly judge?: Judge;
+  readonly rounds?: number;
+  readonly checkRounds: number;
+  readonly fixer?: TeamSeat;
+}
+
 export interface DagNode {
-  job: Job;
+  /**
+   * What the node runs: `agent` for a seat that does the work, `job` for a
+   * node that runs code (`commandJob`, `fnJob`, a nested `dag()`). A node
+   * takes one or the other, never both and never neither.
+   */
+  job?: Job;
+  /**
+   * The seat that does the work, compiled to an `agentJob` whose prompt is
+   * assembled from the graph's brief and the node's `desc` and `gate`, with
+   * the findings the kept send-backs carry. `writes` scopes what it may write;
+   * left out, the agent reads but does not write.
+   */
+  agent?: TeamSeat;
+  /**
+   * What the agent may write: `'workspace'` for the whole run workspace, or a
+   * list of files it owns. A declaration, not a sandbox: it feeds the
+   * unchanged-work check and tells the reviewers what to read.
+   */
+  writes?: 'workspace' | string | readonly string[];
+  /**
+   * The refinement the node owns, built by `review()`: its own checks, goal
+   * check and reviewers each round, and the policy — `rounds` or `judge` —
+   * that also governs the send-backs later nodes declare to it.
+   */
+  refine?: Review;
   /**
    * Names of nodes that must finish before this one runs; a required producer
    * must pass, a failed optional producer does not block.
@@ -596,17 +759,18 @@ export interface DagNode {
   maxOutputBytes?: number;
   /**
    * The nodes this node may send work back to, declared when the graph is
-   * built; each must be one of the nodes it depends on. A send-back to a
-   * node not in this list fails this node with an error that names both,
-   * whatever the dag's `maxKickbacks`.
+   * built; each must be one of the nodes it depends on, and each must declare
+   * `refine`, whose `rounds` or `judge` governs what it receives. A send-back
+   * to a node not in this list fails this node with an error that names both.
    */
-  acceptsKickbackTo?: string[];
+  sendsBackTo?: string | string[];
   /**
    * The file this node builds, relative to the workspace. A judge of work
    * sent back to this node reads it as it stands, and each earlier round it
    * was asked about records how many lines that round changed. A writer sent
-   * back to this node that leaves this file as it was returns the work
-   * unchanged, whatever else it writes. Nothing checks that the node writes
+   * back to this node that leaves its scope as it was returns the work
+   * unchanged: that check reads `writes` when the node declares it, and this
+   * file only when `writes` is left out. Nothing checks that the node writes
    * it, but a resume runs a finished node again when the file is missing,
    * and asks a person first when the node is not `retrySafe`.
    */
@@ -640,7 +804,7 @@ export interface JudgeAnswer {
 
 /**
  * A judge, in place of a plain round count, on a `workflow()` stage's
- * `refine` or a `dag()`'s `maxKickbacks`: a seat that answers typed
+ * `refine` or inside a `dag()` node's `review()`: a seat that answers typed
  * questions about the work and the rounds so far, between a review's
  * verdict and the send-back. With no `cap`, the rounds end when the judge
  * stops them or the review passes. A `cap` is an optional backstop:
@@ -661,8 +825,6 @@ export interface Judge {
   readonly perFinding: boolean;
   readonly interaction?: InteractionBinding;
 }
-
-export type KickbackBudget = number | Readonly<Record<string, number | Judge>>;
 
 export interface DagConfig {
   name: string;
@@ -691,16 +853,9 @@ export interface DagConfig {
    * conflict and writes a synthesised merge body.
    */
   onConflict?: 'fail' | 'synthesize';
-  /**
-   * Re-run budget for cross-stage feedback. A number keeps the graph-wide
-   * counter: that many send-backs in all. A map gives each target node its
-   * own: `{ target: N }` allows N refinements, so at most N+1 runs of it.
-   * Default 0 means kickbacks are ignored and behaviour is unchanged.
-   */
-  maxKickbacks?: KickbackBudget;
-  /** What the work is for, in a sentence or two. A judge in `maxKickbacks` reads it. */
+  /** What the work is for, in a sentence or two. A node's `refine` judge reads it. */
   useCase?: string;
-  /** The brief or ticket text the work answers. A judge in `maxKickbacks` reads it. */
+  /** The brief or ticket text the work answers. A node's `refine` judge reads it. */
   brief?: string;
 }
 

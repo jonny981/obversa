@@ -4,12 +4,13 @@
  * may follow a review.
  *
  * A round is one build and the review of it; round 1 is the first build.
- * `refinements` is how many more builds the policy allows after the first:
- * `refine: N`, `maxKickbacks: { target: N }` and a judge's `cap: N` all allow
- * N, so N+1 builds in all. A bare `maxKickbacks: N` is N send-backs in the
- * whole graph, not N per target. With no limit (a judge with no cap),
- * another build may always follow, and the judge or a passing review ends the
- * rounds.
+ * `refinements` is how many more builds the review policy allows after the
+ * first: `refine: N`, a node `review()`'s `rounds: N` and a judge's
+ * `cap: N` all allow N, so N+1 builds in all on this count. A failed check
+ * or a missing file sends the work back on the `checkRounds` budget, which
+ * adds builds this count does not bound. With no limit (a judge with no
+ * cap), another build may always follow, and the judge or a passing review
+ * ends the rounds.
  */
 
 /** What the rule decides for one round. */
