@@ -177,6 +177,14 @@ module.exports = {
       to: { path: '^(packages|plugins)/', pathNot: '^packages/(builtin-workflows|runtime|api)/' },
     },
     {
+      name: 'rdc-reaches-no-package',
+      comment:
+        '@obversa/rdc stands alone: it ranks and selects memory candidates for any host, so it may reach no package or plugin in this repository',
+      severity: 'error',
+      from: { path: '^packages/rdc/' },
+      to: { path: '^(packages|plugins)/', pathNot: '^packages/rdc/' },
+    },
+    {
       name: 'memory-plugin-reaches-memory-only',
       comment: 'a memory plugin reaches API contracts and core execution only',
       severity: 'error',

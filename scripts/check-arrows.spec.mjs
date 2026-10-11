@@ -57,6 +57,7 @@ manifest("packages/builtin-workflows", {
   exports: { ".": "./src/index.mjs" },
   dependencies: { "@obversa/api": "workspace:*", "@obversa/runtime": "workspace:*" },
 });
+manifest("packages/rdc", { name: "@obversa/rdc", type: "module", exports: { ".": "./src/index.mjs" } });
 manifest("packages/surface", { name: "@obversa/surface", type: "module", exports: { ".": "./src/index.mjs" } });
 manifest("plugins/memory-git", {
   name: "@obversa/memory-git",
@@ -115,6 +116,7 @@ file("packages/core/src/index.mjs", "export const process = 1;\n");
 file("packages/runtime/src/index.mjs", "export const runtime = 1;\n");
 file("packages/runner/src/index.mjs", "export const runner = 1;\n");
 file("packages/builtin-workflows/src/index.mjs", "export const workflows = 1;\n");
+file("packages/rdc/src/index.mjs", "export const rdc = 1;\n");
 file("packages/surface-diff/src/index.mjs", "export const source = 1;\n");
 file("packages/surface-diff/src/private.mjs", "export const priv = 1;\n");
 file("packages/surface/src/index.mjs", "export const surfacer = 1;\n");
@@ -134,6 +136,7 @@ const forbidden = [
   ["packages/runner/src/adapter.mjs", "import '@obversa/memory-simple';\n", "runner-reaches-runtime-and-engine-only"],
   ["packages/runner/src/plugin.mjs", "import '../../../plugins/engine-codex-cli/src/index.mjs';\n", "runner-reaches-runtime-and-engine-only"],
   ["packages/builtin-workflows/src/adapter.mjs", "import '@obversa/engine-codex-cli';\n", "builtin-workflows-reaches-runtime-only"],
+  ["packages/rdc/src/coupled.mjs", "import '@obversa/api';\n", "rdc-reaches-no-package"],
   ["packages/runner/src/private.mjs", "import '../../runtime/src/index.mjs';\n", "no-cross-package-internal-path"],
   ["packages/surface/src/bad-a.mjs", "import '../../core/src/index.mjs';\n", "no-cross-package-internal-path"],
   ["packages/surface/src/bad-a.mjs", null, "surface-reaches-no-package"],

@@ -28,6 +28,7 @@ const expected = new Map([
   ['@obversa/memory-simple', 'plugins/memory-simple'],
   ['@obversa/memory-markdown', 'plugins/memory-markdown'],
   ['@obversa/notify-webhook', 'plugins/notify-webhook'],
+  ['@obversa/rdc', 'packages/rdc'],
 ]);
 
 const manifestAt = (directory) => JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
@@ -52,7 +53,7 @@ function assertExactVersion(version, name) {
   assert.notEqual(validVersion(version), null, `${name}: version must be an exact valid SemVer`);
 }
 
-test('all twenty-two public packages have the accepted names and locations', () => {
+test('all twenty-four public packages have the accepted names and locations', () => {
   const allowlist = JSON.parse(readFileSync('scripts/publish-allowlist.json', 'utf8'));
   assert.deepEqual(allowlist.packages, [...expected.keys()].sort());
   for (const [name, directory] of expected) {

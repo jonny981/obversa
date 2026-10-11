@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import type {
-  MemoryCandidate,
-  PickAnswer,
-  PickBatch,
-  PickDecide,
-} from '@obversa/api';
-
-import { pick, PICK_QUESTION_VERSION } from '../src/memory.js';
+import {
+  pick,
+  PICK_QUESTION_VERSION,
+  type MemoryCandidate,
+  type PickAnswer,
+  type PickBatch,
+  type PickDecide,
+} from '../src/index.js';
 
 function candidate(overrides: Partial<MemoryCandidate> & Pick<MemoryCandidate, 'sourceId' | 'id'>): MemoryCandidate {
   return {
@@ -295,6 +295,36 @@ describe('pick', () => {
     expect(shown.find((question) => question.id === 'long')?.text).toBe('x'.repeat(10));
     expect(shown.find((question) => question.id === 'short')?.text).toBe('tiny');
     expect(result.record.candidates.map((entry) => entry.truncated)).toEqual([true, false]);
+  });
+
+  it('carries changedPaths into the record when a candidate has them', async () => {
+    const candidates = [
+      candidate({ sourceId: 'commits', id: 'c1', changedPaths: ['src/a.ts', 'docs/b.md'] }),
+      candidate({ sourceId: 'commits', id: 'c2' }),
+    ];
+    const { decide } = stubDecide((batch) => allAnswered(batch, 0.9));
+
+    const result = await pick(candidates, { task: 'ship it', decide });
+
+    expect(result.record.candidates[0]).toMatchObject({ changedPaths: ['src/a.ts', 'docs/b.md'] });
+    expect(result.record.candidates[1]).not.toHaveProperty('changedPaths');
+  });
+
+  it('reports incomplete rule coverage when the rule source could not enumerate, even with every rule answered', async () => {
+    const rules = [
+      candidate({ sourceId: 'rules', id: 'r0', role: 'rule' }),
+      candidate({ sourceId: 'rules', id: 'r1', role: 'rule' }),
+    ];
+    const { decide } = stubDecide((batch) => allAnswered(batch, 0.9));
+
+    const result = await pick(rules, {
+      task: 'change the schema',
+      decide,
+      rulesEnumerationComplete: false,
+    });
+
+    expect(result.record.candidates.every((entry) => entry.status === 'selected')).toBe(true);
+    expect(result.record.rulesCoverage).toBe('incomplete');
   });
 
   it('asks the rule question to rules and the evidence question to references', async () => {

@@ -10,8 +10,6 @@ import {
   type MemoryView,
 } from '@obversa/api';
 
-export { pick, PICK_QUESTION_VERSION } from './memory-pick.js';
-
 type Awaitable<T> = T | Promise<T>;
 
 export interface MemorySource {

@@ -31,6 +31,7 @@
     "@obversa/memory-markdown": "workspace:^",
     "@obversa/memory-simple": "workspace:^",
     "@obversa/notify-webhook": "workspace:^",
+    "@obversa/rdc": "workspace:^",
     "@obversa/runner": "workspace:^",
     "@obversa/runtime": "workspace:^",
     "@obversa/surface": "workspace:^",
