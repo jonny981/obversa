@@ -354,6 +354,8 @@ export const EXPECTED_FILES = {
   '@obversa/rdc': [
     'package/LICENSE',
     'package/README.md',
+    'package/dist/git-history.d.ts',
+    'package/dist/git.d.ts',
     'package/dist/index.d.ts',
     'package/dist/index.js',
     'package/dist/index.js.map',

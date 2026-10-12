@@ -62,7 +62,7 @@ describe('pick', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.questions.map((question) => question.id)).toEqual(['high', 'mid', 'low']);
     expect(result.record.questionVersion).toBe(PICK_QUESTION_VERSION);
-    expect(result.record.thresholds).toEqual({ reference: 0.6, rule: 0.6 });
+    expect(result.record.thresholds).toEqual({ reference: 0.6, rule: 0.6, linkedPathBar: 0.4 });
     expect(result.record.limits).toEqual({ maxPerBatch: 150, maxQuestionText: 700 });
     expect(result.record.candidates.map((entry) => [entry.id, entry.priority])).toEqual([
       ['low', 2],
@@ -347,5 +347,188 @@ describe('pick', () => {
     });
     expect(questions.every((question) =>
       typeof question.trueCriterion === 'string' && typeof question.falseCriterion === 'string')).toBe(true);
+  });
+});
+
+describe('the changed-path link', () => {
+  const FULL_SHA = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0';
+  const commit = () => candidate({
+    sourceId: 'commits',
+    id: 'commit a1b2c3d',
+    contentRef: FULL_SHA,
+    repository: 'repo-1',
+    changedPaths: ['docs/ops.md'],
+  });
+  const opsNote = () => candidate({
+    sourceId: 'notes', id: 'ops', repository: 'repo-1', path: 'docs/ops.md',
+  });
+  const otherNote = () => candidate({
+    sourceId: 'notes', id: 'other', repository: 'repo-1', path: 'docs/other.md',
+  });
+
+  function byId(answers: Record<string, PickAnswer>) {
+    return (batch: PickBatch) => Object.fromEntries(
+      batch.questions.map((question) => [question.key, answers[question.id] ?? answered(0.5)]),
+    );
+  }
+
+  it('selects a note below the threshold when a selected commit changed its path', async () => {
+    const { decide } = stubDecide((batch) =>
+      byId({ 'commit a1b2c3d': answered(0.9), ops: answered(0.45), other: answered(0.45) })(batch));
+
+    const result = await pick([commit(), opsNote(), otherNote()], { task: 'fix the ops doc', decide });
+
+    expect(result.selected.map((item) => item.id).sort()).toEqual(['commit a1b2c3d', 'ops']);
+    const byEntry = new Map(result.record.candidates.map((entry) => [entry.id, entry]));
+    expect(byEntry.get('ops')).toMatchObject({
+      status: 'selected',
+      path: 'docs/ops.md',
+      repository: 'repo-1',
+      link: { sourceId: 'commits', id: 'commit a1b2c3d' },
+    });
+    // The carrier's saved entry keeps the full commit SHA: the short
+    // one in `id` is display text, not the identity a record resolves.
+    expect(byEntry.get('commit a1b2c3d')).toMatchObject({
+      status: 'selected',
+      contentRef: FULL_SHA,
+    });
+    expect(byEntry.get('commit a1b2c3d')).not.toHaveProperty('link');
+    expect(byEntry.get('other')).toMatchObject({ status: 'rejected' });
+    expect(result.record.thresholds).toEqual({ reference: 0.6, rule: 0.6, linkedPathBar: 0.4 });
+  });
+
+  it('holds the bar exactly: 0.39 does not link, 0.4 does', async () => {
+    const wide = () => candidate({
+      sourceId: 'commits',
+      id: 'commit a1b2c3d',
+      repository: 'repo-1',
+      changedPaths: ['docs/ops.md', 'docs/low.md'],
+    });
+    const low = () => candidate({
+      sourceId: 'notes', id: 'low', repository: 'repo-1', path: 'docs/low.md',
+    });
+    const { decide } = stubDecide((batch) =>
+      byId({ 'commit a1b2c3d': answered(0.9), ops: answered(0.4), low: answered(0.39) })(batch));
+
+    const result = await pick([wide(), opsNote(), low()], { task: 'fix the docs', decide });
+
+    expect(result.selected.map((item) => item.id).sort()).toEqual(['commit a1b2c3d', 'ops']);
+    expect(result.record.candidates.find((entry) => entry.id === 'low'))
+      .toMatchObject({ status: 'rejected', probability: 0.39 });
+  });
+
+  it('honours a linkedPathBar override and never lowers the reference threshold', async () => {
+    const { decide } = stubDecide((batch) =>
+      byId({ 'commit a1b2c3d': answered(0.9), ops: answered(0.45) })(batch));
+
+    const result = await pick([commit(), opsNote()], {
+      task: 'fix the ops doc',
+      decide,
+      thresholds: { linkedPathBar: 0.5 },
+    });
+
+    expect(result.selected.map((item) => item.id)).toEqual(['commit a1b2c3d']);
+    expect(result.record.candidates.find((entry) => entry.id === 'ops'))
+      .toMatchObject({ status: 'rejected', probability: 0.45 });
+    expect(result.record.thresholds.linkedPathBar).toBe(0.5);
+    expect(result.record.thresholds.reference).toBe(0.6);
+  });
+
+  it('never links across repositories', async () => {
+    const foreign = () => candidate({
+      sourceId: 'notes', id: 'foreign', repository: 'repo-2', path: 'docs/ops.md',
+    });
+    const { decide } = stubDecide((batch) =>
+      byId({ 'commit a1b2c3d': answered(0.9), foreign: answered(0.45) })(batch));
+
+    const result = await pick([commit(), foreign()], { task: 'fix the ops doc', decide });
+
+    expect(result.record.candidates.find((entry) => entry.id === 'foreign'))
+      .toMatchObject({ status: 'rejected', probability: 0.45 });
+  });
+
+  it('never lets a linked candidate carry another over', async () => {
+    // The mid candidate links in through the commit and itself touches
+    // the deep note's path; it was not threshold-selected, so the deep
+    // note must stay rejected.
+    const mid = () => candidate({
+      sourceId: 'notes',
+      id: 'mid',
+      repository: 'repo-1',
+      path: 'docs/ops.md',
+      changedPaths: ['docs/deep.md'],
+    });
+    const deep = () => candidate({
+      sourceId: 'notes', id: 'deep', repository: 'repo-1', path: 'docs/deep.md',
+    });
+    const { decide } = stubDecide((batch) =>
+      byId({
+        'commit a1b2c3d': answered(0.9),
+        mid: answered(0.45),
+        deep: answered(0.45),
+      })(batch));
+
+    const result = await pick([commit(), mid(), deep()], { task: 'fix the docs', decide });
+
+    expect(result.selected.map((item) => item.id).sort()).toEqual(['commit a1b2c3d', 'mid']);
+    expect(result.record.candidates.find((entry) => entry.id === 'deep'))
+      .toMatchObject({ status: 'rejected', probability: 0.45 });
+  });
+
+  it('never links a rule candidate', async () => {
+    const rule = () => candidate({
+      sourceId: 'rules', id: 'rule', role: 'rule', repository: 'repo-1', path: 'docs/ops.md',
+    });
+    const { decide } = stubDecide((batch) =>
+      byId({ 'commit a1b2c3d': answered(0.9), rule: answered(0.45) })(batch));
+
+    const result = await pick([commit(), rule()], { task: 'fix the ops doc', decide });
+
+    expect(result.record.candidates.find((entry) => entry.id === 'rule'))
+      .toMatchObject({ status: 'rejected', probability: 0.45 });
+  });
+
+  it('never links a candidate that did not answer over the bar', async () => {
+    for (const answer of [
+      { status: 'refused' as const },
+      { status: 'error' as const, detail: 'decide broke' },
+    ]) {
+      const { decide } = stubDecide((batch) =>
+        byId({ 'commit a1b2c3d': answered(0.9), ops: answer })(batch));
+
+      const result = await pick([commit(), opsNote()], { task: 'fix the ops doc', decide });
+
+      const entry = result.record.candidates.find((item) => item.id === 'ops');
+      expect(entry!.status).toBe('unanswered');
+      expect(entry!).not.toHaveProperty('link');
+    }
+    // A missing answer and an unassessed candidate behave the same way.
+    const { decide: missing } = stubDecide((batch) =>
+      Object.fromEntries(batch.questions
+        .filter((question) => question.id !== 'ops')
+        .map((question) => [question.key, answered(0.9)])));
+    const missingResult = await pick([commit(), opsNote()], { task: 'x', decide: missing });
+    expect(missingResult.record.candidates.find((entry) => entry.id === 'ops')!.status)
+      .toBe('unanswered');
+
+    const { decide: one } = stubDecide((batch) => allAnswered(batch, 0.9));
+    const shortResult = await pick([commit(), opsNote()], {
+      task: 'fix the ops doc',
+      decide: one,
+      limits: { maxCandidates: 1 },
+    });
+    const entry = shortResult.record.candidates.find((item) => item.id === 'ops');
+    expect(entry).toMatchObject({ status: 'unassessed', reason: 'limits' });
+    expect(entry).not.toHaveProperty('link');
+  });
+
+  it('leaves an ordinary above-threshold selection without a link field', async () => {
+    const { decide } = stubDecide((batch) => allAnswered(batch, 0.9));
+
+    const result = await pick([commit(), opsNote()], { task: 'fix the ops doc', decide });
+
+    const entry = result.record.candidates.find((item) => item.id === 'ops');
+    expect(entry).toMatchObject({ status: 'selected' });
+    expect(entry).not.toHaveProperty('link');
   });
 });

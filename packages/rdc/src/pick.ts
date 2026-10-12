@@ -11,6 +11,14 @@ export interface MemoryCandidate {
   /** Repository paths this candidate changed. For a commit: the files in
    *  its diff, not paths the text mentions. */
   readonly changedPaths?: readonly string[];
+  /** The repository-relative file path a note candidate lives at: the
+   *  note's side of the commit-to-note link. */
+  readonly path?: string;
+  /** Opaque identifier both sides of a link share when their sources
+   *  point into the same work tree; the source declares it (the repo
+   *  toplevel, or a caller-supplied key). Candidates with different
+   *  values, or where either side declares none, never link. */
+  readonly repository?: string;
   readonly date?: {
     readonly value: string;
     readonly meaning: 'changed' | 'effective' | 'recorded';
@@ -56,10 +64,25 @@ export interface PickLimits {
 export interface PickThresholds {
   readonly reference?: number;
   readonly rule?: number;
+  /** The bar a 'reference' candidate at or above it still clears when a
+   *  threshold-selected commit from the same `repository` names its
+   *  `path` in `changedPaths`. Below the reference threshold on purpose.
+   *  0.4 is a chosen default, not a measured best; it is not shown to
+   *  beat the reference threshold everywhere. */
+  readonly linkedPathBar?: number;
 }
 
 export type PickEntryStatus =
-  | { readonly status: 'selected'; readonly asked: boolean; readonly probability?: number }
+  | {
+      readonly status: 'selected';
+      readonly asked: boolean;
+      readonly probability?: number;
+      /** Present when the changed-path link, not the threshold, carried
+       *  the candidate over: the selected candidate whose changedPaths
+       *  named this candidate's path. An entry that passed on threshold
+       *  alone carries none. */
+      readonly link?: { readonly sourceId: string; readonly id: string };
+    }
   | { readonly status: 'rejected'; readonly probability: number }
   | {
       readonly status: 'unanswered';
@@ -75,7 +98,12 @@ export type PickRecordEntry = {
   readonly role: MemoryCandidateRole;
   readonly priority: number;
   readonly signals: Readonly<Record<string, number>>;
+  /** The candidate's own content handle (a commit's full SHA); kept so
+   *  a saved record names the exact bytes, not a short display form. */
+  readonly contentRef?: string;
   readonly changedPaths?: readonly string[];
+  readonly path?: string;
+  readonly repository?: string;
   readonly truncated?: boolean;
 } & PickEntryStatus;
 
@@ -113,6 +141,7 @@ const DEFAULT_MAX_PER_BATCH = 150;
  *  part reaches the model whole. */
 export const DEFAULT_MAX_QUESTION_TEXT = 700;
 const DEFAULT_THRESHOLD = 0.6;
+const DEFAULT_LINKED_PATH_BAR = 0.4;
 const TIMED_OUT = Symbol('timed out');
 
 const PICK_QUESTIONS: Record<
@@ -151,8 +180,8 @@ function positiveLimit(value: number | undefined, name: string, fallback: number
   return value;
 }
 
-function probabilityLimit(value: number | undefined, name: string): number {
-  if (value === undefined) return DEFAULT_THRESHOLD;
+function probabilityLimit(value: number | undefined, name: string, fallback = DEFAULT_THRESHOLD): number {
+  if (value === undefined) return fallback;
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
     throw new TypeError(`${name} must be a number between 0 and 1.`);
   }
@@ -255,6 +284,7 @@ export async function pick(
   const thresholds: Required<PickThresholds> = {
     reference: probabilityLimit(options.thresholds?.reference, 'thresholds.reference'),
     rule: probabilityLimit(options.thresholds?.rule, 'thresholds.rule'),
+    linkedPathBar: probabilityLimit(options.thresholds?.linkedPathBar, 'thresholds.linkedPathBar', DEFAULT_LINKED_PATH_BAR),
   };
   const signal = options.signal ?? new AbortController().signal;
   const started = Date.now();
@@ -374,6 +404,37 @@ export async function pick(
     statuses.set(queue[index]!, { status: 'unassessed', reason: stop! });
   }
 
+  // The changed-path link, one pass after the threshold pass: a
+  // reference candidate that answered at or above the link bar (but below
+  // the threshold) still passes when a selected commit from the same
+  // repository changed the path it lives at. Only candidates the
+  // threshold pass selected can carry a link, so a linked candidate can
+  // never carry another; there is no recursion. The pass only adds: it never
+  // demotes an ordinary selection and never lowers a threshold.
+  const chosen = new Set(selected);
+  for (const candidate of candidates) {
+    const status = statuses.get(candidate)!;
+    if (status.status !== 'rejected'
+      || status.probability < thresholds.linkedPathBar
+      || candidate.role !== 'reference'
+      || candidate.path === undefined
+      || candidate.repository === undefined) continue;
+    const carrier = candidates.find((other) =>
+      other !== candidate
+      && other.role === 'reference'
+      && chosen.has(other)
+      && other.repository === candidate.repository
+      && other.changedPaths?.includes(candidate.path!) === true);
+    if (carrier === undefined) continue;
+    selected.push(candidate);
+    statuses.set(candidate, {
+      status: 'selected',
+      asked: true,
+      probability: status.probability,
+      link: { sourceId: carrier.sourceId, id: carrier.id },
+    });
+  }
+
   const entries: PickRecordEntry[] = candidates.map((candidate) => {
     const status = statuses.get(candidate)!;
     const wasTruncated = truncated.get(candidate);
@@ -384,7 +445,10 @@ export async function pick(
       role: candidate.role,
       priority: priority.get(candidate)!,
       signals: candidate.signals,
+      ...(candidate.contentRef === undefined ? {} : { contentRef: candidate.contentRef }),
       ...(candidate.changedPaths === undefined ? {} : { changedPaths: candidate.changedPaths }),
+      ...(candidate.path === undefined ? {} : { path: candidate.path }),
+      ...(candidate.repository === undefined ? {} : { repository: candidate.repository }),
       ...(wasTruncated === undefined ? {} : { truncated: wasTruncated }),
     };
     return status.status === 'unanswered'

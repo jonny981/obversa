@@ -1,6 +1,17 @@
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
+import {
+  asSourceReadError,
+  canonicalPath,
+  GitFailure,
+  pathNames,
+  probeWorkTree,
+  resolveCommit,
+  runGit,
+  runGitBytes,
+  type WorkTreeProbe,
+} from './git.js';
 import { DEFAULT_MAX_QUESTION_TEXT, type MemoryCandidate } from './pick.js';
 import {
   SourceReadError,
@@ -16,6 +27,9 @@ export interface KnowledgeBaseOptions {
    *  read request's own `maxQuestionText`, filled by `pickFromSources`
    *  from the pick limits, tightens the cut further. */
   readonly maxQuestionText?: number;
+  /** The repository key notes declare for the commit-to-note link when
+   *  the corpus sits inside a work tree; defaults to the toplevel. */
+  readonly repository?: string;
 }
 const TOKEN = /[\p{L}\p{N}]+/gu;
 const CODE_FORM = /[@\w./-]*[./@][\w./-]+|[a-z]+[A-Z]\w+|`[^`]+`/g;
@@ -51,7 +65,9 @@ function tokenize(value: string): readonly string[] {
   return value.normalize('NFKC').toLowerCase().match(TOKEN) ?? [];
 }
 
-function taskTerms(task: string, paths: readonly string[] = []): readonly string[] {
+// Shared with the git-history reader, which scores the same terms against
+// commit subjects and bodies.
+export function taskTerms(task: string, paths: readonly string[] = []): readonly string[] {
   const words = new Set<string>();
   const add = (value: string) => {
     for (const token of tokenize(value)) {
@@ -66,7 +82,7 @@ function taskTerms(task: string, paths: readonly string[] = []): readonly string
   return [...words];
 }
 
-function hits(text: string, terms: readonly string[]): number {
+export function hits(text: string, terms: readonly string[]): number {
   const words = new Set(tokenize(text));
   return terms.filter((term) => words.has(term)).length;
 }
@@ -82,6 +98,7 @@ async function walkMarkdown(
   root: string,
   signal: AbortSignal | undefined,
   exclude: ReadonlySet<string>,
+  toplevel?: string,
 ): Promise<Walked> {
   const files: string[] = [];
   let skipped = 0;
@@ -97,7 +114,7 @@ async function walkMarkdown(
     for (const entry of entries) {
       if (entry.name.startsWith('.')) continue;
       const path = join(directory, entry.name);
-      if (isExcluded(path, root, exclude)) continue;
+      if (isExcluded(path, root, exclude, toplevel)) continue;
       if (entry.isSymbolicLink()) {
         skipped += 1;
       } else if (entry.isDirectory()) {
@@ -115,14 +132,33 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isExcluded(path: string, root: string, exclude: ReadonlySet<string>): boolean {
+function isCancel(error: unknown): boolean {
+  return (error instanceof GitFailure && error.kind === 'cancelled')
+    || (error instanceof SourceReadError && error.code === 'cancelled');
+}
+
+function isExcluded(
+  path: string,
+  root: string,
+  exclude: ReadonlySet<string>,
+  toplevel?: string,
+): boolean {
   if (exclude.size === 0) return false;
   const within = relative(root, path).split(sep).join('/');
   const fromCwd = relative(process.cwd(), path).split(sep).join('/');
+  const fromRepo = toplevel === undefined
+    ? undefined
+    : relative(toplevel, path).split(sep).join('/');
   for (const entry of exclude) {
+    // The root marker: every path beneath an anchor sits under it, the
+    // same set the commit reader refuses for a root exclusion.
+    if (entry === '.') return true;
     if (path === entry || path.startsWith(`${entry}${sep}`)) return true;
     if (within === entry || within.startsWith(`${entry}/`)) return true;
     if (fromCwd === entry || fromCwd.startsWith(`${entry}/`)) return true;
+    if (fromRepo !== undefined && (fromRepo === entry || fromRepo.startsWith(`${entry}/`))) {
+      return true;
+    }
   }
   return false;
 }
@@ -249,62 +285,296 @@ interface ReadState {
   readonly root: string;
   readonly files: readonly string[];
   readonly skipped: number;
+  /** Set when the corpus sits inside a work tree: the repository the
+   *  notes belong to and the corpus's path inside it. */
+  readonly repo?: { readonly toplevel: string; readonly prefix: string };
+  /** Set for a pinned read: the resolved SHA and each file's content at
+   *  that revision, so a candidate's text is what the snapshot held and
+   *  a note absent there stays absent. */
+  readonly pinned?: {
+    readonly revision: string;
+    readonly contents: ReadonlyMap<string, string>;
+  };
 }
 
-/** Resolve the directory, refuse a pinned revision the working tree
- *  cannot resolve (this slice does no Git reads, so no revision can be
- *  honoured, 'HEAD' included), and enumerate its Markdown files without
- *  opening content. An excluded entry is refused here, before its file is
- *  ever read. */
+const PIN_REASON = 'a working-tree Markdown read cannot resolve a pinned revision';
+const NO_HISTORY = /Needed a single revision|does not have any commits|bad default revision|ambiguous argument|unknown revision/i;
+
+/** Every blob under `prefix` at `revision`, from one `ls-tree` pass:
+ *  the repository-relative name, the object id for the batched content
+ *  read, and whether the entry is a committed symbolic link. */
+async function listTree(
+  toplevel: string,
+  prefix: string,
+  revision: string,
+  signal: AbortSignal | undefined,
+): Promise<readonly { name: string; oid: string; symlink: boolean }[]> {
+  const output = await runGit(toplevel, [
+    'ls-tree', '-r', '-z', revision,
+    ...(prefix === '' ? [] : ['--', prefix]),
+  ], { signal });
+  const entries: { name: string; oid: string; symlink: boolean }[] = [];
+  for (const record of output.split('\0')) {
+    if (record === '') continue;
+    const match = /^(\d+) (\w+) ([0-9a-f]{40})\t([\s\S]*)$/.exec(record);
+    if (match === null) throw new SourceReadError('failed', `Could not parse ${record}`);
+    const [, mode, type, oid, name] = match;
+    if (type !== 'blob') continue;
+    entries.push({ name: name!, oid: oid!, symlink: mode === '120000' });
+  }
+  return entries;
+}
+
+/** The contents of the listed blobs, in list order, from one
+ *  `cat-file --batch` stream. */
+async function readBlobs(
+  toplevel: string,
+  files: readonly { oid: string }[],
+  signal: AbortSignal | undefined,
+): Promise<readonly string[]> {
+  if (files.length === 0) return [];
+  const stream = await runGitBytes(
+    toplevel,
+    ['cat-file', '--batch'],
+    { input: `${files.map((file) => file.oid).join('\n')}\n`, signal },
+  );
+  const texts: string[] = [];
+  let offset = 0;
+  for (const file of files) {
+    const end = stream.indexOf(0x0a, offset);
+    if (end < 0) throw new SourceReadError('failed', 'cat-file output ended early.');
+    const parts = stream.subarray(offset, end).toString('utf8').split(' ');
+    offset = end + 1;
+    if (parts[1] === 'missing' || parts[1] !== 'blob') {
+      throw new SourceReadError('failed', `The repository is missing ${file.oid}.`);
+    }
+    const size = Number(parts[2]);
+    texts.push(stream.subarray(offset, offset + size).toString('utf8'));
+    offset += size + 1;
+  }
+  return texts;
+}
+
+/** The last committed change date of every file under `prefix`, from
+ *  one `git log --name-only` pass; newest first means the first date a
+ *  path meets is its last-change date. `--cc` lets a merge commit count
+ *  the paths its resolution changed, which a default log leaves out. A
+ *  repository with no commits yet is not an error: there is no history
+ *  to read. */
+async function logDates(
+  toplevel: string,
+  prefix: string,
+  revision: string | undefined,
+  signal: AbortSignal | undefined,
+): Promise<ReadonlyMap<string, string>> {
+  const args = ['log', '-z', '--cc', '--format=%x1e%cI', '--name-only'];
+  if (revision !== undefined) args.push(revision);
+  if (prefix !== '') args.push('--', prefix);
+  let output: string;
+  try {
+    output = await runGit(toplevel, args, { signal });
+  } catch (error) {
+    if (error instanceof GitFailure && error.kind === 'exit' && NO_HISTORY.test(error.stderr)) {
+      return new Map();
+    }
+    throw error;
+  }
+  const dates = new Map<string, string>();
+  for (const block of output.split('\x1e')) {
+    if (block.trim() === '') continue;
+    const parts = block.split('\0');
+    const date = parts[0]!.trim();
+    for (const path of pathNames(parts.slice(1).join('\0'))) {
+      if (!dates.has(path)) dates.set(path, date);
+    }
+  }
+  return dates;
+}
+
+/** The corpus root rebuilt on the deepest existing ancestor directory,
+ *  realpath'd, and that ancestor for the work-tree probe. A pinned read
+ *  reaches a corpus the working tree no longer holds (deleted, moved,
+ *  replaced by a file) through the commit the pin names. */
+async function existingAnchor(
+  directory: string,
+): Promise<{ readonly anchor: string; readonly root: string } | undefined> {
+  let pending = resolve(directory);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      if ((await lstat(pending)).isDirectory()) {
+        const anchor = await realpath(pending);
+        return { anchor, root: join(anchor, ...tail) };
+      }
+    } catch {
+      // A missing or unreadable level: the next one up may still sit in a tree.
+    }
+    const parent = dirname(pending);
+    if (parent === pending) return undefined;
+    tail.unshift(basename(pending));
+    pending = parent;
+  }
+}
+
+/** Resolve the directory, enumerate its Markdown files without opening
+ *  content, and refuse a pinned revision a read cannot honour. An
+ *  excluded entry is refused here, before its file is ever read.
+ *  `snapshots` turns on the git tier: a corpus inside a work tree learns
+ *  its repository, and a pinned `revision` resolves once so every path
+ *  and byte comes from the tree that revision names — including a corpus
+ *  the working tree no longer holds, found through an existing ancestor.
+ *  A corpus outside any repository cannot resolve a pin and reports
+ *  absent. On an unpinned read the tier is extra: a git failure it meets
+ *  (other than a cancel) skips it, and the corpus carries what the walk
+ *  found. */
 async function openDirectory(
   directory: string,
   request: CandidateReadRequest,
+  snapshots: boolean,
 ): Promise<ReadState | CandidateReadResult> {
-  if (request.revision !== undefined) {
-    return {
-      status: 'absent',
-      reason: 'a working-tree Markdown read cannot resolve a pinned revision',
-    };
+  if (!snapshots && request.revision !== undefined) {
+    return { status: 'absent', reason: PIN_REASON };
   }
   if (request.signal?.aborted) throw new SourceReadError('cancelled', 'The read was cancelled.');
-  let root: string;
+  let absentReason: string | undefined;
+  let root: string | undefined;
   try {
     root = await realpath(directory);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'ENOTDIR') {
-      return { status: 'absent', reason: `there is no directory at ${directory}` };
+      absentReason = `there is no directory at ${directory}`;
+    } else {
+      throw new SourceReadError('failed', `Could not resolve ${directory}: ${message(error)}`);
     }
-    throw new SourceReadError('failed', `Could not resolve ${directory}: ${message(error)}`);
   }
-  let stat;
-  try {
-    stat = await lstat(root);
-  } catch (error) {
-    throw new SourceReadError('failed', `Could not inspect ${directory}: ${message(error)}`);
-  }
-  if (!stat.isDirectory()) {
-    return { status: 'absent', reason: `${directory} is not a directory` };
+  if (root !== undefined) {
+    let stat;
+    try {
+      stat = await lstat(root);
+    } catch (error) {
+      throw new SourceReadError('failed', `Could not inspect ${directory}: ${message(error)}`);
+    }
+    if (!stat.isDirectory()) {
+      absentReason = `${directory} is not a directory`;
+      root = undefined;
+    }
   }
   // Exclusion is resolved before any file's content is opened: each entry
   // is matched as a real path (the walk's paths are realpath'd), as the
   // lexical absolute form the caller would write, and as a path relative
-  // to the source root or the working directory.
+  // to the source root or the working directory. The real form resolves
+  // through the deepest existing ancestor — canonicalPath, the same walk
+  // the commit reader runs — so an entry written through a symlinked
+  // workspace still matches when the file it names is gone from the
+  // working tree but held at the pinned revision. When the corpus sits
+  // inside a work tree the entry also matches relative to the repository
+  // root, so one relative exclusion means the same thing to this reader
+  // and to gitHistory. An entry naming a root — '.', './', '/' — keeps
+  // the marker the commit reader's repoPath resolves for it, and every
+  // path beneath an anchor is refused.
   const exclude = new Set<string>();
   for (const entry of request.exclude ?? []) {
     if (typeof entry !== 'string' || entry.trim() === '') continue;
     const absolute = resolve(entry);
     exclude.add(absolute);
-    try {
-      exclude.add(await realpath(absolute));
-    } catch {
-      // An excluded path that does not exist still matches its relative forms.
-    }
+    exclude.add(await canonicalPath(absolute));
     const cleaned = entry.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
-    if (cleaned !== '') exclude.add(cleaned);
+    exclude.add(cleaned === '' ? '.' : cleaned);
   }
-  const { files, skipped } = await walkMarkdown(root, request.signal, exclude);
-  return { root, files, skipped };
+  let repo: { readonly toplevel: string; readonly prefix: string };
+  if (root === undefined) {
+    // Only a pinned read can still reach the corpus: the commit the pin
+    // names may hold a directory the working tree lost (deleted, moved,
+    // replaced by a file). The deepest existing ancestor locates the
+    // work tree it belonged to.
+    if (!snapshots || request.revision === undefined) {
+      return { status: 'absent', reason: absentReason! };
+    }
+    const anchor = await existingAnchor(directory);
+    if (anchor === undefined) return { status: 'absent', reason: PIN_REASON };
+    let probe: WorkTreeProbe;
+    try {
+      probe = await probeWorkTree(anchor.anchor, request.signal);
+    } catch (error) {
+      throw asSourceReadError(error);
+    }
+    if (probe.status === 'absent') return { status: 'absent', reason: PIN_REASON };
+    const toplevel = await realpath(probe.toplevel);
+    root = anchor.root;
+    repo = { toplevel, prefix: relative(toplevel, root).split(sep).join('/') };
+  } else {
+    if (!snapshots) {
+      const { files, skipped } = await walkMarkdown(root, request.signal, exclude);
+      return { root, files, skipped };
+    }
+    let probe: WorkTreeProbe;
+    try {
+      probe = await probeWorkTree(root, request.signal);
+    } catch (error) {
+      // The git tier is extra on an unpinned read: a repository git
+      // cannot inspect (an unsafe-ownership refusal, a failing config)
+      // is skipped like no repository at all, and the corpus carries
+      // what the walk found. A pinned read still throws, and a cancel
+      // always does.
+      if (request.revision !== undefined || isCancel(error)) {
+        throw asSourceReadError(error);
+      }
+      probe = { status: 'absent', reason: 'no-history' };
+    }
+    if (probe.status === 'absent') {
+      if (request.revision !== undefined) return { status: 'absent', reason: PIN_REASON };
+      const { files, skipped } = await walkMarkdown(root, request.signal, exclude);
+      return { root, files, skipped };
+    }
+    const toplevel = await realpath(probe.toplevel);
+    repo = { toplevel, prefix: relative(toplevel, root).split(sep).join('/') };
+  }
+  if (request.revision === undefined) {
+    const { files, skipped } = await walkMarkdown(root, request.signal, exclude, repo.toplevel);
+    return { root, files, skipped, repo };
+  }
+  try {
+    // The pin resolves once here; the tree, the contents and the dates
+    // all come from the SHA it returned, so a later commit cannot move
+    // the snapshot under the read.
+    const revision = await resolveCommit(repo.toplevel, request.revision, request.signal);
+    const tree = await listTree(repo.toplevel, repo.prefix, revision, request.signal);
+    const wanted: { abs: string; name: string; oid: string }[] = [];
+    let skipped = 0;
+    for (const entry of tree) {
+      if (!entry.name.endsWith('.md')) continue;
+      const within = repo.prefix === '' ? entry.name : entry.name.slice(repo.prefix.length + 1);
+      if (within.split('/').some((part) => part.startsWith('.'))) continue;
+      const abs = join(root, within);
+      if (isExcluded(abs, root, exclude, repo.toplevel)) continue;
+      if (entry.symlink) {
+        skipped += 1;
+      } else {
+        wanted.push({ abs, name: entry.name, oid: entry.oid });
+      }
+    }
+    const texts = await readBlobs(repo.toplevel, wanted, request.signal);
+    return {
+      root,
+      files: wanted.map((entry) => entry.abs).sort(),
+      skipped,
+      repo,
+      pinned: {
+        revision,
+        contents: new Map(wanted.map((entry, index) => [entry.abs, texts[index]!])),
+      },
+    };
+  } catch (error) {
+    if (error instanceof GitFailure && error.kind === 'exit'
+      && error.stderr !== '' && NO_HISTORY.test(error.stderr)) {
+      throw new SourceReadError(
+        'failed',
+        `The pinned revision ${request.revision} is not in this repository.`,
+      );
+    }
+    throw asSourceReadError(error);
+  }
 }
 
 async function readTexts(
@@ -315,10 +585,14 @@ async function readTexts(
   for (const file of state.files) {
     if (signal?.aborted) throw new SourceReadError('cancelled', 'The read was cancelled.');
     let raw: string;
-    try {
-      raw = await readFile(file, 'utf8');
-    } catch (error) {
-      throw new SourceReadError('failed', `Could not read ${file}: ${message(error)}`);
+    if (state.pinned !== undefined) {
+      raw = state.pinned.contents.get(file)!;
+    } else {
+      try {
+        raw = await readFile(file, 'utf8');
+      } catch (error) {
+        throw new SourceReadError('failed', `Could not read ${file}: ${message(error)}`);
+      }
     }
     notes.set(file, parseNote(raw));
   }
@@ -329,6 +603,7 @@ function finish(
   request: CandidateReadRequest,
   candidates: MemoryCandidate[],
   skipped: number,
+  revision?: string,
 ): CandidateReadResult {
   candidates.sort((left, right) => {
     const score = (candidate: MemoryCandidate) =>
@@ -348,6 +623,7 @@ function finish(
   if (skipped > 0) reasons.push(`skipped ${skipped} symbolic-link ${skipped === 1 ? 'entry' : 'entries'}`);
   return {
     status: 'read',
+    ...(revision === undefined ? {} : { revision }),
     candidates: emitted,
     complete: reasons.length === 0,
     ...(reasons.length === 0 ? {} : { partial: reasons.join('; ') }),
@@ -381,7 +657,7 @@ export function knowledgeBase(
     id: `knowledge-base:${resolved}`,
     role: 'reference',
     async read(request) {
-      const state = await openDirectory(resolved, request);
+      const state = await openDirectory(resolved, request, true);
       if ('status' in state) return state;
       const notes = await readTexts(state, request.signal);
       const terms = taskTerms(request.task, request.paths ?? []);
@@ -435,13 +711,41 @@ export function knowledgeBase(
         }
       }
 
+      // The second date tier: a corpus inside a work tree reads each
+      // undated note's last-change commit date in one log pass, labelled
+      // 'changed'. A declared frontmatter date still wins, and outside a
+      // repository the tier is skipped so notes carry what the walk gave.
+      // The tier is extra on an unpinned read: a log pass that fails
+      // (other than a cancel) drops the tier rather than the read —
+      // dates, path and repository go with it. A pinned read still
+      // throws: its dates cannot be honoured without the pass.
+      let repo = state.repo;
+      let lastChanged: ReadonlyMap<string, string> | undefined;
+      if (repo !== undefined
+        && [...notes.values()].some((note) => declaredDate(note.fields) === undefined)) {
+        try {
+          lastChanged = await logDates(
+            repo.toplevel, repo.prefix, state.pinned?.revision, request.signal,
+          );
+        } catch (error) {
+          if (state.pinned !== undefined || isCancel(error)) {
+            throw asSourceReadError(error);
+          }
+          repo = undefined;
+        }
+      }
+
       const candidates: MemoryCandidate[] = [];
       for (const [file, note] of notes) {
         if (request.signal?.aborted) throw new SourceReadError('cancelled', 'The read was cancelled.');
         const name = relative(state.root, file).split(sep).join('/');
+        const repoPath = repo === undefined ? undefined
+          : repo.prefix === '' ? name : `${repo.prefix}/${name}`;
         const replaced = REPLACED_FRONTMATTER.test(note.frontmatter)
           || REPLACED_LINE.test(note.body.slice(0, FIRST_CHARACTERS));
-        const date = declaredDate(note.fields);
+        const changed = repoPath === undefined ? undefined : lastChanged?.get(repoPath);
+        const date = declaredDate(note.fields)
+          ?? (changed === undefined ? undefined : { value: changed, meaning: 'changed' as const });
         for (const [sectionIndex, section] of sections(note.body, note.bodyOffset).entries()) {
           const parts = splitParts(section.text, partBudget);
           for (const [partIndex, text] of parts.entries()) {
@@ -463,13 +767,17 @@ export function knowledgeBase(
               text,
               contentRef: `${name}#L${section.startLine}-L${section.endLine}`,
               ...(date === undefined ? {} : { date }),
+              ...(repoPath === undefined ? {} : {
+                path: repoPath,
+                repository: options.repository ?? repo!.toplevel,
+              }),
               signals,
             });
           }
         }
       }
 
-      return finish(request, withBm25(candidates, terms), state.skipped);
+      return finish(request, withBm25(candidates, terms), state.skipped, state.pinned?.revision);
     },
   };
 }
@@ -489,7 +797,7 @@ export function rules(directory: string): CandidateSource {
     id: `rules:${resolved}`,
     role: 'rule',
     async read(request) {
-      const state = await openDirectory(resolved, request);
+      const state = await openDirectory(resolved, request, false);
       if ('status' in state) return state;
       const files = state.files.filter((file) => basename(file).toLowerCase() !== 'readme.md');
       const notes = await readTexts({ ...state, files }, request.signal);
