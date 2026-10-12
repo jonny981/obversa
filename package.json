@@ -199,6 +199,7 @@
     "test:skill-install": "node --test scripts/skill-install.spec.mjs",
     "example:write-and-review": "pnpm --filter @obversa/runtime exec tsx ../../examples/write-and-review.ts",
     "example:one-agent-job": "pnpm --filter @obversa/runtime exec tsx ../../examples/one-agent-job.ts",
+    "example:seat-candidates": "pnpm --filter @obversa/runtime exec tsx ../../examples/seat-candidates.ts",
     "example:goal-check": "pnpm --filter @obversa/runtime exec tsx ../../examples/goal-check.ts",
     "example:climb-a-workflow": "node scripts/check-example-output.mjs pnpm --filter @obversa/builtin-workflows exec tsx ../../examples/climb-a-workflow.ts",
     "example:command-kickback": "pnpm --filter @obversa/runtime exec tsx ../../examples/command-kickback.ts",
@@ -218,7 +219,8 @@
     "verify:f75": "pnpm build && pnpm --filter @obversa/runtime test && pnpm verify:f39 && pnpm docs:validate",
     "example:human-feedback": "node scripts/check-example-output.mjs pnpm exec tsx examples/human-feedback.proof.ts",
     "test:human-feedback": "node --import tsx --test scripts/f155-human-feedback.spec.mjs",
-    "verify:f155": "pnpm verify:d2 && pnpm test:human-feedback && pnpm example:human-feedback && pnpm check:tarballs"
+    "verify:f155": "pnpm verify:d2 && pnpm test:human-feedback && pnpm example:human-feedback && pnpm check:tarballs",
+    "verify:f221": "pnpm verify:d15 && pnpm example:seat-candidates && pnpm --filter @obversa/runtime exec vitest run tests/seat-candidates.spec.ts"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",

@@ -5,10 +5,11 @@
  * code applies the votes.
  */
 
-import type { TeamSeat } from '@obversa/api';
+import type { SeatChoice } from '@obversa/api';
 
 import { mapWithConcurrency } from './concurrency.js';
 import { agentJob } from './job.js';
+import { seatList } from './seat.js';
 import {
   normalizeFeedbackSeverity,
   reviewPanelWith,
@@ -56,18 +57,23 @@ function replyObject(text: string): Record<string, unknown> | undefined {
  * a claim; the merger reads only the findings in its prompt.
  */
 async function ask(
-  seat: TeamSeat,
+  seat: SeatChoice,
   label: string,
   prompt: string,
   read: boolean,
   ctx: JobContext,
   path: readonly string[],
 ): Promise<Record<string, unknown> | undefined> {
-  const tools = read ? [...seat.identity.tools] : [];
+  const seats = seatList(seat);
+  const primary = seats[0]!;
+  const alternatives = seats.slice(1);
+  const tools = read ? [...primary.identity.tools] : [];
   const outcome = await agentJob({
     label,
-    engine: seat.engine,
-    model: seat.identity.model,
+    engine: primary.engine,
+    model: primary.identity.model,
+    identity: primary.identity,
+    ...(alternatives.length === 0 ? {} : { candidates: alternatives }),
     workspaceMode: tools.length ? 'read' : 'none',
     tools,
     allowedTools: tools,

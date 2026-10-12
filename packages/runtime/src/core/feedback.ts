@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import type { TeamSeat } from '@obversa/api';
+import type { SeatChoice, TeamSeat } from '@obversa/api';
 import type {
   ConditionInput,
   ConditionResult,
@@ -171,7 +171,7 @@ type ReviewTarget = {
   name?: string;
   scope?: string;
   /** The seat behind this reviewer. A synthesising panel asks it the cross-review round. */
-  seat?: TeamSeat;
+  seat?: SeatChoice;
   /** Stable reviewer criteria version. Required when passes are persisted. */
   cacheVersion?: string;
   /** Workspace paths whose content can invalidate this reviewer's persisted pass. */
@@ -217,11 +217,11 @@ export interface ReviewPanelConfig {
 /** What a synthesising panel hands its synthesis step. */
 export interface PanelSynthesisInput {
   readonly label: string;
-  readonly merger: TeamSeat;
+  readonly merger: SeatChoice;
   /** Every finding, with the panel reviewer who raised it, in reviewer order. */
   readonly raised: readonly { readonly reviewer: string; readonly finding: FeedbackFinding }[];
   /** The reviewers that gave a verdict, in reviewer order. */
-  readonly voters: readonly { readonly name: string; readonly seat: TeamSeat }[];
+  readonly voters: readonly { readonly name: string; readonly seat: SeatChoice }[];
   readonly concurrency: number;
   /** `ReviewPanelConfig.context`. */
   readonly context?: string;

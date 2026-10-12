@@ -54,6 +54,15 @@ function recordEngineUsage(
   }
 }
 import type { AgentRequest, AgentResult, EngineRef } from '../engines/engine.js';
+import {
+  isEngine,
+  type AvailabilityTarget,
+  type ExecutionTarget,
+  type SeatRouteTarget,
+  type TeamSeat,
+} from '@obversa/api';
+import { classifyEngineFailure } from '../engines/failure.js';
+import { assertExecutionTarget, seatIdentity } from './seat.js';
 import { resolveEnv } from './env-overlay.js';
 import { LoopError, type LoopErrorCode } from './errors.js';
 import { scrubCapture } from './redact.js';
@@ -97,6 +106,21 @@ export interface AgentJobConfig {
   engine?: EngineRef;
   /** Bare model id — passed straight through to the engine. */
   model?: string;
+  /**
+   * The identity the job's primary route runs as. The seat-carrying callers
+   * (a `dag()` node's agent, a `pipeline()` stage, a `review()` reviewer)
+   * set it so the record can say what the step asked for. Required when
+   * `candidates` is given.
+   */
+  readonly identity?: ExecutionTarget;
+  /**
+   * The seat's ordered alternatives behind the primary, each a full seat
+   * with its own engine, identity and tools. A call that fails on billing
+   * or quota runs the next candidate in the same step, and a candidate the
+   * run's availability store remembers as dead is skipped without a call.
+   * Must not be empty.
+   */
+  readonly candidates?: readonly TeamSeat[];
   /**
    * Reasoning effort for this step, in the engine's own levels, over the
    * engine's own `effort` option. An engine without the setting refuses it.
@@ -208,6 +232,13 @@ export interface AgentRoute {
   effort?: string;
   timeoutMs?: number;
   timeoutGraceMs?: number;
+}
+
+/** A route plus what a seat route knows: the identity it runs as and, for a
+ * candidate, the seat whose own engine and tool policy it uses. */
+interface SeatRoute extends AgentRoute {
+  readonly identity?: ExecutionTarget;
+  readonly candidate?: TeamSeat;
 }
 
 export type ProofDescriptor = ProofArtifact;
@@ -382,8 +413,46 @@ interface ReviewedContent {
   readonly content: string | undefined;
 }
 
+/** The `adapter`/`provider`/`model` an availability entry is scoped to. */
+function availabilityTarget(identity: ExecutionTarget): AvailabilityTarget {
+  return { adapter: identity.adapter, provider: identity.provider, model: identity.model };
+}
+
+/** What a `seat:route` event names for one route. */
+function routeTarget(identity: ExecutionTarget): SeatRouteTarget {
+  return {
+    adapter: identity.adapter,
+    provider: identity.provider,
+    modelFamily: identity.modelFamily,
+    model: identity.model,
+  };
+}
+
 /** Run one fresh agent turn through whichever engine is selected. */
 export function agentJob(config: AgentJobConfig): Job {
+  if (config.candidates !== undefined) {
+    if (!Array.isArray(config.candidates) || config.candidates.length === 0) {
+      throw new TypeError('agentJob candidates must be a non-empty list of seats');
+    }
+    if (config.identity === undefined) {
+      throw new TypeError('agentJob candidates need the primary seat identity in `identity`');
+    }
+  }
+  if (config.identity !== undefined) assertExecutionTarget(config.identity);
+  // Snapshot the caller's list: a job built once routes the same way however
+  // its config object is mutated later.
+  const candidates = config.candidates?.map((candidate, index) => {
+    if (!isEngine(candidate?.engine)) {
+      throw new TypeError(`candidate ${index + 1} is not a seat: it has no engine`);
+    }
+    try {
+      seatIdentity(candidate);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'invalid engine identity';
+      throw new TypeError(`candidate ${index + 1} has an invalid engine identity: ${message}`, { cause });
+    }
+    return candidate;
+  });
   const job: Job = async (ctx) => {
     const recordAs = 'recordAs' in config ? config.recordAs : undefined;
     const path = [...ctx.path];
@@ -451,16 +520,65 @@ export function agentJob(config: AgentJobConfig): Job {
         ? config.fallback
         : [config.fallback]
       : [];
-    const routes: AgentRoute[] = [
+    const routes: SeatRoute[] = [
       {
         engine: config.engine,
         model: config.model ?? config.agent?.model,
         effort: config.effort,
         timeoutMs: defaultTimeoutMs,
         timeoutGraceMs: defaultTimeoutGraceMs,
+        ...(config.identity === undefined ? {} : { identity: config.identity }),
       },
+      ...(candidates ?? []).map((candidate) => ({
+        engine: candidate.engine,
+        model: candidate.identity.model,
+        identity: candidate.identity,
+        candidate,
+      })),
       ...fallbacks,
     ];
+    // A seat with candidates consults the run's availability store; a single
+    // seat never reads it and never writes it.
+    const availability = candidates === undefined ? undefined : ctx.availability;
+    // The store reports its problems once each, and they belong on the
+    // record: drain after every read and write it makes here.
+    const drainAvailabilityProblems = () => {
+      for (const problem of availability?.takeProblems?.() ?? []) ctx.log(problem, 'warn');
+    };
+    drainAvailabilityProblems();
+    // The earliest reset a candidate reported or the memory holds.
+    let earliestReset: number | undefined;
+    const noteReset = (at: number | undefined) => {
+      if (at !== undefined && (earliestReset === undefined || at < earliestReset)) earliestReset = at;
+    };
+    /** The error a seat reports when no candidate can run: a quota limit
+     * that carries the earliest known reset, so the run's `onLimit` policy
+     * waits for the first candidate to come back, or pauses, as it does for
+     * a single model. Never retryable: under `onLimit: 'fail'` an unbounded
+     * round would otherwise spend a call on each dead candidate again. */
+    const exhaustionError = (cause?: unknown) => new LoopError({
+      code: 'QUOTA',
+      phase: 'body',
+      retryable: false,
+      message: `${label} has no seat candidate able to run: every candidate is out of credit or quota, or remembered unavailable`,
+      ...(earliestReset === undefined ? {} : { resetAt: earliestReset }),
+      cause,
+    });
+    /** The next seat candidate after `from` that memory does not hold dead. */
+    const nextCandidateTarget = (from: number): SeatRouteTarget | undefined => {
+      for (let index = from; index < routes.length; index += 1) {
+        const next = routes[index]!.identity;
+        if (next === undefined) continue;
+        if (
+          availability !== undefined
+          && availability.unavailableUntil(availabilityTarget(next), Date.now()) !== undefined
+        ) {
+          continue;
+        }
+        return routeTarget(next);
+      }
+      return undefined;
+    };
     const maxMemoryBytes = positiveLimit(config.maxMemoryBytes ?? ctx.maxMemoryBytes, 'maxMemoryBytes');
     const maxOutputBytes = positiveLimit(config.maxOutputBytes ?? ctx.maxOutputBytes, 'maxOutputBytes');
     const fallbackOn = new Set<LoopErrorCode>(
@@ -480,6 +598,26 @@ export function agentJob(config: AgentJobConfig): Job {
       const routeModel = route.model;
       const timeoutMs = route.timeoutMs ?? defaultTimeoutMs;
       const timeoutGraceMs = route.timeoutGraceMs ?? defaultTimeoutGraceMs;
+      // A candidate the store remembers as dead is skipped without a call,
+      // and the skip goes on the record like a substitution.
+      if (availability !== undefined && route.identity !== undefined) {
+        const dead = availability.unavailableUntil(availabilityTarget(route.identity), Date.now());
+        if (dead !== undefined) {
+          noteReset(dead.until);
+          const selected = nextCandidateTarget(i + 1);
+          ctx.emit({
+            kind: 'seat:route',
+            ts: Date.now(),
+            path,
+            requested: routeTarget(route.identity),
+            ...(selected === undefined ? {} : { selected }),
+            failure: dead.failure,
+            reset: dead.until,
+            remembered: true,
+          });
+          continue;
+        }
+      }
       try {
         const basePrompt = contextualPrompt;
         const engine = ctx.resolveEngine(route.engine ?? config.engine);
@@ -495,6 +633,7 @@ export function agentJob(config: AgentJobConfig): Job {
             }), ctx);
             if ('paused' in answer) {
               ctx.emit({ kind: 'job:end', ts: Date.now(), path, label, outcome: answer.paused });
+              drainAvailabilityProblems();
               return answer.paused;
             }
             materials.push(pending);
@@ -513,8 +652,14 @@ export function agentJob(config: AgentJobConfig): Job {
               model: originalSelection?.model ?? routeModel,
               ...(route.effort === undefined ? {} : { effort: route.effort }),
               maxTokens: config.maxTokens,
-              tools: config.tools ?? config.agent?.tools,
-              allowedTools: config.allowedTools,
+              tools: route.candidate !== undefined
+                ? [...route.candidate.identity.tools]
+                : (config.tools ?? config.agent?.tools
+                  ?? (route.identity === undefined ? undefined : [...route.identity.tools])),
+              allowedTools: route.candidate !== undefined
+                ? [...route.candidate.identity.tools]
+                : (config.allowedTools
+                  ?? (route.identity === undefined ? undefined : [...route.identity.tools])),
               workspaceMode: config.workspaceMode,
               leaf: config.leaf ?? config.agent?.leaf,
               cwd: config.cwd ?? ctx.workspace.dir,
@@ -615,17 +760,80 @@ export function agentJob(config: AgentJobConfig): Job {
           path: ctx.path,
           iteration: ctx.iteration,
         });
+        const kind = classifyEngineFailure(error.cause ?? error);
+        const reset = error.resetAt ?? (error.retryAfterMs === undefined ? undefined : Date.now() + error.retryAfterMs);
+        // A billing or quota failure with a proven reset — one a header or
+        // structured field stated, never one read out of error text — is
+        // remembered for later runs; nothing else is.
+        const provenReset = error.resetProven === true ? reset : undefined;
+        if (kind === 'billing' || kind === 'quota') noteReset(reset);
+        if (
+          availability !== undefined
+          && route.identity !== undefined
+          && !ctx.signal.aborted
+          && (kind === 'billing' || kind === 'quota')
+          && provenReset !== undefined
+        ) {
+          availability.markUnavailable(availabilityTarget(route.identity), { until: provenReset, failure: kind });
+        }
+        // Billing and quota always move to the next candidate; any other code
+        // moves only under the caller's `fallbackOn` policy, as before.
+        const nextIsCandidate = i + 1 < routes.length && routes[i + 1]!.candidate !== undefined;
+        // What runs next for the record: the first later candidate memory
+        // does not hold dead, or none — a plain fallback is not a candidate.
+        const nextCandidate = candidates === undefined || route.identity === undefined
+          ? undefined
+          : nextCandidateTarget(i + 1);
         if (
           originalSelection === undefined && i < routes.length - 1 &&
           !ctx.signal.aborted &&
-          fallbackOn.has(error.code)
+          (fallbackOn.has(error.code) || (nextIsCandidate && (kind === 'billing' || kind === 'quota')))
         ) {
+          if (
+            candidates !== undefined
+            && route.identity !== undefined
+            && (nextIsCandidate || kind === 'billing' || kind === 'quota')
+          ) {
+            ctx.emit({
+              kind: 'seat:route',
+              ts: Date.now(),
+              path,
+              requested: routeTarget(route.identity),
+              ...(nextCandidate === undefined ? {} : { selected: nextCandidate }),
+              failure: kind,
+              ...(reset === undefined ? {} : { reset }),
+            });
+          }
           ctx.log(
             `${label} primary route hit ${error.code}; trying fallback route ${i + 2}`,
             'warn',
           );
           continue;
         }
+        // The step ends on this failure. A candidate seat's billing or quota
+        // death with no live candidate left is the all-unavailable outcome:
+        // record it before the error, with no selected model. The step ends
+        // on the exhaustion error, not the candidate's own: a billing death
+        // is a retryable ENGINE error by default, and the rounds would retry
+        // a seat that can never answer instead of waiting for a reset.
+        const seatExhausted =
+          candidates !== undefined
+          && route.identity !== undefined
+          && originalSelection === undefined
+          && !ctx.signal.aborted
+          && (kind === 'billing' || kind === 'quota')
+          && nextCandidate === undefined;
+        if (seatExhausted) {
+          ctx.emit({
+            kind: 'seat:route',
+            ts: Date.now(),
+            path,
+            requested: routeTarget(route.identity),
+            failure: kind,
+            ...(reset === undefined ? {} : { reset }),
+          });
+        }
+        drainAvailabilityProblems();
         ctx.emit({
           kind: 'error',
           ts: Date.now(),
@@ -633,10 +841,11 @@ export function agentJob(config: AgentJobConfig): Job {
           message: error.message,
           code: error.code,
         });
+        const failure = seatExhausted ? exhaustionError(error) : error;
         const outcome: Outcome = {
           status: ctx.signal.aborted ? 'aborted' : 'fail',
-          summary: error.message,
-          error,
+          summary: failure.message,
+          error: failure,
         };
         ctx.emit({
           kind: 'job:end',
@@ -648,12 +857,21 @@ export function agentJob(config: AgentJobConfig): Job {
         return outcome;
       }
     }
-    if (!result)
-      throw new LoopError({
-        code: 'ENGINE',
-        phase: 'body',
-        message: `${label} produced no engine result`,
-      });
+    // Every route the loop reached was skipped by memory or failed and
+    // spilled: drain any store problems the reads and writes queued.
+    drainAvailabilityProblems();
+    if (!result) {
+      // Every route was skipped by remembered unavailability or failed in
+      // this run: the step ends on the exhaustion error, with the skips and
+      // the substitution events already on the record. A loop then waits
+      // for the earliest remembered reset or pauses; it never re-runs the
+      // step at once to record the same skips again.
+      const error = exhaustionError();
+      ctx.emit({ kind: 'error', ts: Date.now(), path, message: error.message, code: error.code });
+      const outcome: Outcome = { status: 'fail', summary: error.message, error };
+      ctx.emit({ kind: 'job:end', ts: Date.now(), path, label, outcome });
+      return outcome;
+    }
 
     // The reply enters events and status records. Scrub it before any consumer
     // can persist an injected environment value.
@@ -673,6 +891,7 @@ export function agentJob(config: AgentJobConfig): Job {
     const finalOutcome: Outcome = unchanged
       ? { status: 'fail', summary, error: new LoopError({ code: 'VALIDATION', phase: 'body', path: ctx.path, message: summary }) }
       : timed;
+    drainAvailabilityProblems();
     ctx.emit({
       kind: 'job:end',
       ts: Date.now(),

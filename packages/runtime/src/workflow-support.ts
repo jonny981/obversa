@@ -4,16 +4,19 @@ import { join } from 'node:path';
 
 import { agentJob } from './core/job.js';
 import { LoopError } from './core/errors.js';
-import { seatIdentity } from './core/refine.js';
+import { seatIdentity, seatList } from './core/seat.js';
 import type { Job, JobContext } from './core/types.js';
-import type { TeamSeat } from '@obversa/api';
+import type { SeatChoice, TeamSeat } from '@obversa/api';
 import { INVALID_TEAM_DECISION, outcomeFromAgentText } from './workflow-agent-response.js';
 
 export {
+  assertDistinctChoices,
   assertDistinctSeats,
+  seatIdentity,
+} from './core/seat.js';
+export {
   requireNoFiles,
   requireNonEmptyFiles,
-  seatIdentity,
 } from './core/refine.js';
 export type { ReviewerSeat } from './core/types.js';
 import type { ReviewerSeat } from './core/types.js';
@@ -59,7 +62,7 @@ function rolePrompt(role: string, brief: string): string {
 
 export function teamAgent(
   label: string,
-  seat: TeamSeat,
+  seat: SeatChoice,
   input: TeamInput,
   instructions: string | ((ctx: JobContext) => string),
   target?: string,
@@ -67,14 +70,19 @@ export function teamAgent(
   workspaceMode: TeamWorkspaceMode = 'write',
   recordAs?: { readonly role: 'writer' | 'reviewer'; readonly stage: string },
 ): Job {
-  const identity = seatIdentity(seat);
+  const seats = seatList(seat);
+  const primary = seats[0]!;
+  const alternatives = seats.slice(1);
+  const identity = seatIdentity(primary);
   if (workspaceMode === 'read' && identity.tools.length === 0) {
     throw new TypeError(`${label} cannot read the workspace: reviewer seat declares no tools`);
   }
   const agent = agentJob({
     label,
-    engine: seat.engine,
+    engine: primary.engine,
     model: identity.model,
+    identity,
+    ...(alternatives.length === 0 ? {} : { candidates: alternatives }),
     tools: [...identity.tools],
     allowedTools: [...identity.tools],
     workspaceMode,

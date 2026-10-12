@@ -41,6 +41,7 @@ export const CONSUMER_EXAMPLES = Object.freeze([
   'run-child.ts',
   'write-and-review.ts',
   'one-agent-job.ts',
+  'seat-candidates.ts',
   'command-kickback.ts',
   'notify-webhook.ts',
   'engine-anthropic-api-binding.ts',

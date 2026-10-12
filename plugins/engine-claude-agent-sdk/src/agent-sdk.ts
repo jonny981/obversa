@@ -178,7 +178,8 @@ function classifySdkLimit(
       ? `agent-sdk usage/billing limit: ${message}`
       : `agent-sdk rate limited: ${message}`,
     cause: error,
-    resetAt,
+    // `rate_limit_info` is a structured SDK field, so the reset is proven.
+    ...(resetAt === undefined ? {} : { resetAt, resetProven: true }),
   });
 }
 
@@ -383,6 +384,7 @@ export class AgentSdkEngine implements Engine {
           cause: e.cause,
           retryAfterMs: e.retryAfterMs,
           resetAt: e.resetAt,
+          resetProven: e.resetProven,
           effective: effectiveSelection(),
         });
       }

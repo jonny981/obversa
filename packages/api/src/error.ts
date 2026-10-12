@@ -22,6 +22,12 @@ export interface EngineErrorInit {
   readonly cause?: unknown;
   readonly retryAfterMs?: number;
   readonly resetAt?: number;
+  /**
+   * True only when the reset or retry hint came from a header or a
+   * structured field — never from text parsed out of an error message.
+   * Only a proven reset may be remembered as a seat's unavailability.
+   */
+  readonly resetProven?: boolean;
   readonly effective?: EngineSelectionRecord;
 }
 
@@ -30,6 +36,7 @@ export class EngineError extends Error {
   readonly kind: EngineFailureKind;
   readonly retryAfterMs?: number;
   readonly resetAt?: number;
+  readonly resetProven?: boolean;
   readonly effective?: EngineSelectionRecord;
 
   constructor(init: EngineErrorInit) {
@@ -41,6 +48,7 @@ export class EngineError extends Error {
     this.kind = init.kind;
     this.retryAfterMs = init.retryAfterMs;
     this.resetAt = init.resetAt;
+    this.resetProven = init.resetProven;
     this.effective = init.effective === undefined
       ? undefined
       : engineSelection(init.effective);

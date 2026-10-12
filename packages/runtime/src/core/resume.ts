@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { RECORDED_ENGINE_USAGE, type RecordedEngineUsage } from './job.js';
 import { approval, delegateNodeJob } from './approval-job.js';
 import type { DagConfig, DagNode, Job, JobContext, Outcome, RecordedStage, ResumedStageRecords } from './types.js';
-import type { TeamSeat } from '@obversa/api';
+import { seatsOf, type SeatChoice, type TeamSeat } from '@obversa/api';
 import { hasSavedInteraction, interactionDeclaration, interactionIdentity } from './interaction.js';
 import { REBUILD_UNTIL, rebuildUntil, recordedRounds, recordKey, roundsOf, staleUntil } from './context.js';
 import type { Writes } from './describe.js';
@@ -57,10 +57,16 @@ function canonicalForDigest(value: unknown): unknown {
  * a finished node whose task changed since its record stands for nothing.
  * Node `job` functions are excluded for the same reason. */
 export function dagResumeIdentity(config: DagConfig): string {
-  const seat = (value: TeamSeat | true | undefined): unknown =>
-    value === undefined ? null
-      : value === true ? true
-        : { model: value.identity?.model ?? null, modelFamily: value.identity?.modelFamily ?? null };
+  const seat = (value: SeatChoice | true | undefined): unknown => {
+    if (value === undefined) return null;
+    if (value === true) return true;
+    const digest = (entry: TeamSeat) => ({
+      model: entry.identity?.model ?? null,
+      modelFamily: entry.identity?.modelFamily ?? null,
+    });
+    const seats = seatsOf(value);
+    return seats.length === 1 ? digest(seats[0]!) : seats.map(digest);
+  };
   const refine = (value: DagNode['refine']): unknown => value === undefined ? null : {
     checks: value.checks,
     // `goalCheck()` declares its requirements, target and seat on the job it

@@ -9,6 +9,7 @@ import {
 import type { RefineBudget, ReviewerSeat, TeamInput } from './types.js';
 
 export {
+  assertDistinctChoices,
   assertDistinctSeats,
   panelReviewers,
   requireNoFiles,

@@ -30,7 +30,7 @@ import { startSupervisor, newRunId, type Supervisor } from './supervisor.js';
 import { jobMeta } from '../core/describe.js';
 import { currentBranch } from '../core/git.js';
 import type { Environment, EnvHandle } from '../env/environment.js';
-import type { Memory } from '@obversa/api';
+import type { AvailabilityStore, Memory } from '@obversa/api';
 import { createCallbackClient } from '../callback/client.js';
 import { startMonitor, type RunMonitor, type StartedMonitor } from './monitor.js';
 import {
@@ -86,6 +86,14 @@ export interface RunOptions {
   state?: Record<string, unknown>;
   /** Memory instance available to every job in the run. */
   memory?: Memory;
+  /**
+   * The run's store of remembered candidate unavailability. Only a step
+   * whose seat names `candidates` consults it, and only a billing or quota
+   * failure with a proven reset writes it — so a run without candidate
+   * seats never touches it. `fileAvailabilityStore` is the plain-file
+   * default.
+   */
+  availability?: AvailabilityStore;
   /**
    * The client the run's questions go through (`approval`). Default: a fresh
    * in-memory client for this run, so a run without one forgets its questions
@@ -499,6 +507,7 @@ export async function run(
     params,
     state: initialState,
     memory: options.memory,
+    availability: options.availability,
     callbacks,
     onCallback: options.onCallback ?? 'exit',
     workspace,

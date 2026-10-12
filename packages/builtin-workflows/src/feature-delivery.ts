@@ -17,7 +17,7 @@ import {
 } from '@obversa/runtime';
 
 import {
-  assertDistinctSeats,
+  assertDistinctChoices,
   assertRefineBudget,
   assertReviewers,
   assertTeamInput,
@@ -320,7 +320,7 @@ export function featureDelivery(config: FeatureDeliveryConfig) {
   assertTeamInput(config);
   featureInput(config);
   assertReviewers(config.reviewers, config.reviewThreshold);
-  assertDistinctSeats([
+  assertDistinctChoices([
     config.implement,
     ...config.reviewers.map(({ seat }) => seat),
   ]);

@@ -38,6 +38,12 @@ export interface LoopErrorInit {
   retryAfterMs?: number;
   /** When the limit resets, as epoch ms. The wait policy prefers this. */
   resetAt?: number;
+  /**
+   * True only when the reset or retry hint came from a header or a
+   * structured field — never from text parsed out of an error message.
+   * Only a proven reset may be remembered as a seat's unavailability.
+   */
+  resetProven?: boolean;
 }
 
 export class LoopError extends Error {
@@ -50,6 +56,8 @@ export class LoopError extends Error {
   readonly retryAfterMs?: number;
   /** When the limit resets, as epoch ms. The wait policy prefers this. */
   readonly resetAt?: number;
+  /** Whether the reset hint is proven by a header or structured field. */
+  readonly resetProven?: boolean;
 
   constructor(init: LoopErrorInit) {
     super(
@@ -63,6 +71,7 @@ export class LoopError extends Error {
     this.iteration = init.iteration;
     this.retryAfterMs = init.retryAfterMs;
     this.resetAt = init.resetAt;
+    this.resetProven = init.resetProven;
     this.retryable = init.retryable ?? defaultRetryable(init);
   }
 
@@ -80,6 +89,7 @@ export class LoopError extends Error {
         cause: value,
         retryAfterMs: value.retryAfterMs,
         resetAt: value.resetAt,
+        resetProven: value.resetProven,
       });
     }
     const message = value instanceof Error ? value.message : String(value);
@@ -97,6 +107,7 @@ export class LoopError extends Error {
       retryable: this.retryable,
       retryAfterMs: this.retryAfterMs,
       resetAt: this.resetAt,
+      resetProven: this.resetProven,
     };
   }
 }

@@ -107,8 +107,10 @@ function modelFor(
 /**
  * Classify redacted CLI failure text as a provider limit. Billing keeps the
  * historical quota kind. Ambiguous usage/session/quota text is rate-limit;
- * a parsed reset is retained without deciding the allowance duration.
- * Unrelated failures return undefined for the existing generic error path.
+ * a parsed reset is retained for the wait policy without deciding the
+ * allowance duration, and is never marked proven: text is not proof of a
+ * reset. Unrelated failures return undefined for the existing generic error
+ * path.
  */
 export function classifyCliLimit(text: string): EngineError | undefined {
   const classified = classifyEngineFailure(new Error(text));

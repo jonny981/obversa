@@ -190,6 +190,7 @@ export function childContext(
     params: parent.params,
     state: parent.state,
     memory: parent.memory,
+    availability: parent.availability,
     callbacks: parent.callbacks,
     interactionCheckpoint: parent.interactionCheckpoint,
     onCallback: parent.onCallback,

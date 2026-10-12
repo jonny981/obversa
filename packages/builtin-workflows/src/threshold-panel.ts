@@ -1,7 +1,7 @@
 import { reviewPanel } from '@obversa/runtime';
 
 import {
-  assertDistinctSeats,
+  assertDistinctChoices,
   assertRefineBudget,
   assertReviewers,
   assertTeamInput,
@@ -18,7 +18,7 @@ import type { PanelConfig } from './types.js';
 export function thresholdPanel(config: PanelConfig) {
   assertTeamInput(config);
   assertReviewers(config.reviewers, config.threshold);
-  assertDistinctSeats([config.implement, ...config.reviewers.map(({ seat }) => seat)]);
+  assertDistinctChoices([config.implement, ...config.reviewers.map(({ seat }) => seat)]);
   const refineBudget = config.refine ?? 1;
   assertRefineBudget(refineBudget, ['implement']);
   const implement = teamAgent(

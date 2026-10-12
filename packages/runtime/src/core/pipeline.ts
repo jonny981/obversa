@@ -15,7 +15,7 @@ import type {
   Job,
   JobMeta,
 } from './types.js';
-import type { TeamSeat } from '@obversa/api';
+import type { SeatChoice } from '@obversa/api';
 import { dag } from './dag.js';
 import { jobMeta, type NodeMeta } from './describe.js';
 import { LoopError } from './errors.js';
@@ -25,7 +25,7 @@ export interface PipelineStage {
   /** What the stage runs: `job` for code, `agent` for a seat that does the work. */
   job?: Job;
   /** The seat that does the work (dag's per-node `agent`), exclusive with `job`. */
-  agent?: TeamSeat;
+  agent?: SeatChoice;
   /** What the agent may write (dag's per-node `writes`). */
   writes?: 'workspace' | string | readonly string[];
   /** The file the stage's judge reads and a resume recovers (dag's per-node `file`). */

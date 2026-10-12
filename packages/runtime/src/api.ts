@@ -15,7 +15,16 @@ export {
   type WorkflowRole,
   type WorkflowStage,
 } from './workflow.js';
-export type { TeamSeat } from '@obversa/api';
+export type {
+  TeamSeat,
+  SeatAlternatives,
+  SeatChoice,
+  SeatRouteTarget,
+  AvailabilityTarget,
+  UnavailableEntry,
+  AvailabilityStore,
+} from '@obversa/api';
+export { seatsOf } from '@obversa/api';
 
 export type {
   JsonPrimitive,
@@ -155,6 +164,7 @@ export {
   type GraphExecutorResult,
 } from './runtime/graph-executor.js';
 export { projectTeamRooms } from './runtime/team-rooms.js';
+export { fileAvailabilityStore } from './runtime/availability.js';
 export {
   resolveGraphPlan,
   validateGraphDescription,

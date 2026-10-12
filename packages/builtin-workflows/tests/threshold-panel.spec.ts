@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
-import { agentJob, jobMeta, reviewPanel, run } from '@obversa/runtime';
+import { agentJob, EngineError, jobMeta, reviewPanel, run } from '@obversa/runtime';
 
 import { outcomeFromAgentText, thresholdPanel } from '../src/index.js';
 import type { PanelConfig } from '../src/types.js';
@@ -119,6 +119,50 @@ describe('thresholdPanel', () => {
         expect.any(Array),
       ]);
       await expect(readFile(join(workspace, 'reviews/correctness.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('runs a named reviewer\'s alternate candidate when the first is out of credit', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-panel-'));
+    try {
+      const implement = scriptedEngine('implement', [
+        async (request) => {
+          await writePanelFiles(request.cwd!);
+          return pass('implementation written');
+        },
+      ]);
+      // One named reviewer with ordered alternatives: the first is out of
+      // credit, so the second answers the same reviewer job.
+      const deadReviewer = scriptedEngine('dead-reviewer', [
+        async () => {
+          throw new EngineError({ kind: 'billing', message: 'credit balance too low' });
+        },
+      ]);
+      const liveReviewer = scriptedEngine('live-reviewer', [
+        async () => pass('the alternate accepted'),
+      ]);
+      const job = thresholdPanel({
+        brief: 'Write a module that exports result 7 and a test for it.',
+        workspace,
+        files: ['src/result.mjs', 'test/result.test.mjs'],
+        test: testCommand,
+        implement: seat(implement, 'implement'),
+        reviewers: [{
+          name: 'reviewer',
+          seat: {
+            seat: seat(deadReviewer, 'reviewer'),
+            candidates: [seat(liveReviewer, 'reviewer')],
+          },
+        }],
+        threshold: 1,
+      });
+
+      const result = await run(job, { cwd: workspace });
+      expect(result.outcome.status).toBe('pass');
+      expect(deadReviewer.calls).toHaveLength(1);
+      expect(liveReviewer.calls).toHaveLength(1);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

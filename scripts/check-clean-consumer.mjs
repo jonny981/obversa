@@ -901,6 +901,7 @@ async function main() {
 
     await copyFile(join(root, 'examples', 'write-and-review.ts'), join(consumerDirectory, 'write-and-review.ts'));
     await copyFile(join(root, 'examples', 'one-agent-job.ts'), join(consumerDirectory, 'one-agent-job.ts'));
+    await copyFile(join(root, 'examples', 'seat-candidates.ts'), join(consumerDirectory, 'seat-candidates.ts'));
     await copyFile(join(root, 'examples', 'command-kickback.ts'), join(consumerDirectory, 'command-kickback.ts'));
     await copyFile(join(root, 'examples', 'notify-webhook.ts'), join(consumerDirectory, 'notify-webhook.ts'));
     await copyFile(join(root, 'examples', 'approval.ts'), join(consumerDirectory, 'approval.ts'));

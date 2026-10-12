@@ -1124,6 +1124,7 @@ function resetAtHeader(value: string | undefined): number | undefined {
 function nativeLimitHints(raw: JsonObject | null): {
   readonly retryAfterMs?: number;
   readonly resetAt?: number;
+  readonly resetProven?: boolean;
 } {
   if (raw === null) return Object.freeze({});
   const retryAfterMs = retryAfterHeaderToMs(header(raw, 'retry-after'));
@@ -1131,16 +1132,18 @@ function nativeLimitHints(raw: JsonObject | null): {
     header(raw, 'x-ratelimit-reset')
     ?? header(raw, 'x-rate-limit-reset'),
   );
+  // Either hint is a response header's own figure, so the reset is proven.
   return Object.freeze({
     ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
     ...(resetAt === undefined ? {} : { resetAt }),
+    ...(retryAfterMs === undefined && resetAt === undefined ? {} : { resetProven: true }),
   });
 }
 
 function loopError(
   kind: EngineFailureKind,
   message: string,
-  hints: { readonly retryAfterMs?: number; readonly resetAt?: number } = {},
+  hints: { readonly retryAfterMs?: number; readonly resetAt?: number; readonly resetProven?: boolean } = {},
 ): EngineError {
   return new EngineError({ kind, message, ...hints });
 }

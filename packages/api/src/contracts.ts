@@ -92,6 +92,75 @@ export interface TeamSeat {
   readonly identity: ExecutionTarget;
 }
 
+/**
+ * One logical seat, tried in order. `seat` runs first; each entry of
+ * `candidates` runs when the seat before it cannot answer: its call failed
+ * on billing or quota, the step's `fallbackOn` policy passed the failure
+ * on (a rate limit under the default policy), or the run's availability
+ * store remembers the earlier seat as dead and skips it without a call.
+ * Every entry is a full seat: its own engine, identity and tools.
+ * `candidates` must not be empty.
+ */
+export interface SeatAlternatives {
+  readonly seat: TeamSeat;
+  readonly candidates: readonly TeamSeat[];
+}
+
+/** A seat position: one seat, or one seat with ordered alternatives. */
+export type SeatChoice = TeamSeat | SeatAlternatives;
+
+/** Every seat a choice can run as, in try order. */
+export function seatsOf(choice: SeatChoice): readonly TeamSeat[] {
+  return 'candidates' in choice ? [choice.seat, ...choice.candidates] : [choice];
+}
+
+/** The seat identity a routing decision or availability entry names. */
+export interface SeatRouteTarget {
+  readonly adapter: string;
+  readonly provider: string;
+  readonly modelFamily: string;
+  readonly model: string;
+}
+
+/**
+ * One account's access route: the key remembered availability is scoped to.
+ * The same model name on another adapter or provider is another account.
+ */
+export interface AvailabilityTarget {
+  readonly adapter: string;
+  readonly provider: string;
+  readonly model: string;
+}
+
+/** A remembered dead candidate: it stays skipped until `until` (epoch ms). */
+export interface UnavailableEntry {
+  readonly until: number;
+  readonly failure: 'billing' | 'quota';
+}
+
+/**
+ * Remembered unavailability across runs. A runtime reads it before trying
+ * a step's candidates and writes it only for a billing or quota failure
+ * with a proven reset: one a header or structured field stated, never one
+ * parsed out of error text. The host gives the store to the run; the runtime
+ * opens no file unless the host passes a file-backed store.
+ */
+export interface AvailabilityStore {
+  /**
+   * The stored entry for `target` when it is still dead at `now` (epoch
+   * milliseconds), else `undefined`. An entry at or past its `until` is
+   * absent.
+   */
+  unavailableUntil(target: AvailabilityTarget, now: number): UnavailableEntry | undefined;
+  markUnavailable(target: AvailabilityTarget, entry: UnavailableEntry): void;
+  /**
+   * Drains non-fatal problems found while reading or writing, such as a
+   * corrupt backing file, so the run can record a warning once. Optional:
+   * a store without problems to report may omit it.
+   */
+  takeProblems?(): readonly string[];
+}
+
 export type EngineFailureKind =
   | 'auth'
   | 'billing'

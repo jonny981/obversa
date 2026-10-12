@@ -16,11 +16,17 @@ describe('@obversa/api', () => {
       kind: 'rate-limit',
       message: 'slow down',
       retryAfterMs: 250,
+      resetAt: 1_800_000_000_000,
+      resetProven: true,
       effective,
     });
     expect(error.kind).toBe('rate-limit');
     expect(error.retryAfterMs).toBe(250);
+    expect(error.resetAt).toBe(1_800_000_000_000);
+    expect(error.resetProven).toBe(true);
     expect(error.effective).toEqual(effective);
+    // A reset reported without provenance is not marked proven.
+    expect(new EngineError({ kind: 'quota', message: 'out', resetAt: 1_800_000_000_000 }).resetProven).toBeUndefined();
   });
 
   test('rejects a result without exactly one final part', () => {

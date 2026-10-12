@@ -14,12 +14,13 @@ import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { modelIdentity, type TeamSeat } from '@obversa/api';
+import { modelIdentity, type SeatChoice } from '@obversa/api';
 
 import { INVALID_TEAM_DECISION, outcomeFromAgentText, withDecisionRetry } from './agent-response.js';
 import { commandJob, predicate } from './condition.js';
 import { copyJobMeta, declaredWrites, declareWrites, jobMeta } from './describe.js';
 import { LoopError } from './errors.js';
+import { assertDistinctChoices, seatIdentity, seatList } from './seat.js';
 import { revisionFromOutcome } from './feedback.js';
 import { reviewPanel } from './synthesis.js';
 import {
@@ -63,47 +64,6 @@ import type {
 /* ------------------------------------------------------------------ */
 /* Seats                                                               */
 /* ------------------------------------------------------------------ */
-
-export function seatIdentity(seat: TeamSeat): TeamSeat['identity'] {
-  const identity = seat.identity;
-  if (
-    !identity
-    || typeof identity.adapter !== 'string'
-    || typeof identity.provider !== 'string'
-    || typeof identity.modelFamily !== 'string'
-    || typeof identity.model !== 'string'
-    || !Array.isArray(identity.tools)
-    || !identity.adapter.trim()
-    || !identity.provider.trim()
-    || !identity.model.trim()
-    || !identity.modelFamily.trim()
-  ) {
-    throw new TypeError('engine identity must contain adapter, provider, model family, and model');
-  }
-  return identity;
-}
-
-export function assertDistinctSeats(seats: readonly TeamSeat[]): void {
-  const identities = seats.map((seat, index) => {
-    try {
-      return seatIdentity(seat);
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : 'invalid engine identity';
-      throw new TypeError(`seat ${index + 1} has an invalid engine identity: ${message}`, { cause });
-    }
-  });
-  for (let leftIndex = 0; leftIndex < identities.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < identities.length; rightIndex += 1) {
-      const left = identities[leftIndex]!;
-      const right = identities[rightIndex]!;
-      const sameFamily = left.modelFamily === right.modelFamily;
-      if (!sameFamily) continue;
-      throw new TypeError(
-        `seats ${leftIndex + 1} and ${rightIndex + 1} report the same model family ${left.modelFamily}; model family must be distinct per seat`,
-      );
-    }
-  }
-}
 
 /* ------------------------------------------------------------------ */
 /* File guards                                                         */
@@ -198,8 +158,11 @@ export function isReview(value: unknown): value is Review {
   return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'review';
 }
 
+/** A named reviewer entry. A bare `{ seat, candidates }` alternatives shape
+ * also carries `seat`, so the name is what marks the entry: only it
+ * discriminates the two, never the `seat` field. */
 function isReviewerEntry(value: unknown): value is ReviewerSeat {
-  return typeof value === 'object' && value !== null && 'seat' in (value as object);
+  return typeof value === 'object' && value !== null && 'seat' in (value as object) && 'name' in (value as object);
 }
 
 function isCommand(value: unknown): value is string | readonly string[] {
@@ -239,10 +202,18 @@ export function review(config: ReviewConfig): Review {
     }
     return config.reviewers.map((entry, index): ReviewerSeat => {
       const declared = isReviewerEntry(entry);
+      // `candidates` next to the reviewer's name is not part of a named
+      // entry: the rebuild below keeps only `name`, `seat` and `scope`, so
+      // the alternatives would be dropped without a word. Refuse it.
+      if (declared && 'candidates' in entry) {
+        throw new TypeError(
+          `review() reviewers[${index}] takes its seat's alternatives on the seat, not next to the reviewer's name: { name, seat: { seat, candidates } }`,
+        );
+      }
       const definition = declared
         ? entry
-        : { name: `reviewer-${index + 1}`, seat: entry as TeamSeat };
-      seatIdentity(definition.seat);
+        : { name: `reviewer-${index + 1}`, seat: entry as SeatChoice };
+      seatList(definition.seat);
       if (definition.scope !== undefined && (typeof definition.scope !== 'string' || !definition.scope.trim())) {
         throw new TypeError(`review() reviewers[${index}] scope must be a non-empty string`);
       }
@@ -251,7 +222,7 @@ export function review(config: ReviewConfig): Review {
       return built;
     });
   })();
-  if (reviewers !== undefined) assertDistinctSeats(reviewers.map((definition) => definition.seat));
+  if (reviewers !== undefined) assertDistinctChoices(reviewers.map((definition) => definition.seat));
   const pass = config.pass === undefined ? 'all' : (() => {
     if (config.pass === 'all') return 'all' as const;
     if (reviewers === undefined) throw new TypeError('review() pass needs reviewers');
@@ -735,18 +706,23 @@ function assertRecordedFamilies(
  * either tagged side is a refusal, never a pass. */
 export function recordedFamilyGate(
   panel: Job,
-  reviewers: readonly TeamSeat[],
-  writerStageNames: readonly string[],
-  writerFamilies: readonly string[],
+  reviewers: readonly SeatChoice[],
+  writers: readonly { readonly stage: string; readonly family: string }[],
   writerRunsInsidePanel: boolean,
 ): Job {
-  const reviewerDeclarations = reviewers.map((seat) => ({
-    label: `reviewer seat ${seatIdentity(seat).model}`,
-    family: seatIdentity(seat).modelFamily,
-  }));
-  const writerDeclarations = writerStageNames.map((name, index) => ({
-    label: `writer stage ${name}`,
-    family: writerFamilies[index] ?? '',
+  const writerStageNames = [...new Set(writers.map((writer) => writer.stage))];
+  // Every candidate a reviewer seat can resolve to declares its family:
+  // a recorded writer answer must differ from all of them, not only the
+  // primary's.
+  const reviewerDeclarations = reviewers.flatMap((choice) =>
+    seatList(choice).map((seat) => ({
+      label: `reviewer seat ${seat.identity.model}`,
+      family: seat.identity.modelFamily,
+    })),
+  );
+  const writerDeclarations = writers.map(({ stage, family }) => ({
+    label: `writer stage ${stage}`,
+    family,
   })).filter((entry) => entry.family !== '');
   return declareWrites(async (ctx) => {
     try {
@@ -879,18 +855,23 @@ function nodePrompt(
  */
 function seatBuilder(
   name: string,
-  seat: TeamSeat,
+  seat: SeatChoice,
   node: DagNode,
   config: DagConfig,
   routes: readonly string[],
 ): Job {
-  const identity = seatIdentity(seat);
+  const seats = seatList(seat);
+  const primary = seats[0]!;
+  const alternatives = seats.slice(1);
+  const identity = primary.identity;
   const writes = node.writes;
   const writeFiles = writeList(writes);
   const ask = (again: boolean) => agentJob({
     label: name,
-    engine: seat.engine,
+    engine: primary.engine,
     model: identity.model,
+    identity,
+    ...(alternatives.length === 0 ? {} : { candidates: alternatives }),
     tools: [...identity.tools],
     allowedTools: [...identity.tools],
     workspaceMode: writes === undefined ? 'read' : 'write',
@@ -995,7 +976,10 @@ function reviewerJob(
   node: DagNode,
   config: DagConfig,
 ): Job {
-  const identity = seatIdentity(definition.seat);
+  const seats = seatList(definition.seat);
+  const primary = seats[0]!;
+  const alternatives = seats.slice(1);
+  const identity = primary.identity;
   const target = reviewFiles(node);
   const instructions = [
     `Review target: ${target.length ? target.join(', ') : 'the work the node did'}.`,
@@ -1010,8 +994,10 @@ function reviewerJob(
   const label = definition.name.startsWith(`${name}-`) ? definition.name : `${name}-${definition.name}`;
   const ask = (again: boolean) => agentJob({
     label,
-    engine: definition.seat.engine,
+    engine: primary.engine,
     model: identity.model,
+    identity,
+    ...(alternatives.length === 0 ? {} : { candidates: alternatives }),
     tools: [...identity.tools],
     allowedTools: [...identity.tools],
     workspaceMode: 'read',
@@ -1101,8 +1087,10 @@ export function compileNodeJob(
   // or the fixer's model family.
   const reviewerSeats = (refine.reviewers ?? []).map((definition) => definition.seat);
   if (reviewerSeats.length) {
-    for (const writerSeat of [node.agent, refine.fixer]) {
-      if (writerSeat !== undefined) assertDistinctSeats([writerSeat, ...reviewerSeats]);
+    for (const writerSeat of [node.agent, refine.fixer] as const) {
+      // Every candidate either side can resolve to counts: no reachable
+      // combination of writer and reviewer may share a model family.
+      if (writerSeat !== undefined) assertDistinctChoices([writerSeat, ...reviewerSeats]);
     }
   }
   const fixer = refine.fixer;
@@ -1155,8 +1143,7 @@ export function compileNodeJob(
     recordedFamilyGate(
       wrapped,
       reviewerSeats,
-      [name],
-      [seatIdentity(writerSeat).modelFamily],
+      seatList(writerSeat).map((seat) => ({ stage: name, family: seat.identity.modelFamily })),
       node.agent !== undefined,
     ),
     wrapped,

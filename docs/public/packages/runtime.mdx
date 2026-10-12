@@ -218,6 +218,60 @@ asks an engine a scored question as a condition; `confidenceCondition` and
 is the state key under which a run records which model answered each
 engine call, so the review gate compares writers with reviewers by family.
 
+## Candidate seats
+
+Where a graph names the seat that does the work (a `dag()` node's `agent`, a
+`pipeline()` stage's `agent`, each seat in `review({ reviewers })`), it may
+name that seat's ordered alternatives instead:
+
+```ts examples/seat-candidates.ts (excerpt)
+    build: {
+      agent: {
+        seat: primary,
+        candidates: [spare],
+      },
+      writes: 'workspace',
+      desc: 'Build the change.',
+    },
+```
+
+Each candidate is a full seat of its own: engine, identity and tools. A call
+that fails on billing or quota runs the next candidate in the same step,
+under that candidate's own tool policy. A rate limit follows the step's
+`fallbackOn` policy, so it also moves to the next candidate when that policy
+allows it, as the default does. Any other failure ends the step as it
+always did, and an abort stops the step at once. An empty `candidates`
+list is refused, and a seat with none behaves exactly as before.
+
+The record names the move in a `seat:route` event: the requested identity,
+the selected candidate, the failure kind and the reset when one is known.
+What actually answered stays on the `engine:usage` event, so the
+recorded-model checks compare the answering model's family, never the
+selection's. When every candidate is unavailable the step ends on a
+`QUOTA` error, with each skip on the record. The error carries the earliest
+reset that a candidate reported or the store holds, so a loop's `onLimit`
+policy waits for that reset or pauses, as it does for a single model.
+Inside a review that is an operational failure, never a verdict.
+
+A run may carry an `AvailabilityStore` on `run({ availability })`, and
+`fileAvailabilityStore(path)` is the plain-file default. A billing or quota
+failure whose reset is proven, meaning a header or a structured field
+stated it rather than text parsed out of an error message, writes
+`(adapter, provider, model)` to the time it resets, and a later run skips
+that candidate without a call and records the skip. A failure with no
+proven reset writes nothing. A host that learns a reset out of band calls
+the store's `markUnavailable` itself before the run. A store file that
+cannot be read counts as empty with a warning in the record, and a run
+with no candidate seats never opens the store. The
+[seat candidates example](https://github.com/jonny981/obversa/blob/main/examples/seat-candidates.ts)
+runs one end to end.
+
+The family rule still holds over every reachable candidate: inside a
+review, no reviewer may resolve to the model family of another reviewer,
+the node's `agent` or its `fixer`, over every candidate either side can
+run as, or the graph is refused before any model runs. Two alternatives
+inside one seat may share a family.
+
 ## Ask a person
 
 `humanReview(name, { question, input, interaction })` makes a review step
@@ -374,6 +428,7 @@ variables for a job and every job beneath it.
 | `params` | `RunBrief` | none | A frozen JSON object every job reads as `ctx.params`. |
 | `state` | `Record<string, unknown>` | none | Seed for the shared mutable run state. |
 | `memory` | `Memory` | none | The memory adapter every job sees as `ctx.memory`. |
+| `availability` | `AvailabilityStore` | none | The store that remembers a candidate seat's dead model until its known reset; `fileAvailabilityStore(path)` is the plain-file default. Only a step whose seat names `candidates` reads or writes it. |
 | `monitor` | `boolean` | off; on under `supervise` | Serve the run's own page on a loopback port. |
 | `budget` | `number` or `BudgetConfig` | none | Cap on total tokens; `{ limit, headroom?, soft? }`. |
 | `supervise` | `boolean` | `false` | Register under `~/.obversa/runs/<runId>` for outside inspection. |
@@ -390,7 +445,7 @@ except `retrySafe` and the timeout and output bounds.
 
 | Key | What it means |
 | --- | --- |
-| `agent` | The seat that does the work, such as `claude('claude-sonnet-4-5')`. Its prompt is assembled from the graph's brief and the node's `desc` and `gate`, and a kept send-back's findings reach it the next round. A node takes `agent` or `job`, never both and never neither. |
+| `agent` | The seat that does the work, such as `claude('claude-sonnet-4-5')`, or `{ seat, candidates }` naming its ordered alternatives ([Candidate seats](#candidate-seats)). Its prompt is assembled from the graph's brief and the node's `desc` and `gate`, and a kept send-back's findings reach it the next round. A node takes `agent` or `job`, never both and never neither. |
 | `job` | A `Job` the node runs: `fnJob`, `commandJob`, `agentJob`, a nested `dag()` or a `loop()`. For code, and for a seat whose typed reply is data a later node reads. |
 | `writes` | What an `agent` node may write: `'workspace'` for the whole run workspace, one file path, or a list of paths. Left out, the seat reads but does not write. A declaration, not a sandbox: it feeds the unchanged-work check and tells the reviewers what to read. |
 | `file` | The artifact this node builds, relative to the workspace. A judge of work sent back to this node reads it, and a resume runs a finished node again when it is missing. The unchanged-work check after a send-back reads `writes` when the node declares it, and this file only when `writes` is left out. Separate from `writes`: `writes` is the scope, `file` is the one artifact. |
@@ -411,7 +466,7 @@ The fields `review({ ... })` takes, on a node's `refine`. A review needs
 | --- | --- |
 | `checks` | Commands run first each round, through `commandJob` as it ships: a string, which refuses shell syntax (quoting, pipes, `&&`, redirects, `$`), or an argv array for the arguments a string cannot carry. A red check sends the work back under `checkRounds` and skips the reviewers and the judge for that round; no vote or judge waives it. |
 | `goal` | The job `goalCheck()` returns, run after the checks and before the reviewers each round. An unmet requirement sends the work back with its evidence; no judge decides it, and it counts as a review round. |
-| `reviewers` | The panel: seats, or named seats with a scope (`{ name, seat, scope }`). Each reviewer must report a different model family from the node's `agent` and from each other's. A reviewer that fails to start is an error, not a finding. |
+| `reviewers` | The panel: seats, or named seats with a scope (`{ name, seat, scope }`); any `seat` may be `{ seat, candidates }`. Each reviewer must report a different model family from the node's `agent` and from each other's, over every candidate it can resolve to. A reviewer that fails to start is an error, not a finding. |
 | `pass` | `'all'` (the default) or how many reviewers must accept for a round to pass. Needs `reviewers`. |
 | `synthesise` | A seat, or `true` for the first reviewer's, that merges the reviews into one before anything reads them, as `reviewPanel`'s. Needs `reviewers`. |
 | `judge` | The value `judge()` returns: a seat asked about each round between the review's verdict and the send-back, deciding each finding `act` or `skip`. Its own `cap` bounds the rounds; with none, the rounds end when it stops them or the review passes. Cannot be given with `rounds`. |
@@ -477,7 +532,7 @@ export keeps the exact `Job` type), `defineAgent`, `defineAgentFromMarkdown`,
 **Build a graph.** `dag`, `pipeline`, `sequence`, `parallel`, `loop`,
 `fnJob`, `agentJob`, `commandJob`, `commandSucceeds`, `gateJob`, `prove`,
 `isolated`, `writeScope`, `team`, `jobMeta`, `copyJobMeta`, `renderPlan`,
-`assertGraph`, `withEnv`.
+`assertGraph`, `withEnv`, `seatsOf`.
 
 **Conditions.** `passed`, `failed`, `all`, `any`, `not`, `always`, `never`,
 `predicate`, `toCondition`, `describeConditions`, `bodyPassed`, `quorum`,
@@ -496,6 +551,7 @@ export keeps the exact `Job` type), `defineAgent`, `defineAgentFromMarkdown`,
 `formatCostReport`, `renderRecord`, `summarizeRecord`,
 `preflight`, `preflightEngine`, `formatPreflight`,
 `fallbackEngine`, `classifyEngineFailure`, `LANE_DEAD_FAILURES`,
+`fileAvailabilityStore`,
 `finalResultPart`, `finalResultText`, `validateAgentResult`.
 
 **Evidence.** `writeProofArtifact`, `createAcceptedResultRecord`,

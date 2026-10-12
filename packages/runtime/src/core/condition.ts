@@ -422,6 +422,7 @@ export function quorum(k: number, ...inputs: ConditionInput[]): Condition {
         retryable: first.retryable,
         retryAfterMs: first.retryAfterMs,
         resetAt: first.resetAt,
+        resetProven: first.resetProven,
         cause: { error: first, output },
       });
     }

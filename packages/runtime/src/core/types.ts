@@ -17,7 +17,16 @@
 
 import type { Engine, EngineRef, UsageReceipt } from '../engines/engine.js';
 import type { Billing, CostReceipt } from '@obversa/api';
-import type { EngineSelectionRecord, ExecutionTarget, Memory, TeamSeat } from '@obversa/api';
+import type {
+  AvailabilityStore,
+  EngineFailureKind,
+  EngineSelectionRecord,
+  ExecutionTarget,
+  Memory,
+  SeatChoice,
+  SeatRouteTarget,
+  TeamSeat,
+} from '@obversa/api';
 import type { LoopError, LoopErrorCode } from './errors.js';
 import type { TreeChange } from './git.js';
 import type { Budget } from './budget.js';
@@ -390,6 +399,13 @@ export interface JobContext {
   /** Memory available to jobs in this run, when the caller supplied it. */
   readonly memory?: Memory;
   /**
+   * Remembered candidate unavailability for this run, when the host supplied
+   * a store. A step whose seat names `candidates` reads it before trying
+   * them and writes it only for a billing or quota failure with a proven
+   * reset. A step with one seat never touches it.
+   */
+  readonly availability?: AvailabilityStore;
+  /**
    * The run's callbacks client: where a step posts a question for a person or
    * an outside router, and where the answer is found again on a resume. Every
    * run has one, a fresh in-memory client by default; pass `callbacks` to
@@ -653,12 +669,14 @@ export interface LoopConfig {
 // are all expressed as nodes + `needs`.
 
 /**
- * One seat on a review panel: the seat itself, the name its verdicts carry,
- * and the part of the work it reads when the panel divides the work by scope.
+ * One seat on a review panel: the seat itself — or one seat with its ordered
+ * candidates — the name its verdicts carry, and the part of the work it
+ * reads when the panel divides the work by scope. Candidates are one logical
+ * reviewer tried in order, never extra reviewers or extra votes.
  */
 export interface ReviewerSeat {
   readonly name: string;
-  readonly seat: TeamSeat;
+  readonly seat: SeatChoice;
   readonly scope?: string;
 }
 
@@ -684,9 +702,9 @@ export interface ReviewConfig {
   /**
    * The panel that reviews the work each round. Every reviewer must be a
    * different model family than the node's agent and each other's, as the
-   * panel rules require.
+   * panel rules require — every candidate a seat can resolve to counts.
    */
-  readonly reviewers?: readonly (TeamSeat | ReviewerSeat)[];
+  readonly reviewers?: readonly (SeatChoice | ReviewerSeat)[];
   /**
    * How many reviewers must pass for a round to pass: `'all'` (the default)
    * or a count, as `reviewPanel`'s `pass`.
@@ -752,10 +770,12 @@ export interface DagNode {
   /**
    * The seat that does the work, compiled to an `agentJob` whose prompt is
    * assembled from the graph's brief and the node's `desc` and `gate`, with
-   * the findings the kept send-backs carry. `writes` scopes what it may write;
-   * left out, the agent reads but does not write.
+   * the findings the kept send-backs carry. `{ seat, candidates }` names the
+   * seat's ordered alternatives: a billing or quota failure on one runs the
+   * next in the same step. `writes` scopes what it may write; left out, the
+   * agent reads but does not write.
    */
-  agent?: TeamSeat;
+  agent?: SeatChoice;
   /**
    * What the agent may write: `'workspace'` for the whole run workspace, or a
    * list of files it owns. A declaration, not a sandbox: it feeds the
@@ -1226,6 +1246,26 @@ export type LoopEvent =
       phase: 'use' | 'result';
       /** The file, command, URL or pattern the tool acted on, when known. */
       target?: string;
+    }
+  | {
+      /** A seat's candidates moved the step to another model, or remembered
+       * unavailability skipped one without a call: what the step asked for,
+       * what it selected, and why. Absent `selected` means no candidate
+       * could run. The model that actually answered is on `engine:usage`,
+       * never here. */
+      kind: 'seat:route';
+      ts: number;
+      path: string[];
+      /** The candidate that failed or was skipped. */
+      requested: SeatRouteTarget;
+      /** The next candidate that runs, when one can. */
+      selected?: SeatRouteTarget;
+      /** Why the requested candidate did not run. */
+      failure: EngineFailureKind;
+      /** The known reset the failure or the memory entry gave, epoch ms. */
+      reset?: number;
+      /** The skip came from remembered unavailability, not a fresh failure. */
+      remembered?: true;
     }
   | {
       kind: 'engine:usage';

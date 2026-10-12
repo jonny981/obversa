@@ -18,15 +18,14 @@ import { kickback, revisionFromOutcome } from './core/feedback.js';
 import { reviewPanel } from './core/synthesis.js';
 import { isJudge } from './core/judge.js';
 import {
-  assertDistinctSeats,
   recordedFamilyGate,
   recordRoundChange,
   refinedRounds,
   requireNoFiles,
   requireNonEmptyFiles,
   review,
-  seatIdentity,
 } from './core/refine.js';
+import { assertDistinctSeats, seatIdentity } from './core/seat.js';
 import type { ConditionInput, DagConfig, Job, JobContext, Judge, Outcome } from './core/types.js';
 import { checkpointInteraction, humanReview, interactionIdentity, jsonSnapshot, requestInteraction, type InteractionBinding } from './core/interaction.js';
 
@@ -606,8 +605,7 @@ function stageJob(
       recordedFamilyGate(
         reviewLoop,
         reviewers,
-        [named.name],
-        [seatIdentity(seatRole(roles, config.agent)).modelFamily],
+        [{ stage: named.name, family: seatIdentity(seatRole(roles, config.agent)).modelFamily }],
         true,
       ),
       reviewLoop,
@@ -629,7 +627,7 @@ function stageJob(
   if ('panel' in config && config.panel !== undefined) {
     const reviewers = panelRole(roles, config.panel);
     const panel = reviewerPanel(brief, named, reviewers, files, declaredFiles, targetFiles, config.sendsBackTo, config.agree, config.synthesise);
-    return copyJobMeta(recordedFamilyGate(panel, reviewers, familyTargetStageNames, familyTargetFamilies, false), panel);
+    return copyJobMeta(recordedFamilyGate(panel, reviewers, familyTargetStageNames.map((stage, index) => ({ stage, family: familyTargetFamilies[index]! })), false), panel);
   }
   if ('input' in config && config.input !== undefined) {
     const personRole = inputRole(roles, config.input);
