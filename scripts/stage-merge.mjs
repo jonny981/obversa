@@ -175,6 +175,7 @@ export const stageBranches = {
   F234: 'fix/opencode-scan-vanished',
   F230: 'fix/failed-judge-stops',
   F221: 'feat/model-router',
+  F236: 'feat/rdc-git-history',
   F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',
