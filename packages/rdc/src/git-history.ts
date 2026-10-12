@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
   asSourceReadError,
   canonicalPath,
+  commitDate,
   GitFailure,
   pathNames,
   probeWorkTree,
@@ -74,7 +75,7 @@ function parseLog(output: string, withBody: boolean): LogCommit[] {
     commits.push({
       sha,
       short,
-      date,
+      date: commitDate(date),
       subject,
       body: body.trim(),
       changedPaths: pathNames(pathBlock),

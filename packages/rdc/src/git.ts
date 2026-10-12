@@ -161,6 +161,12 @@ export async function resolveCommit(
   return output.trim();
 }
 
+/** A committer date as `%cI` prints it, in one form whatever the git
+ *  version: git 2.39 writes UTC as `+00:00`, git 2.55 writes `Z`. */
+export function commitDate(raw: string): string {
+  return raw.endsWith('Z') ? `${raw.slice(0, -1)}+00:00` : raw;
+}
+
 /** `log`/`show -z` print a commit's path list as `\x00\n` + NUL-separated
  *  names, so the first name carries git's newline separator; later names
  *  are raw (a real file name may itself contain a newline). */

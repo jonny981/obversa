@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { gitHistory, type CandidateSource } from '../src/index.js';
+import { commitDate } from '../src/git.js';
 
 // The reader's own git invocations always carry `-c core.hooksPath=…`;
 // recording only those calls keeps the fixture's own commits out of the
@@ -146,6 +147,19 @@ afterEach(async () => {
   for (const directory of temporaryDirectories.splice(0)) {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+describe('commitDate', () => {
+  // git 2.39 prints a UTC committer date as +00:00 and git 2.55 prints Z;
+  // the fixture specs only see whichever git the machine has.
+  it('gives a UTC date one form whatever the git version', () => {
+    expect(commitDate('2026-10-02T10:00:00Z')).toBe('2026-10-02T10:00:00+00:00');
+    expect(commitDate('2026-10-02T10:00:00+00:00')).toBe('2026-10-02T10:00:00+00:00');
+  });
+
+  it('leaves a date with another offset unchanged', () => {
+    expect(commitDate('2026-10-02T11:00:00+01:00')).toBe('2026-10-02T11:00:00+01:00');
+  });
 });
 
 describe('gitHistory', () => {

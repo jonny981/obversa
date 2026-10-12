@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import {
   asSourceReadError,
   canonicalPath,
+  commitDate,
   GitFailure,
   pathNames,
   probeWorkTree,
@@ -383,7 +384,7 @@ async function logDates(
   for (const block of output.split('\x1e')) {
     if (block.trim() === '') continue;
     const parts = block.split('\0');
-    const date = parts[0]!.trim();
+    const date = commitDate(parts[0]!.trim());
     for (const path of pathNames(parts.slice(1).join('\0'))) {
       if (!dates.has(path)) dates.set(path, date);
     }
