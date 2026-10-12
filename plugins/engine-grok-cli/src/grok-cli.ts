@@ -248,33 +248,58 @@ function trustedSystemPrompt(request: AgentRequest): string {
     : `${BASE_SYSTEM_PROMPT}\n\n${request.system}`;
 }
 
-function authRedactions(contents: string | null): Readonly<Record<string, string>> {
-  if (contents === null) return Object.freeze({});
-  const text = contents;
-  if (Buffer.byteLength(text, 'utf8') > 1024 * 1024) {
+interface GrokAuthInspection {
+  readonly redactions: Readonly<Record<string, string>>;
+  readonly expiries: readonly string[];
+}
+
+function inspectAuth(contents: string): GrokAuthInspection {
+  if (Buffer.byteLength(contents, 'utf8') > 1024 * 1024) {
     throw new TypeError('Grok auth file must not exceed 1 MiB');
   }
   let value: unknown;
   try {
-    value = JSON.parse(text);
+    value = JSON.parse(contents);
   } catch {
     throw new TypeError('Grok auth file must contain valid JSON');
   }
-  const redactions: Record<string, string> = { GROK_AUTH_FILE: text };
-  const pending: unknown[] = [value];
+  const redactions: Record<string, string> = { GROK_AUTH_FILE: contents };
+  const expiries: string[] = [];
+  const pending: [string | null, unknown][] = [[null, value]];
   let index = 0;
   while (pending.length > 0) {
-    const current = pending.pop();
+    const [key, current] = pending.pop()!;
     if (typeof current === 'string') {
-      redactions[`GROK_AUTH_VALUE_${index}`] = current;
-      index += 1;
+      if (key === 'expires_at') {
+        // An expiry is a time, not a secret: the failure message names it.
+        expiries.push(current);
+      } else {
+        redactions[`GROK_AUTH_VALUE_${index}`] = current;
+        index += 1;
+      }
     } else if (Array.isArray(current)) {
-      pending.push(...current);
+      for (const item of current) pending.push([null, item]);
     } else if (typeof current === 'object' && current !== null) {
-      pending.push(...Object.values(current));
+      pending.push(...Object.entries(current));
     }
   }
-  return Object.freeze(redactions);
+  return {
+    redactions: Object.freeze(redactions),
+    expiries: Object.freeze(expiries),
+  };
+}
+
+function latestAuthExpiry(
+  expiries: readonly string[],
+): { readonly text: string; readonly time: number } | null {
+  let latest: { text: string; time: number } | null = null;
+  for (const expiry of expiries) {
+    const time = Date.parse(expiry);
+    if (!Number.isNaN(time) && (latest === null || time > latest.time)) {
+      latest = { text: expiry, time };
+    }
+  }
+  return latest;
 }
 
 function scrubAuthValues(
@@ -750,7 +775,6 @@ export class GrokCliEngine implements Engine {
   readonly #identity: GrokCliIdentity;
   readonly #environment: Readonly<Record<string, string>>;
   readonly #authFile: string | null;
-  readonly #authContents: string | null;
   readonly #authRedactions: Readonly<Record<string, string>>;
   readonly #options: GrokCliEngineOptions;
 
@@ -792,7 +816,7 @@ export class GrokCliEngine implements Engine {
     this.#environment = Object.freeze(selectedEnvironment);
     if (options.authFile === undefined) {
       this.#authFile = null;
-      this.#authContents = null;
+      this.#authRedactions = Object.freeze({});
     } else {
       if (!isAbsolute(options.authFile)) {
         throw new TypeError('Grok auth file must be an absolute path');
@@ -802,9 +826,8 @@ export class GrokCliEngine implements Engine {
         throw new TypeError('Grok auth file must be a regular file, not a symlink');
       }
       this.#authFile = realpathSync(options.authFile);
-      this.#authContents = readFileSync(this.#authFile, 'utf8');
+      this.#authRedactions = inspectAuth(readFileSync(this.#authFile, 'utf8')).redactions;
     }
-    this.#authRedactions = authRedactions(this.#authContents);
     this.#options = Object.freeze({
       executable: this.#executable,
       version: this.#version,
@@ -820,6 +843,25 @@ export class GrokCliEngine implements Engine {
     });
   }
 
+  /**
+   * The login file as it reads now, so a refresh made outside the run
+   * reaches the next call. Redaction covers this call's copy.
+   */
+  #readAuth(): ({ readonly contents: string } & GrokAuthInspection) | null {
+    if (this.#authFile === null) return null;
+    try {
+      const contents = readFileSync(this.#authFile, 'utf8');
+      return { contents, ...inspectAuth(contents) };
+    } catch (error) {
+      const diagnostic = error instanceof Error ? error.message : String(error);
+      throw loopError('invalid-config', scrubCapture(
+        scrubAuthValues(diagnostic, this.#authRedactions),
+        { ...this.#environment },
+        700,
+      ));
+    }
+  }
+
   async admit(
     request: Omit<AgentRequest, 'prompt'>,
     signal: AbortSignal,
@@ -830,6 +872,8 @@ export class GrokCliEngine implements Engine {
     }
     let normalized: AgentRequest;
     let selected: EngineSelectionRecord;
+    let authContents: string | null = null;
+    let authRedactions = this.#authRedactions;
     try {
       if (request.env !== undefined && Object.keys(request.env).length > 0) {
         throw new TypeError(
@@ -854,6 +898,19 @@ export class GrokCliEngine implements Engine {
         || !Number.isSafeInteger(memory) || memory < 1) {
         throw new TypeError('Grok request command limits are invalid');
       }
+      const auth = this.#readAuth();
+      if (auth !== null) {
+        authContents = auth.contents;
+        authRedactions = auth.redactions;
+        // A login that cannot last the call's limit fails here instead of
+        // spending the call on 401 rejections.
+        const expiry = latestAuthExpiry(auth.expiries);
+        if (expiry !== null && expiry.time <= Date.now() + timeout) {
+          throw new TypeError(
+            `the Grok login expires at ${expiry.text}, before this call's limit; run grok once outside Obversa to refresh it`,
+          );
+        }
+      }
       ownedCommandIdentity({
         adapter: 'grok-cli', runId: request.attempt?.runId,
         leafId: request.attempt?.leafId, attemptId: request.attempt?.attemptId,
@@ -871,7 +928,7 @@ export class GrokCliEngine implements Engine {
     } catch (error) {
       const diagnostic = error instanceof Error ? error.message : 'invalid request';
       throw loopError('invalid-config', scrubCapture(
-        scrubAuthValues(diagnostic, this.#authRedactions), { ...this.#environment }, 700,
+        scrubAuthValues(diagnostic, authRedactions), { ...this.#environment }, 700,
       ));
     }
     // Recheck availability at the retained absolute path, never choose another path.
@@ -881,7 +938,7 @@ export class GrokCliEngine implements Engine {
       throw loopError('missing-cli', 'Grok configured executable is missing or not runnable');
     }
     const version = await (this.#versionObservation ??= this.#observeVersion(
-      normalized, selected.capabilities, signal,
+      normalized, selected.capabilities, authContents, signal,
     ).catch((error: unknown) => {
       this.#versionObservation = undefined;
       throw error;
@@ -893,16 +950,17 @@ export class GrokCliEngine implements Engine {
   async #observeVersion(
     request: AgentRequest,
     capabilities: readonly string[],
+    authContents: string | null,
     signal: AbortSignal,
   ): Promise<string> {
     let directory: string | undefined;
     let primary: EngineError | undefined;
     try {
-      if (this.#authContents !== null) {
+      if (authContents !== null) {
         directory = mkdtempSync(join(tmpdir(), 'lines-grok-version-'));
       }
       const environment = childEnvironment(
-        directory, request, capabilities, this.#environment, this.#authContents,
+        directory, request, capabilities, this.#environment, authContents,
       );
       const command = await runOwnedCommand({
         executable: this.#executable,
@@ -982,6 +1040,7 @@ export class GrokCliEngine implements Engine {
     const capabilities = requested.capabilities;
     const cwd = realpathSync(request.cwd!);
     const normalizedRequest: AgentRequest = { ...request, cwd };
+    const auth = this.#readAuth();
     const directory = mkdtempSync(join(tmpdir(), 'lines-grok-'));
     const promptFile = join(directory, 'prompt.md');
     writeFileSync(promptFile, request.prompt, { encoding: 'utf8', mode: 0o600 });
@@ -1013,7 +1072,7 @@ export class GrokCliEngine implements Engine {
         normalizedRequest,
         capabilities,
         this.#environment,
-        this.#authContents,
+        auth?.contents ?? null,
       );
       const structured = normalizedRequest.jsonSchema !== undefined;
       const command = await runOwnedCommand({
@@ -1061,7 +1120,7 @@ export class GrokCliEngine implements Engine {
       const stdout = new TextDecoder().decode(command.stdout);
       const stderr = new TextDecoder().decode(command.stderr);
       const scrubDiagnostic = (value: string): string => scrubCapture(
-        scrubAuthValues(value, this.#authRedactions),
+        scrubAuthValues(value, auth?.redactions ?? this.#authRedactions),
         { ...this.#environment },
         700,
       );

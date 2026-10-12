@@ -45,3 +45,18 @@ const engine = new GrokCliEngine({
   permissionMode: 'dontAsk',
 });
 ```
+
+## Login expiry
+
+Each account entry in a Grok login file carries `expires_at`. A login lasts
+six hours.
+
+With `authFile` the engine reads the file again at each call, so a refresh
+made outside the run reaches the next call.
+
+Before a call starts Grok, the engine checks those times. When the file
+has at least one `expires_at` and none of them is later than now plus the
+call's time limit, the call fails at once with `invalid-config` and names
+the expiry. Run `grok` once outside Obversa to refresh the login, then run
+again. A file with no `expires_at` is not checked. A value that does not
+read as a date is ignored.

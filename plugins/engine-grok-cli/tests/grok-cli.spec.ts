@@ -22,6 +22,7 @@ import {
   digestJson,
   EngineError,
   engineSelection,
+  LANE_DEAD_FAILURES,
   type AgentRequest,
   type EngineStreamEvent,
   type EngineSelectionRecord,
@@ -1075,7 +1076,8 @@ describe('Grok CLI adapter', () => {
         OBVERSA_TEST_GROK_SCENARIO: 'invocation',
       },
     });
-    writeFileSync(authFile, '{"fixture":"changed-after-selection"}');
+    const refreshed = '{"fixture":"changed-after-selection"}';
+    writeFileSync(authFile, refreshed);
 
     await engine.run(
       request(),
@@ -1091,7 +1093,9 @@ describe('Grok CLI adapter', () => {
       };
     };
 
-    expect(call.environment.auth).toBe(auth);
+    // The engine reads the login file again at each call, so a refresh made
+    // after construction reaches the next call.
+    expect(call.environment.auth).toBe(refreshed);
     expect(call.environment.home).toBe(process.env.HOME);
     expect(call.environment.grokHome).not.toBe(process.env.GROK_HOME ?? null);
     expect(call.environment.grokVariables).toEqual({
@@ -1100,6 +1104,65 @@ describe('Grok CLI adapter', () => {
       GROK_SUBAGENTS: '0',
     });
     expect(existsSync(call.environment.grokHome!)).toBe(false);
+  });
+
+  it.each([
+    ['already expired', () => new Date(Date.now() - 3_600_000).toISOString()],
+    ['expires inside the call\'s limit', () => new Date(Date.now() + 5_000).toISOString()],
+  ])('fails before any process when the login %s', async (_label, expiryOf) => {
+    const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
+    const expiresAt = expiryOf();
+    const authFile = join(temporaryDirectory('lines-grok-auth-'), 'auth.json');
+    writeFileSync(authFile, JSON.stringify({
+      accounts: [{ access_token: 'fixture-token', expires_at: expiresAt }],
+    }), { mode: 0o600 });
+    const engine = new GrokCliEngine({
+      ...options(),
+      authFile,
+      environment: { OBVERSA_TEST_GROK_CALLS: calls },
+    });
+    let error: unknown;
+
+    try {
+      await engine.run(request({ timeoutMs: 60_000 }), () => {}, new AbortController().signal);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(EngineError);
+    expect(error).toMatchObject({
+      name: 'EngineError',
+      kind: 'invalid-config',
+      message: `the Grok login expires at ${expiresAt}, before this call's limit; run grok once outside Obversa to refresh it`,
+    });
+    expect(LANE_DEAD_FAILURES.has((error as EngineError).kind)).toBe(true);
+    expect(invocations(calls)).toEqual([]);
+  });
+
+  it.each([
+    ['a login valid past the call\'s limit', [
+      { access_token: 'fixture-token', expires_at: new Date(Date.now() + 3_600_000).toISOString() },
+    ]],
+    ['a login with an expired entry beside a valid one', [
+      { access_token: 'fixture-old-token', expires_at: new Date(0).toISOString() },
+      { access_token: 'fixture-token', expires_at: new Date(Date.now() + 3_600_000).toISOString() },
+    ]],
+    ['a login with no expires_at', [{ access_token: 'fixture-token' }]],
+  ])('runs %s', async (_label, accounts) => {
+    const authFile = join(temporaryDirectory('lines-grok-auth-'), 'auth.json');
+    writeFileSync(authFile, JSON.stringify({ accounts }), { mode: 0o600 });
+    const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
+
+    const result = await new GrokCliEngine({
+      ...options(),
+      authFile,
+      environment: {
+        OBVERSA_TEST_GROK_RECORD: recordPath,
+        OBVERSA_TEST_GROK_SCENARIO: 'invocation',
+      },
+    }).run(request(), () => {}, new AbortController().signal);
+
+    expect(result.parts.at(-1)).toMatchObject({ kind: 'assistant', final: true });
   });
 
   it.each([
