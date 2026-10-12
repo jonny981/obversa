@@ -174,6 +174,7 @@ export const stageBranches = {
   F232: 'fix/consumer-red-run',
   F234: 'fix/opencode-scan-vanished',
   F230: 'fix/failed-judge-stops',
+  F221: 'feat/model-router',
   F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',
