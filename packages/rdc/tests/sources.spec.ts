@@ -1,6 +1,11 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
+  gitHistory,
   pickFromSources,
   SourceReadError,
   type CandidateReadResult,
@@ -55,6 +60,29 @@ describe('pickFromSources', () => {
     expect(result.selected.map((item) => item.id).sort()).toEqual(['n1', 'r1']);
     expect(result.record.rulesCoverage).toBe('complete');
     expect(result.reads.map((read) => read.status)).toEqual(['read', 'read']);
+  });
+
+  it('proceeds past a git history source that reports absent', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'obversa-rdc-src-'));
+    try {
+      const result = await pickFromSources(
+        [
+          gitHistory(directory),
+          source('notes', 'reference', async () => ({
+            status: 'read',
+            complete: true,
+            candidates: [candidate({ sourceId: 'notes', id: 'n1' })],
+          })),
+        ],
+        { task: 'the task' },
+        { task: 'the task', decide: sayYes },
+      );
+
+      expect(result.reads[0]).toEqual({ status: 'absent', reason: 'no-history' });
+      expect(result.selected.map((item) => item.id)).toEqual(['n1']);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('treats an absent source as a result, not a failure', async () => {

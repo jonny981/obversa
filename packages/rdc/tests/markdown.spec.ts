@@ -1,10 +1,13 @@
+import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  gitHistory,
   knowledgeBase,
   pick,
   pickFromSources,
@@ -14,6 +17,27 @@ import {
   type PickAnswer,
   type PickBatch,
 } from '../src/index.js';
+
+// knowledgeBase's own git invocations carry `-c core.hooksPath=…`; only
+// those calls have their child environment recorded, so the fixture's own
+// commits stay out of the locale assertions. The child is also handed to
+// onGitChild so a spec can act on the running process.
+const gitEnvs: (NodeJS.ProcessEnv | undefined)[] = [];
+let onGitChild: ((child: ChildProcess, args: readonly string[]) => void) | undefined;
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  const wrapped = (...rest: unknown[]) => {
+    const child = (actual.execFile as (...call: unknown[]) => ChildProcess)(...rest);
+    const args = rest[1];
+    if (Array.isArray(args) && args.some((arg) => String(arg).startsWith('core.hooksPath='))) {
+      gitEnvs.push((rest[2] as { env?: NodeJS.ProcessEnv } | undefined)?.env);
+      onGitChild?.(child, args.map(String));
+    }
+    return child;
+  };
+  return { ...actual, execFile: wrapped };
+});
 
 const temporaryDirectories: string[] = [];
 
@@ -42,6 +66,11 @@ function allAnswered(probability: number) {
       { status: 'answered' as const, probability },
     ]));
 }
+
+beforeEach(() => {
+  gitEnvs.length = 0;
+  onGitChild = undefined;
+});
 
 afterEach(async () => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -519,7 +548,7 @@ describe('knowledgeBase', () => {
     });
   });
 
-  it('answers absent for a HEAD pin too, since it resolves nothing', async () => {
+  it('answers absent for a HEAD pin too, since the corpus sits outside any work tree', async () => {
     const directory = await tree({ 'note.md': '## Note\nBody.\n' });
     const result = await read(knowledgeBase(directory), { task: 'read it', revision: 'HEAD' });
     expect(result).toEqual({
@@ -642,6 +671,464 @@ describe('rules', () => {
       expect(result.candidates.map((candidate) => candidate.id)).toEqual(['open-rule.md']);
     } finally {
       await chmod(locked, 0o644);
+    }
+  });
+});
+
+describe('knowledgeBase git dates', () => {
+  const IDENTITY: NodeJS.ProcessEnv = {
+    GIT_AUTHOR_NAME: 'Test',
+    GIT_AUTHOR_EMAIL: 'test@example.com',
+    GIT_COMMITTER_NAME: 'Test',
+    GIT_COMMITTER_EMAIL: 'test@example.com',
+  };
+
+  function git(directory: string, args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<string> {
+    return new Promise((resolve, reject) => {
+      execFile('git', ['-C', directory, ...args], { env: { ...process.env, ...env } },
+        (error, stdout) => {
+          if (error === null) resolve(stdout.toString());
+          else reject(error);
+        });
+    });
+  }
+
+  /** A repository with the given files committed in one commit. */
+  async function committedRepo(
+    files: Record<string, string>,
+    date = '2026-09-15T12:00:00Z',
+  ): Promise<string> {
+    const root = await tree({ 'repo/.keep': '' });
+    const repo = join(root, 'repo');
+    for (const [path, text] of Object.entries(files)) {
+      const file = join(repo, path);
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, text);
+    }
+    await git(repo, ['init', '-b', 'main']);
+    await git(repo, ['add', '-A']);
+    await git(repo, ['commit', '-m', 'add the corpus'], {
+      ...IDENTITY,
+      GIT_AUTHOR_DATE: date,
+      GIT_COMMITTER_DATE: date,
+    });
+    return repo;
+  }
+
+  it('labels an undated note with its last committed change', async () => {
+    const repo = await committedRepo({ 'docs/ops.md': 'the ops body' });
+    const toplevel = (await git(repo, ['rev-parse', '--show-toplevel'])).trim();
+
+    const result = await read(knowledgeBase(join(repo, 'docs')), { task: 'ops work' });
+
+    expect(result.status).toBe('read');
+    if (result.status !== 'read') return;
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      path: 'docs/ops.md',
+      repository: toplevel,
+      date: { value: '2026-09-15T12:00:00+00:00', meaning: 'changed' },
+    });
+  });
+
+  it('keeps a declared frontmatter date ahead of the commit date', async () => {
+    const repo = await committedRepo({
+      'docs/ops.md': '---\ndate: 2026-01-01\n---\nthe ops body\n',
+    });
+
+    const result = await read(knowledgeBase(join(repo, 'docs')), { task: 'ops work' });
+
+    expect(result.status).toBe('read');
+    if (result.status !== 'read') return;
+    expect(result.candidates[0]!.date).toEqual({ value: '2026-01-01', meaning: 'recorded' });
+  });
+
+  it('leaves notes outside any repository exactly as before', async () => {
+    const directory = await tree({ 'docs/ops.md': 'the ops body' });
+
+    const result = await read(knowledgeBase(directory), { task: 'ops work' });
+
+    expect(result.status).toBe('read');
+    if (result.status !== 'read') return;
+    expect(result.candidates[0]).not.toHaveProperty('date');
+    expect(result.candidates[0]).not.toHaveProperty('path');
+    expect(result.candidates[0]).not.toHaveProperty('repository');
+  });
+
+  it('gives an untracked note no git date', async () => {
+    const repo = await committedRepo({ 'docs/ops.md': 'the ops body' });
+    await writeFile(join(repo, 'docs', 'draft.md'), 'uncommitted draft');
+
+    const result = await read(knowledgeBase(join(repo, 'docs')), { task: 'ops work' });
+
+    expect(result.status).toBe('read');
+    if (result.status !== 'read') return;
+    const byId = new Map(result.candidates.map((candidate) => [candidate.id, candidate]));
+    expect(byId.get('ops.md#1')!.date).toEqual({
+      value: '2026-09-15T12:00:00+00:00',
+      meaning: 'changed',
+    });
+    expect(byId.get('draft.md#1')).not.toHaveProperty('date');
+  });
+
+  it("dates a modified working file by its last committed change", async () => {
+    const repo = await committedRepo({ 'docs/ops.md': 'the committed body' });
+    await writeFile(join(repo, 'docs', 'ops.md'), 'uncommitted edits');
+
+    const result = await read(knowledgeBase(join(repo, 'docs')), { task: 'ops work' });
+
+    expect(result.status).toBe('read');
+    if (result.status !== 'read') return;
+    expect(result.candidates[0]!.text).toContain('uncommitted edits');
+    expect(result.candidates[0]!.date).toEqual({
+      value: '2026-09-15T12:00:00+00:00',
+      meaning: 'changed',
+    });
+  });
+
+  it('dates a note by the merge commit whose resolution changed it', async () => {
+    const repo = await committedRepo({ 'docs/ops.md': 'the first body' });
+    await git(repo, ['checkout', '-b', 'side']);
+    await writeFile(join(repo, 'docs', 'ops.md'), 'the side body');
+    await git(repo, ['add', '-A']);
+    await git(repo, ['commit', '-m', 'side edit'], {
+      ...IDENTITY,
+      GIT_AUTHOR_DATE: '2026-10-01T12:00:00Z',
+      GIT_COMMITTER_DATE: '2026-10-01T12:00:00Z',
+    });
+    await git(repo, ['checkout', 'main']);
+    await writeFile(join(repo, 'docs', 'ops.md'), 'the main body');
+    await git(repo, ['add', '-A']);
+    await git(repo, ['commit', '-m', 'main edit'], {
+      ...IDENTITY,
+      GIT_AUTHOR_DATE: '2026-10-05T12:00:00Z',
+      GIT_COMMITTER_DATE: '2026-10-05T12:00:00Z',
+    });
+    // Both sides changed the note, so the merge conflicts; the
+    // resolution writes a third version, which is the last change.
+    await git(repo, ['merge', '--no-ff', 'side', '-m', 'merge side']).catch(() => {});
+    await writeFile(join(repo, 'docs', 'ops.md'), 'the resolved body');
+    await git(repo, ['add', 'docs/ops.md']);
+    await git(repo, ['commit', '-m', 'merge side'], {
+      ...IDENTITY,
+      GIT_AUTHOR_DATE: '2026-10-10T12:00:00Z',
+      GIT_COMMITTER_DATE: '2026-10-10T12:00:00Z',
+    });
+
+    const result = await read(knowledgeBase(join(repo, 'docs')), { task: 'ops work' });
+
+    expect(result.status).toBe('read');
+    if (result.status !== 'read') return;
+    expect(result.candidates[0]!.date).toEqual({
+      value: '2026-10-10T12:00:00+00:00',
+      meaning: 'changed',
+    });
+  });
+
+  it('reads a repository-relative exclusion the same way as the commit reader', async () => {
+    const repo = await committedRepo({
+      'docs/ops.md': 'the first ops body',
+      'docs/private.md': 'the private body',
+    });
+    await writeFile(join(repo, 'docs', 'ops.md'), 'the second ops body');
+    await git(repo, ['add', '-A']);
+    await git(repo, ['commit', '-m', 'ops update'], IDENTITY);
+    // One relative entry means the same to both readers: the commit that
+    // touched the private path is dropped, and the note is never opened
+    // (it cannot even be read) on the working-tree or the pinned pass.
+    const privateNote = join(repo, 'docs', 'private.md');
+    await chmod(privateNote, 0o000);
+    try {
+      const request = { task: 'ops work', exclude: ['docs/private.md'] };
+      const commits = await read(gitHistory(repo), request);
+      const notes = await read(knowledgeBase(join(repo, 'docs')), request);
+      const head = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+      const pinned = await read(
+        knowledgeBase(join(repo, 'docs')),
+        { ...request, revision: head },
+      );
+
+      expect(commits.status).toBe('read');
+      expect(notes.status).toBe('read');
+      expect(pinned.status).toBe('read');
+      if (commits.status !== 'read' || notes.status !== 'read' || pinned.status !== 'read') return;
+      expect(commits.candidates.map((candidate) => candidate.title)).toEqual(['ops update']);
+      expect(notes.candidates.map((candidate) => candidate.id)).toEqual(['ops.md#1']);
+      expect(pinned.candidates.map((candidate) => candidate.id)).toEqual(['ops.md#1']);
+    } finally {
+      await chmod(privateNote, 0o644);
+    }
+  });
+
+  it('excludes a deleted file on a pinned read through a symlinked workspace path', async () => {
+    const repo = await committedRepo({
+      'docs/ops.md': 'the ops body',
+      'docs/private.md': 'the private body',
+    });
+    const pinned = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    await rm(join(repo, 'docs', 'private.md'));
+    await git(repo, ['add', '-A']);
+    await git(repo, ['commit', '-m', 'drop the private note'], IDENTITY);
+    const parent = await mkdtemp(join(tmpdir(), 'obversa-rdc-link-'));
+    temporaryDirectories.push(parent);
+    const link = join(parent, 'repo-link');
+    await symlink(repo, link);
+
+    // The pin still holds private.md; the working tree does not. The
+    // exclusion is spelled through the link, so it resolves only through
+    // its deepest existing ancestor — a bare realpath of the file itself
+    // fails on the deleted path and leaves the alias spelling, which the
+    // realpath'd enumeration never matches.
+    const corpus = join(link, 'docs');
+    const open = await read(knowledgeBase(corpus), { task: 'ops work', revision: pinned });
+    const filtered = await read(knowledgeBase(corpus), {
+      task: 'ops work',
+      exclude: [join(link, 'docs', 'private.md')],
+      revision: pinned,
+    });
+
+    expect(open.status).toBe('read');
+    expect(filtered.status).toBe('read');
+    if (open.status !== 'read' || filtered.status !== 'read') return;
+    expect(open.candidates.map((candidate) => candidate.id).sort())
+      .toEqual(['ops.md#1', 'private.md#1']);
+    expect(filtered.candidates.map((candidate) => candidate.id)).toEqual(['ops.md#1']);
+  });
+
+  it('reads the pinned snapshot: earlier text, no later file, the pin as the revision', async () => {
+    const repo = await committedRepo({ 'docs/ops.md': 'version one' });
+    const first = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    await writeFile(join(repo, 'docs', 'ops.md'), 'version two');
+    await writeFile(join(repo, 'docs', 'new.md'), 'added later');
+    await git(repo, ['add', '-A']);
+    await git(repo, ['commit', '-m', 'second change'], {
+      ...IDENTITY,
+      GIT_AUTHOR_DATE: '2026-10-01T12:00:00Z',
+      GIT_COMMITTER_DATE: '2026-10-01T12:00:00Z',
+    });
+
+    const result = await read(
+      knowledgeBase(join(repo, 'docs')),
+      { task: 'ops work', revision: first },
+    );
+
+    expect(result.status).toBe('read');
+    if (result.status !== 'read') return;
+    expect(result.revision).toBe(first);
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]!.text).toContain('version one');
+    expect(result.candidates[0]!.date).toEqual({
+      value: '2026-09-15T12:00:00+00:00',
+      meaning: 'changed',
+    });
+  });
+
+  it('keeps the pinned snapshot when HEAD advances after the pin resolves', async () => {
+    const repo = await committedRepo({ 'docs/ops.md': 'version one' });
+    const pinned = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    onGitChild = (child, args) => {
+      // The pause the proof needs: 'HEAD' has already resolved, and this
+      // commit lands before the tree and dates are read. The read must
+      // still describe the SHA the resolution returned.
+      if (args.includes('--verify')) {
+        child.once('close', () => {
+          writeFileSync(join(repo, 'docs', 'ops.md'), 'version two');
+          writeFileSync(join(repo, 'docs', 'new.md'), 'added later');
+          execFileSync('git', ['-C', repo, 'add', '-A'], {
+            env: { ...process.env, ...IDENTITY },
+          });
+          execFileSync('git', ['-C', repo, 'commit', '-m', 'second change'], {
+            env: { ...process.env, ...IDENTITY },
+          });
+        });
+      }
+    };
+    try {
+      const result = await read(
+        knowledgeBase(join(repo, 'docs')),
+        { task: 'ops work', revision: 'HEAD' },
+      );
+
+      expect(result.status).toBe('read');
+      if (result.status !== 'read') return;
+      expect(result.revision).toBe(pinned);
+      expect(result.candidates.map((candidate) => candidate.id)).toEqual(['ops.md#1']);
+      expect(result.candidates[0]!.text).toContain('version one');
+      expect(result.candidates[0]!.date).toEqual({
+        value: '2026-09-15T12:00:00+00:00',
+        meaning: 'changed',
+      });
+    } finally {
+      onGitChild = undefined;
+    }
+  });
+
+  it('reports absent for a pinned revision on a corpus outside any repository', async () => {
+    const directory = await tree({ 'docs/ops.md': 'the ops body' });
+
+    await expect(read(knowledgeBase(directory), { task: 'ops', revision: 'HEAD' }))
+      .resolves.toEqual({
+        status: 'absent',
+        reason: 'a working-tree Markdown read cannot resolve a pinned revision',
+      });
+  });
+
+  it('reads a corpus outside any repository under a non-English locale', async () => {
+    const directory = await tree({ 'docs/ops.md': 'the ops body' });
+    const names = ['LANG', 'LC_ALL', 'LANGUAGE'] as const;
+    const previous = new Map(names.map((name) => [name, process.env[name]]));
+    // The work-tree probe matches git's English stderr; a translated
+    // message must never turn an expected absence into a thrown error.
+    process.env.LANG = 'de_DE.UTF-8';
+    process.env.LC_ALL = 'de_DE.UTF-8';
+    process.env.LANGUAGE = 'de';
+    try {
+      const result = await read(knowledgeBase(directory), { task: 'ops work' });
+      expect(result.status).toBe('read');
+    } finally {
+      for (const name of names) {
+        const value = previous.get(name);
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+    // The work-tree probe ran with the pinned locale: every recorded
+    // child got LC_ALL 'C', so a translated error message can never
+    // reach the absent/throw decision.
+    expect(gitEnvs.length).toBeGreaterThan(0);
+    expect(gitEnvs.every((env) => env?.LC_ALL === 'C')).toBe(true);
+  });
+
+  it('keeps a pinned rules read absent, as before', async () => {
+    const repo = await committedRepo({ 'rules/run.md': '# Run\nFollow it.\n' });
+
+    await expect(read(rules(join(repo, 'rules')), { task: 'ops', revision: 'HEAD' }))
+      .resolves.toEqual({
+        status: 'absent',
+        reason: 'a working-tree Markdown read cannot resolve a pinned revision',
+      });
+  });
+
+  it('refuses every note for a root exclusion, the same set the commit reader refuses', async () => {
+    const repo = await committedRepo({
+      'docs/ops.md': 'the ops body',
+      'docs/other.md': 'the other body',
+    });
+    const head = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+
+    // The corpus repository sits outside the working directory, so '.'
+    // can only name a root through the readers' own anchors — the
+    // repository root, not the process's cwd. On the working-tree pass
+    // and the pinned pass alike, nothing beneath it is opened.
+    const commits = await read(gitHistory(repo), { task: 'ops work', exclude: ['.'] });
+    expect(commits.status).toBe('read');
+    if (commits.status === 'read') expect(commits.candidates).toHaveLength(0);
+    for (const request of [
+      { task: 'ops work', exclude: ['.'] },
+      { task: 'ops work', exclude: ['./'] },
+      { task: 'ops work', exclude: ['.'], revision: head },
+    ]) {
+      const result = await read(knowledgeBase(join(repo, 'docs')), request);
+      expect(result.status).toBe('read');
+      if (result.status !== 'read') return;
+      expect(result.candidates).toHaveLength(0);
+    }
+  });
+
+  it('reads the pinned corpus when the working tree no longer holds the directory', async () => {
+    const repo = await committedRepo({ 'docs/ops.md': 'the pinned body' });
+    const pinned = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    await rm(join(repo, 'docs'), { recursive: true, force: true });
+    await git(repo, ['add', '-A']);
+    await git(repo, ['commit', '-m', 'drop the corpus'], IDENTITY);
+
+    // The directory is gone from the working tree, but the commit the
+    // pin names still holds it: the repository is located through the
+    // existing ancestor and the corpus enumerated from that commit.
+    const result = await read(
+      knowledgeBase(join(repo, 'docs')),
+      { task: 'ops work', revision: pinned },
+    );
+
+    expect(result.status).toBe('read');
+    if (result.status !== 'read') return;
+    expect(result.revision).toBe(pinned);
+    expect(result.candidates.map((candidate) => candidate.id)).toEqual(['ops.md#1']);
+    expect(result.candidates[0]!.text).toContain('the pinned body');
+    expect(result.candidates[0]!.date).toEqual({
+      value: '2026-09-15T12:00:00+00:00',
+      meaning: 'changed',
+    });
+  });
+
+  it('still reads the notes when the work-tree probe fails unexpectedly', async () => {
+    const repo = await committedRepo({ 'docs/ops.md': 'the ops body' });
+    const head = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    // A stand-in git that fails every call with an unexpected error:
+    // the probe cannot even refuse cleanly, and an unpinned read skips
+    // the tier and carries what the walk found.
+    const bin = await mkdtemp(join(tmpdir(), 'obversa-rdc-bin-'));
+    temporaryDirectories.push(bin);
+    await writeFile(join(bin, 'git'), '#!/bin/sh\necho "unexpected git failure" >&2\nexit 128\n');
+    await chmod(join(bin, 'git'), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      const result = await read(knowledgeBase(join(repo, 'docs')), { task: 'ops work' });
+      expect(result.status).toBe('read');
+      if (result.status !== 'read') return;
+      expect(result.candidates.map((candidate) => candidate.id)).toEqual(['ops.md#1']);
+      expect(result.candidates[0]!.text).toContain('the ops body');
+      expect(result.candidates[0]).not.toHaveProperty('date');
+      expect(result.candidates[0]).not.toHaveProperty('path');
+      expect(result.candidates[0]).not.toHaveProperty('repository');
+      // A pinned read still throws: it cannot honour its pin without git.
+      await expect(
+        read(knowledgeBase(join(repo, 'docs')), { task: 'ops work', revision: head }),
+      ).rejects.toMatchObject({ name: 'SourceReadError' });
+    } finally {
+      process.env.PATH = path;
+    }
+  });
+
+  it('still reads the notes when the git log pass fails unexpectedly', async () => {
+    const repo = await committedRepo({ 'docs/ops.md': 'the ops body' });
+    const head = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    // A stand-in git that refuses only `log`: the probe and every other
+    // call go through to the real binary, and the failing date pass
+    // drops the tier rather than the read.
+    const bin = await mkdtemp(join(tmpdir(), 'obversa-rdc-bin-'));
+    temporaryDirectories.push(bin);
+    const real = execFileSync('which', ['git']).toString().trim();
+    await writeFile(join(bin, 'git'), [
+      '#!/bin/sh',
+      'for arg in "$@"; do',
+      '  if [ "$arg" = "log" ]; then',
+      '    echo "unexpected git failure" >&2',
+      '    exit 128',
+      '  fi',
+      'done',
+      `exec "${real}" "$@"`,
+      '',
+    ].join('\n'));
+    await chmod(join(bin, 'git'), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      const result = await read(knowledgeBase(join(repo, 'docs')), { task: 'ops work' });
+      expect(result.status).toBe('read');
+      if (result.status !== 'read') return;
+      expect(result.candidates.map((candidate) => candidate.id)).toEqual(['ops.md#1']);
+      expect(result.candidates[0]!.text).toContain('the ops body');
+      expect(result.candidates[0]).not.toHaveProperty('date');
+      expect(result.candidates[0]).not.toHaveProperty('path');
+      expect(result.candidates[0]).not.toHaveProperty('repository');
+      // A pinned read still throws: its dates cannot be honoured.
+      await expect(
+        read(knowledgeBase(join(repo, 'docs')), { task: 'ops work', revision: head }),
+      ).rejects.toMatchObject({ name: 'SourceReadError' });
+    } finally {
+      process.env.PATH = path;
     }
   });
 });
