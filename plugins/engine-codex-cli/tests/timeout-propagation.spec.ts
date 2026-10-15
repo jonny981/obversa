@@ -29,7 +29,6 @@ describe('Codex timeout propagation', () => {
           timedOut: false,
           aborted: false,
           peakMemoryBytes: 0,
-          stoppedProcesses: [],
           remainingProcesses: [],
         };
       }
@@ -44,7 +43,6 @@ describe('Codex timeout propagation', () => {
         timedOut: true,
         aborted: false,
         peakMemoryBytes: 0,
-        stoppedProcesses: [],
         remainingProcesses: [],
       };
     });

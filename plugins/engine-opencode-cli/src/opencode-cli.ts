@@ -35,7 +35,6 @@ import {
   type EngineSelectionRecord,
   type JsonObject,
   type JsonValue,
-  type StoppedProcess,
   type UsageReceipt,
   validateAgentResult,
   validateIncompleteResultEvidence,
@@ -1144,12 +1143,7 @@ function nativeLimitHints(raw: JsonObject | null): {
 function loopError(
   kind: EngineFailureKind,
   message: string,
-  hints: {
-    readonly retryAfterMs?: number;
-    readonly resetAt?: number;
-    readonly resetProven?: boolean;
-    readonly stoppedProcesses?: readonly StoppedProcess[];
-  } = {},
+  hints: { readonly retryAfterMs?: number; readonly resetAt?: number; readonly resetProven?: boolean } = {},
 ): EngineError {
   return new EngineError({ kind, message, ...hints });
 }
@@ -1465,7 +1459,6 @@ export class OpenCodeCliEngine implements Engine {
         throw loopError(
           'invalid-config',
           `OpenCode returned an invalid JSON protocol: ${scrub(accumulator.protocolError.message)}`,
-          { stoppedProcesses: command.stoppedProcesses },
         );
       }
       // A call that ends with no answer still spent the tokens it reported.
@@ -1478,9 +1471,7 @@ export class OpenCodeCliEngine implements Engine {
       const aborted = command.aborted || signal.aborted;
       if (aborted && accumulator.stopReason !== 'stop') {
         reportSpent();
-        throw loopError('aborted', 'OpenCode attempt was aborted', {
-          stoppedProcesses: command.stoppedProcesses,
-        });
+        throw loopError('aborted', 'OpenCode attempt was aborted');
       }
 
       const stderr = scrub(new TextDecoder().decode(command.stderr));
@@ -1503,7 +1494,6 @@ export class OpenCodeCliEngine implements Engine {
         throw loopError(
           'unknown',
           `OpenCode ended with ${accumulator.stopReason}`,
-          { stoppedProcesses: command.stoppedProcesses },
         );
       }
       if (accumulator.stopReason === 'length') {
@@ -1535,7 +1525,6 @@ export class OpenCodeCliEngine implements Engine {
                   ),
                 }
               : {}),
-            stoppedProcesses: command.stoppedProcesses,
             raw: cloneFrozenJson(accumulator.frames),
           }),
         );
@@ -1547,7 +1536,6 @@ export class OpenCodeCliEngine implements Engine {
           throw loopError(
             'invalid-config',
             'OpenCode completed without a final step',
-            { stoppedProcesses: command.stoppedProcesses },
           );
         }
         const kind = command.timedOut
@@ -1559,10 +1547,7 @@ export class OpenCodeCliEngine implements Engine {
             kind,
             nativeMessage || stderr || 'incomplete result',
           ),
-          {
-            ...nativeLimitHints(accumulator.terminalError),
-            stoppedProcesses: command.stoppedProcesses,
-          },
+          nativeLimitHints(accumulator.terminalError),
         );
       }
 
@@ -1578,10 +1563,7 @@ export class OpenCodeCliEngine implements Engine {
               kind,
               nativeMessage || stderr || 'OpenCode produced no result text',
             ),
-            {
-              ...nativeLimitHints(accumulator.terminalError),
-              stoppedProcesses: command.stoppedProcesses,
-            },
+            nativeLimitHints(accumulator.terminalError),
           );
         }
         const measuredUsage = usage(accumulator);
@@ -1601,7 +1583,6 @@ export class OpenCodeCliEngine implements Engine {
             requested,
             effective,
             stopReason: 'stop',
-            stoppedProcesses: command.stoppedProcesses,
             raw: cloneFrozenJson(accumulator.frames),
           }),
         );
@@ -1651,7 +1632,6 @@ export class OpenCodeCliEngine implements Engine {
                 ),
               }
             : {}),
-        stoppedProcesses: command.stoppedProcesses,
         raw: cloneFrozenJson(accumulator.frames),
       });
     } catch (error) {

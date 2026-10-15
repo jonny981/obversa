@@ -6,7 +6,7 @@ vi.mock('../src/command/process-tree.ts', async () => {
 });
 
 import { stopOwnedProcessTree } from '../src/command/process-tree.ts';
-import { OwnedCommandError, runOwnedCommand, type OwnedCommandRequest } from '../src/command/run.ts';
+import { runOwnedCommand, type OwnedCommandRequest } from '../src/command/run.ts';
 import { exactPid, parentFixture, fixtureDirectory, fixturePids, isProcessAlive, waitForFixtureRecord } from './process-fixture.ts';
 
 const ATTEMPT_ID = `sha256:${'3'.repeat(64)}` as const;
@@ -60,44 +60,6 @@ describe.runIf(process.platform !== 'win32')('owned command output cleanup', () 
         expect.objectContaining({ pid: survivor.pid }),
       ]),
     });
-    expect(isProcessAlive(survivor.pid)).toBe(true);
-
-    try { process.kill(exactPid(survivor.pid), 'SIGKILL'); } catch {}
-    await expect.poll(() => isProcessAlive(survivor.pid), { timeout: 5_000 }).toBe(false);
-  });
-
-  it('keeps a process it signalled but did not stop on both lists of the record', async () => {
-    const directory = fixtureDirectory();
-    directories.push(directory);
-    const cleanup = vi.mocked(stopOwnedProcessTree);
-    cleanup.mockImplementation(async (stopRequest) => {
-      const survivor = await waitForFixtureRecord(directory, 'grandchild');
-      const identity = {
-        pid: survivor.pid,
-        parentPid: survivor.parentPid,
-        processGroupId: survivor.pid,
-        startedAt: 'fixture-survivor',
-      };
-      // A signal was sent to the process and it is still running, so the
-      // teardown reports it on both sides.
-      stopRequest.onSignal?.([identity]);
-      return [identity];
-    });
-
-    const failure = await runOwnedCommand(
-      request(directory),
-      new AbortController().signal,
-    ).then(
-      () => { throw new Error('expected the attempt to fail'); },
-      (error: unknown) => error,
-    );
-    const survivor = await waitForFixtureRecord(directory, 'grandchild');
-
-    expect(failure).toBeInstanceOf(OwnedCommandError);
-    const error = failure as OwnedCommandError;
-    expect(error.code).toBe('TEARDOWN_INCOMPLETE');
-    expect(error.stoppedProcesses.some((entry) => entry.pid === survivor.pid)).toBe(true);
-    expect(error.remainingProcesses.some((entry) => entry.pid === survivor.pid)).toBe(true);
     expect(isProcessAlive(survivor.pid)).toBe(true);
 
     try { process.kill(exactPid(survivor.pid), 'SIGKILL'); } catch {}

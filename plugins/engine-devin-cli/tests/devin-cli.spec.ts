@@ -12,7 +12,6 @@ import {
   type AgentRequest,
   type EngineStreamEvent,
 } from '@obversa/api';
-import { OwnedCommandError } from '@obversa/core/command';
 import { DevinCliEngine, buildDevinArgs, devin } from '../src/index.ts';
 
 const source = fileURLToPath(new URL('./fixtures/devin-cli.mjs', import.meta.url));
@@ -72,21 +71,7 @@ function flag(args: readonly string[], name: string): string | undefined {
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  for (const dir of directories.splice(0)) {
-    // A detached helper writes its pid to helper.json inside the fixture's
-    // directory; reap it before the folder goes so a failed teardown or
-    // assertion cannot leave it running.
-    const record = join(dir, 'helper.json');
-    if (existsSync(record)) {
-      try {
-        const pid = (JSON.parse(readFileSync(record, 'utf8')) as { pid: number }).pid;
-        if (Number.isSafeInteger(pid) && pid > 0) {
-          try { process.kill(pid, 'SIGKILL'); } catch {}
-        }
-      } catch {}
-    }
-    rmSync(dir, { recursive: true, force: true });
-  }
+  for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe('Devin arguments', () => {
@@ -436,25 +421,6 @@ describe.runIf(process.platform !== 'win32')('Devin process', () => {
       .catch((caught: unknown) => caught);
     expect(error).toMatchObject({ code: 'OUTPUT_LIMIT' });
     expect(f.models()).toHaveLength(2);
-  });
-
-  it('keeps what earlier runs stopped on the failure of a continued run', async () => {
-    // The first run leaves a helper behind on its pipes, so its teardown
-    // stops one; the continued run then goes over what is left of the
-    // attempt's output limit and the command itself throws.
-    const f = fixture('refused-tool');
-    const helperRecord = join(f.dir, 'helper.json');
-    const error = await f.engine.run({
-      ...f.request,
-      maxOutputBytes: 150,
-      env: { ...f.request.env, OBVERSA_TEST_DEVIN_HELPER: helperRecord },
-    }, () => {}, signal()).catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(OwnedCommandError);
-    expect(error).toMatchObject({ code: 'OUTPUT_LIMIT' });
-    const helper = JSON.parse(readFileSync(helperRecord, 'utf8')) as { pid: number };
-    expect(
-      (error as OwnedCommandError).stoppedProcesses.some((entry) => entry.pid === helper.pid),
-    ).toBe(true);
   });
 
   it('counts every continued run against the attempt\'s time limit', async () => {

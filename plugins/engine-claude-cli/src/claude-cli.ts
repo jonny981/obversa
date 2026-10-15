@@ -19,7 +19,6 @@ import {
   type Engine,
   type EngineEventSink,
   type EngineSelectionRecord,
-  type StoppedProcess,
 } from '@obversa/api';
 import { claudeToolOptions } from '@obversa/core/claude-tools';
 import { claudeBilling, mapMessage, newAccumulator, reportedCost } from '@obversa/core/claude-stream-json';
@@ -113,10 +112,7 @@ function modelFor(
  * reset. Unrelated failures return undefined for the existing generic error
  * path.
  */
-export function classifyCliLimit(
-  text: string,
-  stoppedProcesses?: readonly StoppedProcess[],
-): EngineError | undefined {
+export function classifyCliLimit(text: string): EngineError | undefined {
   const classified = classifyEngineFailure(new Error(text));
   if (classified !== 'billing' && classified !== 'quota' && classified !== 'rate-limit') {
     return undefined;
@@ -129,7 +125,6 @@ export function classifyCliLimit(
       ? `claude usage limit: ${text}`
       : `claude rate limited: ${text}`,
     resetAt,
-    ...(stoppedProcesses === undefined ? {} : { stoppedProcesses }),
   });
 }
 
@@ -548,7 +543,6 @@ export class ClaudeCliEngine implements Engine {
       throw new EngineError({
         kind: 'aborted',
         message: 'claude-cli run aborted',
-        stoppedProcesses: result.stoppedProcesses,
       });
     }
     const late =
@@ -592,7 +586,6 @@ export class ClaudeCliEngine implements Engine {
             }`,
             exitCode: result.exitCode ?? null,
           },
-          stoppedProcesses: result.stoppedProcesses,
         });
       }
       // An unfinished call still spent the tokens it reported.
@@ -612,13 +605,12 @@ export class ClaudeCliEngine implements Engine {
       );
       const detail = `${stderr}\n${stdout}`;
       if (!result.timedOut) {
-        const limit = classifyCliLimit(detail, result.stoppedProcesses);
+        const limit = classifyCliLimit(detail);
         if (limit) throw limit;
       }
       throw new EngineError({
         kind: result.timedOut ? 'timeout' : classifyEngineFailure(new Error(detail)),
         message: `claude exited ${result.exitCode ?? '?'}${stderr ? `: ${stderr}` : ''}`,
-        stoppedProcesses: result.stoppedProcesses,
       });
     }
 
@@ -642,7 +634,6 @@ export class ClaudeCliEngine implements Engine {
       ...(acc.stopReason === undefined
         ? {}
         : { stopReason: acc.stopReason }),
-      stoppedProcesses: result.stoppedProcesses,
       ...(late
         ? {
             transportFailure: {

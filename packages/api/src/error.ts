@@ -12,7 +12,6 @@ import type {
   EngineFailureKind,
   EngineIncompleteResultEvidence,
   EngineSelectionRecord,
-  StoppedProcess,
 } from './contracts.js';
 import { engineSelection } from './result.js';
 export type { EngineFailureKind } from './contracts.js';
@@ -30,8 +29,6 @@ export interface EngineErrorInit {
    */
   readonly resetProven?: boolean;
   readonly effective?: EngineSelectionRecord;
-  /** What the attempt's command teardown signaled before this failure. */
-  readonly stoppedProcesses?: readonly StoppedProcess[];
 }
 
 /** A provider or adapter failure with no runtime policy attached. */
@@ -41,7 +38,6 @@ export class EngineError extends Error {
   readonly resetAt?: number;
   readonly resetProven?: boolean;
   readonly effective?: EngineSelectionRecord;
-  readonly stoppedProcesses?: readonly StoppedProcess[];
 
   constructor(init: EngineErrorInit) {
     super(
@@ -56,9 +52,6 @@ export class EngineError extends Error {
     this.effective = init.effective === undefined
       ? undefined
       : engineSelection(init.effective);
-    this.stoppedProcesses = init.stoppedProcesses === undefined
-      ? undefined
-      : Object.freeze([...init.stoppedProcesses]);
   }
 }
 

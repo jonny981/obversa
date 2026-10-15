@@ -1,11 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 
-import {
-  readProcessIdentities,
-  readProcessIdentity,
-  type ProcessIdentity,
-} from './command/process-tree.js';
+import { readProcessIdentities, readProcessIdentity } from './command/process-tree.js';
 
 const MAX_TIMER_MS = 2_147_483_647;
 const DRAIN_GRACE_MS = 500;
@@ -17,12 +13,8 @@ interface LiveChild {
   readonly detached: boolean;
   /** The child's start time, read as it starts; undefined if it could not be read. */
   readonly startedAt: number | undefined;
-  /** The child's identity, read as it starts; undefined if it could not be read. */
-  readonly identity: ProcessIdentity | undefined;
   /** Members of the child's group read while it ran: pid to start time. */
   readonly members: Map<number, string>;
-  /** Records the processes each signal was sent to. */
-  readonly onSignal?: (processes: readonly ProcessIdentity[]) => void;
 }
 
 const liveChildren = new Set<LiveChild>();
@@ -86,12 +78,11 @@ type StopReason = 'timeout' | 'abort' | 'output';
 
 /** @internal Hooks used by the owned engine command wrapper. */
 interface RunChildHooks {
-  readonly onSpawn?: (child: ChildProcess, identity: ProcessIdentity | undefined) => void;
+  readonly onSpawn?: (child: ChildProcess) => void;
   readonly onExit?: (code: number | null, signal: NodeJS.Signals | null) => void | Promise<void>;
   readonly onStdout?: (chunk: Uint8Array) => void;
   readonly onStderr?: (chunk: Uint8Array) => void;
   readonly onStop?: (reason: StopReason) => void | Promise<void>;
-  readonly onSignal?: (processes: readonly ProcessIdentity[]) => void;
 }
 
 function positiveInteger(value: unknown, field: string): number {
@@ -139,14 +130,13 @@ function startTime(startedAt: string): number {
   return Date.parse(`${startedAt} UTC`);
 }
 
-function signalProcess(entry: LiveChild, signal: NodeJS.Signals): void {
+function signalProcess(entry: LiveChild, signal: NodeJS.Signals): boolean {
   const { child, detached, members } = entry;
   const pid = child.pid;
-  if (pid === undefined || pid < 1) return;
+  if (pid === undefined || pid < 1) return false;
   // After Node sees the exit, the system can give the child's pid, and so its
   // group id, to any new process.
   const running = child.exitCode === null && child.signalCode === null;
-  const signaled: ProcessIdentity[] = [];
   if (detached) {
     // While the child runs, every process the table shows with the child's
     // pid as its group id gets the signal by its own pid and is recorded,
@@ -155,7 +145,7 @@ function signalProcess(entry: LiveChild, signal: NodeJS.Signals): void {
     // time could not be read. After the child exits, only recorded members
     // still running with the same start time get it. A process that joins
     // the group after the last read is not signalled.
-    let targets: readonly ProcessIdentity[] = [];
+    let targets: readonly number[] = [];
     try {
       const table = readProcessIdentities();
       if (running) {
@@ -164,38 +154,28 @@ function signalProcess(entry: LiveChild, signal: NodeJS.Signals): void {
           member.pid !== pid &&
           startTime(member.startedAt) >= entry.startedAt!);
         for (const member of group) members.set(member.pid, member.startedAt);
-        targets = group;
+        targets = group.map((member) => member.pid);
       } else {
         targets = table
-          .filter((member) => members.get(member.pid) === member.startedAt);
+          .filter((member) => members.get(member.pid) === member.startedAt)
+          .map((member) => member.pid);
       }
     } catch {
       // The child is still signalled below.
     }
     for (const member of targets) {
       try {
-        process.kill(member.pid, signal);
-        signaled.push(member);
+        process.kill(member, signal);
       } catch {
         // The member may have exited since the table was read.
       }
     }
   }
-  if (running) {
-    try {
-      if (child.kill(signal) && entry.identity !== undefined) {
-        signaled.push(entry.identity);
-      }
-    } catch {
-      // The child may have exited since the check above.
-    }
-  }
-  if (signaled.length > 0) {
-    try {
-      entry.onSignal?.(signaled);
-    } catch {
-      // Recording the signal must not undo it.
-    }
+  if (!running) return false;
+  try {
+    return child.kill(signal);
+  } catch {
+    return false;
   }
 }
 
@@ -290,30 +270,20 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
   }
 
   const detached = options.detached === true && process.platform !== 'win32';
-  let identity: ProcessIdentity | undefined;
   let startedAt: number | undefined;
-  // A signal's record names the child by this identity, read while it is
-  // starting so a first signal that already stops it is still named. A
-  // detached child's group tracking and a caller's signal record each need
-  // it; any other child skips the read.
-  if (child.pid !== undefined && (detached || options.hooks?.onSignal !== undefined)) {
+  if (detached && child.pid !== undefined) {
     try {
-      identity = readProcessIdentity(child.pid);
-      if (detached && identity !== undefined) {
-        startedAt = startTime(identity.startedAt);
-      }
+      const identity = readProcessIdentity(child.pid);
+      if (identity !== undefined) startedAt = startTime(identity.startedAt);
     } catch {
       // The group is then left alone; the child is still signalled.
-      identity = undefined;
     }
   }
   const live: LiveChild = {
     child,
     detached,
     startedAt: startedAt !== undefined && Number.isFinite(startedAt) ? startedAt : undefined,
-    identity,
     members: new Map(),
-    onSignal: options.hooks?.onSignal,
   };
   const unregisterChild = registerLiveChild(live);
 
@@ -520,7 +490,7 @@ export function runChild(options: RunChildOptions): Promise<RunChildResult> {
     });
 
     try {
-      options.hooks?.onSpawn?.(child, identity);
+      options.hooks?.onSpawn?.(child);
     } catch (error) {
       stopError = error;
       terminate('abort');

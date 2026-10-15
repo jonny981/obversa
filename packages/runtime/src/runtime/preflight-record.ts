@@ -165,7 +165,7 @@ function resultEvidence(value: unknown, path: string): ProbeEvidence {
   exact(item, ['kind', 'result'], path);
   if (item.kind !== 'complete' && item.kind !== 'incomplete') invalid(`${path}/kind`, 'Invalid evidence kind.');
   const result = object(item.result, `${path}/result`);
-  exact(result, ['parts', 'usage', 'requested', 'effective'], `${path}/result`, ['stopReason', 'transportFailure', 'stoppedProcesses']);
+  exact(result, ['parts', 'usage', 'requested', 'effective'], `${path}/result`, ['stopReason', 'transportFailure']);
   if (!Array.isArray(result.parts)) invalid(`${path}/result/parts`, 'Result parts must be an array.');
   result.parts.forEach((value, index) => {
     const partPath = `${path}/result/parts/${index}`;
@@ -179,14 +179,6 @@ function resultEvidence(value: unknown, path: string): ProbeEvidence {
   selection(result.effective, `${path}/result/effective`);
   if (Object.hasOwn(result, 'transportFailure')) {
     exact(object(result.transportFailure, `${path}/result/transportFailure`), ['kind', 'message', 'exitCode'], `${path}/result/transportFailure`);
-  }
-  if (Object.hasOwn(result, 'stoppedProcesses')) {
-    const list = result.stoppedProcesses;
-    if (!Array.isArray(list)) invalid(`${path}/result/stoppedProcesses`, 'Result stopped processes must be an array.');
-    list.forEach((entry, index) => {
-      const entryPath = `${path}/result/stoppedProcesses/${index}`;
-      exact(object(entry, entryPath), ['pid', 'parentPid', 'processGroupId', 'startedAt'], entryPath);
-    });
   }
   const validated = checked(`${path}/result`, () => item.kind === 'complete'
     ? validateAgentResult(result as unknown as AgentResult)

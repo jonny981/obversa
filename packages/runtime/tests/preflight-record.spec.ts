@@ -441,35 +441,6 @@ describe('durable preflight records', () => {
     expect(JSON.stringify(loaded.events)).not.toContain('late transport warning');
   });
 
-  it.each([
-    ['complete', 'succeeded'],
-    ['incomplete', 'failed'],
-  ] as const)('retains the stopped processes stored %s evidence carries', async (kind, outcome) => {
-    const f = await fixture();
-    await f.staticDone();
-    const stopped = [{ pid: 4321, parentPid: 1, processGroupId: 4321, startedAt: 'Mon Oct 12 00:00:00 2026' }];
-    const value: AgentResult = {
-      ...f.result(),
-      ...(kind === 'incomplete'
-        ? { parts: [{ kind: 'assistant' as const, text: 'partial', final: false }] }
-        : {}),
-      stoppedProcesses: stopped,
-    };
-    await f.liveDone(value, outcome, 'timeout', kind);
-    const loaded = await snapshot(f);
-    expect(loaded.probes[1]!.evidence).toEqual({ kind, result: value });
-  });
-
-  it('rejects stored evidence whose stopped processes carry unknown fields', async () => {
-    const f = await fixture();
-    await f.staticDone();
-    const value = { ...f.result(), stoppedProcesses: [
-      { pid: 4321, parentPid: 1, processGroupId: 4321, startedAt: 'Mon Oct 12 00:00:00 2026', extra: true },
-    ] };
-    await f.liveDone(value as AgentResult);
-    await expect(snapshot(f)).rejects.toMatchObject(invalid);
-  });
-
   it.each(['complete', 'incomplete'])('never admits failed %s evidence', async (kind) => {
     const f = await fixture();
     await f.staticDone();

@@ -549,7 +549,6 @@ async function superviseRun(options: SupervisedRunOptions, resume?: {
           cleanupSafe, leaseRetained: leaseToken !== undefined,
           ...(leaseReleaseFailed ? { releaseFailure: 'WORKSPACE_RELEASE' } : {}),
           remainingProcesses: error instanceof OwnedCommandError ? error.remainingProcesses : [],
-          stoppedProcesses: error instanceof OwnedCommandError ? error.stoppedProcesses : [],
         });
       } finally {
         if (cleanupSafe && !leaseReleaseFailed) {
