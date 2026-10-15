@@ -9,6 +9,7 @@ import {
 } from '@obversa/api';
 import { validateArtifactReference, type JsonObject, type GraphEngineBinding, type RunStorageBinding } from '@obversa/runtime';
 import { createLocalRunStorage } from '@obversa/runtime/storage/local';
+import { OwnedCommandError } from '@obversa/core/command';
 import { superviseEngines } from '../src/supervised-engines.js';
 import { readSupervision, supervisionWriter } from '../src/supervised-record.js';
 
@@ -123,6 +124,70 @@ describe('supervised engine evidence', () => {
       transportFailure: { kind: 'timeout', message: 'transport ended', exitCode: 9 },
     } });
     expect(await storedParts(records[1]!.payload)).toEqual([{ kind: 'assistant', text: 'partial', final: false }]);
+    expect(JSON.stringify(records)).not.toMatch(/private-/u);
+  });
+
+  it('records the processes a command failure stopped and every process it counted', async () => {
+    const stopped = [
+      { pid: 4101, parentPid: 4100, processGroupId: 4100, startedAt: 'a' },
+    ];
+    const counted = [
+      {
+        pid: 4100, parentPid: 1, command: 'node builder.mjs', residentBytes: 700 * 1_024 * 1_024,
+        root: true, descendant: false, groupMember: true, earlierObserved: false,
+      },
+      {
+        pid: 4101, parentPid: 4100, command: 'node measure.mjs', residentBytes: 200 * 1_024 * 1_024,
+        root: false, descendant: true, groupMember: false, earlierObserved: true,
+      },
+    ];
+    const failure = new OwnedCommandError('MEMORY_LIMIT', 'private-error', [], undefined, stopped, counted);
+    const records: { type: string; payload: JsonObject }[] = [];
+    const [wrapped] = superviseEngines([binding({ name: 'fixture', async run() { throw failure; } })],
+      async (type, payload) => { records.push({ type, payload }); }, storage, 'run');
+    await expect(wrapped!.engine.run(request, () => {}, new AbortController().signal)).rejects.toBe(failure);
+    expect(records[1]).toMatchObject({
+      type: 'engine-failed',
+      payload: { stoppedProcesses: stopped, countedProcesses: counted },
+    });
+    expect(JSON.stringify(records)).not.toMatch(/private-/u);
+  });
+
+  it('keeps a signalled process that is still running on both lists of the record', async () => {
+    const remaining = [
+      { pid: 4101, parentPid: 4100, processGroupId: 4100, startedAt: 'a' },
+    ];
+    const failure = new OwnedCommandError(
+      'TEARDOWN_INCOMPLETE', 'private-error', remaining, undefined, remaining,
+    );
+    const records: { type: string; payload: JsonObject }[] = [];
+    const [wrapped] = superviseEngines([binding({ name: 'fixture', async run() { throw failure; } })],
+      async (type, payload) => { records.push({ type, payload }); }, storage, 'run');
+    await expect(wrapped!.engine.run(request, () => {}, new AbortController().signal)).rejects.toBe(failure);
+    expect(records[1]).toMatchObject({
+      type: 'engine-failed',
+      payload: { stoppedProcesses: remaining, remainingProcesses: remaining },
+    });
+    expect(JSON.stringify(records)).not.toMatch(/private-/u);
+  });
+
+  it('records the processes a typed failure or a completed result stopped', async () => {
+    const stopped = [
+      { pid: 4201, parentPid: 4200, processGroupId: 4200, startedAt: 'a' },
+    ];
+    const records: { type: string; payload: JsonObject }[] = [];
+    const append = async (type: 'engine-started' | 'engine-completed' | 'engine-failed', payload: JsonObject): Promise<void> => {
+      records.push({ type, payload });
+    };
+    const failure = new EngineError({ kind: 'timeout', message: 'private-error', stoppedProcesses: stopped });
+    const [failedWrap] = superviseEngines([binding({ name: 'fixture', async run() { throw failure; } })], append, storage, 'run');
+    await expect(failedWrap!.engine.run(request, () => {}, new AbortController().signal)).rejects.toBe(failure);
+    expect(records.at(-1)!.payload).toMatchObject({ stoppedProcesses: stopped });
+
+    const completed: AgentResult = { ...result, stoppedProcesses: stopped };
+    const [completedWrap] = superviseEngines([binding({ name: 'fixture', async run() { return completed; } })], append, storage, 'run');
+    expect(await completedWrap!.engine.run(request, () => {}, new AbortController().signal)).toMatchObject({ stoppedProcesses: stopped });
+    expect(records.at(-1)!.payload).toMatchObject({ stoppedProcesses: stopped });
     expect(JSON.stringify(records)).not.toMatch(/private-/u);
   });
 

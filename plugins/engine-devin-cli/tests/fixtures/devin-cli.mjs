@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // A hand-written stand-in for the `devin` CLI. Its export follows the shape
 // Devin 3000.11 writes; it is not a capture of a real conversation.
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 
 const args = process.argv.slice(2);
 const valueAfter = (flag) => {
@@ -62,6 +63,19 @@ const agent = (step_id, message, extra = {}) => ({ step_id, source: 'agent', mod
 // earlier step, and its totals cover every run in the session.
 const resumed = valueAfter('-r');
 const sessionId = resumed ?? `session-${process.pid}`;
+// When the test names a record file, the first run starts a detached helper
+// that keeps this process's output pipes and lives on after it exits, the
+// way a leftover the attempt's teardown has to stop would.
+const helperRecord = process.env.OBVERSA_TEST_DEVIN_HELPER;
+if (helperRecord && resumed === undefined) {
+  const helper = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    detached: true,
+    stdio: 'inherit',
+  });
+  helper.unref();
+  writeFileSync(`${helperRecord}.tmp`, JSON.stringify({ pid: helper.pid }));
+  renameSync(`${helperRecord}.tmp`, helperRecord);
+}
 const sessionFile = calls ? `${calls}.${sessionId}.json` : undefined;
 if (resumed !== undefined && (sessionFile === undefined || !existsSync(sessionFile))) {
   process.stderr.write(`no session ${resumed}`);

@@ -469,7 +469,11 @@ export class CodexEngine implements Engine {
       // A call that ends with no answer still spent the tokens it reported.
       if (failed && !text) onEvent({ type: 'usage', usage, model: model ?? 'codex', billing });
       if (aborted && !text)
-        throw new EngineError({ kind: 'aborted', message: 'codex run aborted' });
+        throw new EngineError({
+          kind: 'aborted',
+          message: 'codex run aborted',
+          stoppedProcesses: sub.stoppedProcesses,
+        });
       const diagnostic = diagnosticCapture(stderr, stdout, env);
       let transportFailure: AgentResult['transportFailure'];
       if (failed && !text)
@@ -482,6 +486,7 @@ export class CodexEngine implements Engine {
           message: `codex exited ${sub.exitCode ?? '?'}${
             diagnostic ? `: ${diagnostic}` : ''
           }`,
+          stoppedProcesses: sub.stoppedProcesses,
         });
       if (failed) {
         transportFailure = {
@@ -502,6 +507,7 @@ export class CodexEngine implements Engine {
         requested,
         stopReason: 'end_turn',
         ...(transportFailure ? { transportFailure } : {}),
+        stoppedProcesses: sub.stoppedProcesses,
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });

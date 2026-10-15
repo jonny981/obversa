@@ -15,12 +15,14 @@ import { RunChildError, runChild, type RunChildOptions } from '../index.js';
 import { digestJson, type Sha256Digest } from '@obversa/api';
 import {
   capturePipeOwnerProbe,
+  describeCountedProcesses,
   inspectAttemptMarkedProcesses,
   inspectOwnedProcessTree,
   inspectPipeHoldingProcesses,
-  measureOwnedProcessMemory,
+  measureOwnedProcessTree,
   readProcessIdentity,
   stopOwnedProcessTree,
+  type CountedProcess,
   type ProcessIdentity,
 } from './process-tree.js';
 import { attemptEnvironment } from './attempt-env.js';
@@ -44,7 +46,8 @@ export type CommandCleanupCapability = 'inherited-owner' | 'observed-processes';
 /**
  * Linux can discover exact inherited owner markers. Other platforms clean
  * observed processes (and retained pipes on macOS). On macOS a helper that
- * moves into a new session before the watchdog samples it is not swept.
+ * moves into a new session and drops the command's pipes before any
+ * inspection observes it can escape.
  */
 export function commandCleanupCapability(): CommandCleanupCapability {
   return process.platform === 'linux' ? 'inherited-owner' : 'observed-processes';
@@ -63,18 +66,32 @@ export class OwnedCommandError extends Error {
   readonly code: OwnedCommandErrorCode;
   readonly spawnCode?: string;
   readonly remainingProcesses: readonly ProcessIdentity[];
+  /**
+   * The processes teardown sent a signal to. A signalled process that is
+   * still running is on `remainingProcesses` too.
+   */
+  readonly stoppedProcesses: readonly ProcessIdentity[];
+  /**
+   * On a memory-limit stop, every process the last measure counted, with its
+   * command line and the reasons it counted. Empty on other failures.
+   */
+  readonly countedProcesses: readonly CountedProcess[];
 
   constructor(
     code: OwnedCommandErrorCode,
     message: string,
     remainingProcesses: readonly ProcessIdentity[] = [],
     spawnCode?: string,
+    stoppedProcesses: readonly ProcessIdentity[] = [],
+    countedProcesses: readonly CountedProcess[] = [],
   ) {
     super(message);
     this.name = 'OwnedCommandError';
     this.code = code;
     this.spawnCode = spawnCode;
     this.remainingProcesses = Object.freeze([...remainingProcesses]);
+    this.stoppedProcesses = Object.freeze([...stoppedProcesses]);
+    this.countedProcesses = Object.freeze([...countedProcesses]);
   }
 }
 
@@ -103,6 +120,11 @@ export interface OwnedCommandResult {
   readonly timedOut: boolean;
   readonly aborted: boolean;
   readonly peakMemoryBytes: number;
+  /**
+   * The processes teardown sent a signal to. `remainingProcesses` is empty:
+   * a process still running makes the call throw instead.
+   */
+  readonly stoppedProcesses: readonly ProcessIdentity[];
   readonly remainingProcesses: readonly ProcessIdentity[];
 }
 
@@ -141,11 +163,12 @@ type StopReason =
 
 type OwnedRunChildOptions = Omit<RunChildOptions, 'hooks'> & {
   readonly hooks: {
-    readonly onSpawn: (child: ChildProcess) => void;
+    readonly onSpawn: (child: ChildProcess, identity: ProcessIdentity | undefined) => void;
     readonly onExit: (code: number | null, signal: NodeJS.Signals | null) => void | Promise<void>;
     readonly onStdout?: (chunk: Uint8Array) => void;
     readonly onStderr?: (chunk: Uint8Array) => void;
     readonly onStop: (reason: 'timeout' | 'abort' | 'output') => void | Promise<void>;
+    readonly onSignal: (processes: readonly ProcessIdentity[]) => void;
   };
 };
 
@@ -357,6 +380,7 @@ function emptyResult(aborted: boolean): OwnedCommandResult {
     timedOut: false,
     aborted,
     peakMemoryBytes: 0,
+    stoppedProcesses: Object.freeze([]),
     remainingProcesses: Object.freeze([]),
   });
 }
@@ -386,6 +410,8 @@ export async function runOwnedCommand(
   } | undefined;
   let pipeProbe: ReturnType<typeof capturePipeOwnerProbe> | undefined;
   let observed: readonly ProcessIdentity[] = [];
+  let signaled: readonly ProcessIdentity[] = [];
+  let countedProcesses: readonly CountedProcess[] = Object.freeze([]);
   let peakMemoryBytes = 0;
   let stopReason: StopReason | undefined;
   let cleanupPromise: Promise<readonly ProcessIdentity[]> | undefined;
@@ -420,6 +446,12 @@ export async function runOwnedCommand(
         ...treeRequest,
         observed,
         graceMs: request.teardownGraceMs,
+        ...(pipeProbe === undefined
+          ? {}
+          : { pipeFileDescriptors: pipeProbe.fileDescriptors }),
+        onSignal: (processes) => {
+          signaled = mergeObserved(signaled, processes);
+        },
       });
     })();
     void cleanupPromise.catch(() => {});
@@ -429,17 +461,27 @@ export async function runOwnedCommand(
   const monitor = async (): Promise<void> => {
     try {
       while (!monitorStopped && stopReason === undefined && treeRequest !== undefined) {
+        const carried = observed;
         const found = await inspectOwnedProcessTree({
           ...treeRequest,
           observed,
         });
         observed = mergeObserved(observed, found);
-        const residentBytes = await measureOwnedProcessMemory({
+        const measure = await measureOwnedProcessTree({
           ...treeRequest,
           observed,
         });
-        peakMemoryBytes = Math.max(peakMemoryBytes, residentBytes);
-        if (residentBytes > request.maxMemoryBytes) {
+        peakMemoryBytes = Math.max(peakMemoryBytes, measure.residentBytes);
+        if (measure.residentBytes > request.maxMemoryBytes) {
+          countedProcesses = (
+            await describeCountedProcesses(
+              { ...treeRequest, observed: carried },
+              measure.counted,
+            )
+          ).map((entry) => Object.freeze({
+            ...entry,
+            command: scrubCapture(entry.command, request.env, 200),
+          }));
           requestStop('memory');
           return;
         }
@@ -477,15 +519,20 @@ export async function runOwnedCommand(
       detached: true,
       signal: cancellation.signal,
       hooks: {
-        onSpawn: (child) => {
+        onSpawn: (child, identity) => {
           const rootPid = child.pid;
           if (rootPid === undefined) throw new Error('owned command has no process id');
-          let root: ProcessIdentity | undefined;
-          try {
-            root = readProcessIdentity(rootPid);
-          } catch (error) {
-            inspectionFailure = error;
-            throw error;
+          // runChild already read the identity as the process started; only a
+          // missing read is retried, so a failed look still surfaces as an
+          // inspection failure.
+          let root = identity;
+          if (root === undefined) {
+            try {
+              root = readProcessIdentity(rootPid);
+            } catch (error) {
+              inspectionFailure = error;
+              throw error;
+            }
           }
           treeRequest = {
             attemptId: request.attemptId,
@@ -517,6 +564,9 @@ export async function runOwnedCommand(
           requestStop(reason);
           await cleanup();
         },
+        onSignal: (processes) => {
+          signaled = mergeObserved(signaled, processes);
+        },
       },
     };
     childResult = await runChild(childOptions);
@@ -533,10 +583,14 @@ export async function runOwnedCommand(
         cleanupError = error;
       }
     }
-    pipeProbe?.close();
   }
 
+  // Every identity a signal was sent to stays on the record, including one
+  // still running: remainingProcesses names those separately.
+  const stopped = (): readonly ProcessIdentity[] => Object.freeze([...signaled]);
+
   if (cleanupError !== undefined) {
+    pipeProbe?.close();
     if (treeRequest !== undefined) {
       cancellation.abort();
       try {
@@ -544,6 +598,9 @@ export async function runOwnedCommand(
           ...treeRequest,
           observed,
           graceMs: request.teardownGraceMs,
+          onSignal: (processes) => {
+            signaled = mergeObserved(signaled, processes);
+          },
         });
       } catch (error) {
         inspectionFailure ??= error;
@@ -555,20 +612,28 @@ export async function runOwnedCommand(
         ? cleanupError.message
         : 'owned process teardown failed',
       remainingProcesses,
+      undefined,
+      stopped(),
     );
   }
+  pipeProbe?.close();
   if (childError !== undefined) {
     if (remainingProcesses.length > 0) {
       throw new OwnedCommandError(
         'TEARDOWN_INCOMPLETE',
         childError instanceof Error ? childError.message : 'owned command left processes running after teardown',
         remainingProcesses,
+        undefined,
+        stopped(),
       );
     }
     if (childError instanceof RunChildError && childError.code === 'OUTPUT_LIMIT') {
       throw new OwnedCommandError(
         'OUTPUT_LIMIT',
         `owned command output exceeded ${request.maxOutputBytes} bytes`,
+        [],
+        undefined,
+        stopped(),
       );
     }
     if (childError instanceof RunChildError && childError.code === 'SPAWN_FAILED') {
@@ -581,9 +646,12 @@ export async function runOwnedCommand(
           inspectionFailure instanceof Error
             ? inspectionFailure.message
             : 'owned process inspection failed',
+          [],
+          undefined,
+          stopped(),
         );
       }
-      throw new OwnedCommandError('TEARDOWN_INCOMPLETE', childError.message);
+      throw new OwnedCommandError('TEARDOWN_INCOMPLETE', childError.message, [], undefined, stopped());
     }
     throw childError;
   }
@@ -592,18 +660,27 @@ export async function runOwnedCommand(
       'TEARDOWN_INCOMPLETE',
       'owned command left processes running after teardown',
       remainingProcesses,
+      undefined,
+      stopped(),
     );
   }
   if (stopReason === 'output') {
     throw new OwnedCommandError(
       'OUTPUT_LIMIT',
       `owned command output exceeded ${request.maxOutputBytes} bytes`,
+      [],
+      undefined,
+      stopped(),
     );
   }
   if (stopReason === 'memory') {
     throw new OwnedCommandError(
       'MEMORY_LIMIT',
       `owned process tree exceeded ${request.maxMemoryBytes} bytes`,
+      [],
+      undefined,
+      stopped(),
+      countedProcesses,
     );
   }
   if (stopReason === 'inspection' || inspectionFailure !== undefined) {
@@ -612,6 +689,9 @@ export async function runOwnedCommand(
       inspectionFailure instanceof Error
         ? inspectionFailure.message
         : 'owned process inspection failed',
+      [],
+      undefined,
+      stopped(),
     );
   }
 
@@ -622,6 +702,7 @@ export async function runOwnedCommand(
     timedOut: stopReason === 'timeout' || childResult?.timedOut === true,
     aborted: stopReason === 'abort',
     peakMemoryBytes,
+    stoppedProcesses: stopped(),
     remainingProcesses: Object.freeze([]),
   };
   return Object.freeze(result);
@@ -641,6 +722,7 @@ export {
   readAttemptMarkerProcessIds,
   readProcessIdentity,
   stopOwnedProcessTree,
+  type CountedProcess,
   type OwnedProcessTreeRequest,
   type PipeOwnerProbe,
   type ProcessIdentity,

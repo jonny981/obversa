@@ -25,6 +25,7 @@ import {
   type Engine,
   type EngineEventSink,
   type EngineSelectionRecord,
+  type StoppedProcess,
 } from '@obversa/api';
 import {
   attemptEnvironment,
@@ -339,7 +340,7 @@ function assertDevinConfiguration(req: AgentRequest, opts: DevinCliEngineOptions
 
 const LOAD_SPAWN_CODES = new Set(['EAGAIN', 'EMFILE', 'ENOMEM']);
 
-function devinCommandError(error: unknown, executable?: string): unknown {
+function mapDevinCommandError(error: unknown, executable?: string): unknown {
   if (!(error instanceof OwnedCommandError)) return error;
   if (error.code === 'INVALID_EXECUTABLE') {
     return new EngineError({ kind: 'missing-cli', message: 'Devin executable is not runnable' });
@@ -361,6 +362,49 @@ function devinCommandError(error: unknown, executable?: string): unknown {
     return new EngineError({ kind: 'unknown', message: 'Devin command could not start' });
   }
   return error;
+}
+
+/**
+ * The error a failed command throws, carrying what the attempt's earlier
+ * commands stopped. An `EngineIncompleteResultError` already records its
+ * evidence.
+ */
+function devinCommandError(
+  error: unknown,
+  executable?: string,
+  stopped: readonly StoppedProcess[] = [],
+): unknown {
+  const mapped = mapDevinCommandError(error, executable);
+  if (stopped.length === 0 || mapped instanceof EngineIncompleteResultError) return mapped;
+  const stoppedProcesses = [
+    ...stopped,
+    ...(mapped instanceof EngineError || mapped instanceof OwnedCommandError
+      ? mapped.stoppedProcesses ?? []
+      : []),
+  ];
+  if (mapped instanceof EngineError) {
+    return new EngineError({
+      kind: mapped.kind,
+      message: mapped.message,
+      cause: mapped.cause,
+      retryAfterMs: mapped.retryAfterMs,
+      resetAt: mapped.resetAt,
+      resetProven: mapped.resetProven,
+      effective: mapped.effective,
+      stoppedProcesses,
+    });
+  }
+  if (mapped instanceof OwnedCommandError) {
+    return new OwnedCommandError(
+      mapped.code,
+      mapped.message,
+      mapped.remainingProcesses,
+      mapped.spawnCode,
+      stoppedProcesses,
+      mapped.countedProcesses,
+    );
+  }
+  return mapped;
 }
 
 /** What Devin prints when its permission mode refuses a tool in print mode. */
@@ -531,6 +575,8 @@ export class DevinCliEngine implements Engine {
       if (config !== undefined) writeFileSync(configFile, config, { encoding: 'utf8', mode: 0o600 });
       let exportFile = join(dir, 'conversation.json');
       let args = buildDevinArgs(req, this.opts, { promptFile, exportFile, configFile });
+      // Each retried run can stop its own leftovers; the attempt records all of them.
+      const stopped: StoppedProcess[] = [];
       for (let refusals = 0; ; refusals += 1) {
         const sub = await runOwnedCommand({
           executable,
@@ -546,13 +592,18 @@ export class DevinCliEngine implements Engine {
           teardownGraceMs: req.timeoutGraceMs ?? DEFAULT_OWNED_COMMAND_LIMITS.teardownGraceMs,
           maxOutputBytes: maxOutputBytes - outputBytes,
           maxMemoryBytes: req.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes,
-        }, signal).catch((error: unknown) => { throw devinCommandError(error, executable); });
+        }, signal).catch((error: unknown) => { throw devinCommandError(error, executable, stopped); });
         outputBytes += sub.stdout.byteLength + sub.stderr.byteLength;
+        stopped.push(...sub.stoppedProcesses);
 
         const conversation = readExport(exportFile);
         const answered = conversation?.answered === true;
         const aborted = sub.aborted || signal.aborted;
-        if (aborted && !answered) throw new EngineError({ kind: 'aborted', message: 'devin run aborted' });
+        if (aborted && !answered) throw new EngineError({
+          kind: 'aborted',
+          message: 'devin run aborted',
+          stoppedProcesses: stopped,
+        });
         const diagnostic = scrubCapture(
           output(sub),
           env,
@@ -563,12 +614,14 @@ export class DevinCliEngine implements Engine {
           throw new EngineError({
             kind: sub.timedOut ? 'timeout' : classifyEngineFailure(new Error(diagnostic)),
             message: `devin exited ${sub.exitCode ?? '?'}${diagnostic ? `: ${diagnostic}` : ''}`,
+            stoppedProcesses: stopped,
           });
         }
         if (conversation === undefined) {
           throw new EngineError({
             kind: 'unknown',
             message: `devin wrote no readable conversation export${diagnostic ? `: ${diagnostic}` : ''}`,
+            stoppedProcesses: stopped,
           });
         }
 
@@ -616,7 +669,7 @@ export class DevinCliEngine implements Engine {
               : `devin ended without a final answer under permission mode ${permissionMode(req, this.opts)}`}${
               diagnostic ? `: ${diagnostic}` : ''
             }`,
-            { parts, usage: conversation.usage, requested, effective },
+            { parts, usage: conversation.usage, requested, effective, stoppedProcesses: stopped },
           );
         }
         onEvent({ type: 'usage', usage: conversation.usage, model: effective.model ?? 'devin' });
@@ -625,6 +678,7 @@ export class DevinCliEngine implements Engine {
           usage: conversation.usage,
           requested,
           effective,
+          stoppedProcesses: stopped,
           ...(failed
             ? {
                 transportFailure: {

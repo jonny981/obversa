@@ -1,6 +1,6 @@
 /** Provider-neutral values and behavior shared by runtimes and engine plugins. */
 
-import type { JsonValue } from './json.js';
+import type { JsonObject, JsonValue } from './json.js';
 
 export type {
   JsonObject,
@@ -180,6 +180,14 @@ export interface EngineTransportFailure {
   readonly exitCode: number | null;
 }
 
+/** A process an engine attempt's command teardown signaled. */
+export interface StoppedProcess extends JsonObject {
+  readonly pid: number;
+  readonly parentPid: number;
+  readonly processGroupId: number;
+  readonly startedAt: string;
+}
+
 /** Tools used by supported agent hosts to dispatch sub-agents. */
 export const SUBAGENT_TOOLS = ['Task', 'Agent', 'task'];
 export const CLAUDE_SUBAGENT_TOOLS = ['Task', 'Agent'];
@@ -232,6 +240,8 @@ export interface AgentResult {
   readonly effective: EngineSelectionRecord;
   readonly stopReason?: string;
   readonly transportFailure?: EngineTransportFailure;
+  /** What the attempt's command teardown signaled, when the attempt ran one. */
+  readonly stoppedProcesses?: readonly StoppedProcess[];
   readonly raw?: unknown;
 }
 

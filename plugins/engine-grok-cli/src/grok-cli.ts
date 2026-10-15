@@ -27,6 +27,7 @@ import {
   type EngineSelectionRecord,
   type JsonObject,
   type JsonValue,
+  type StoppedProcess,
   type UsageReceipt,
   validateAgentResult,
 } from '@obversa/api';
@@ -704,8 +705,14 @@ function loopError(
   kind: EngineFailureKind,
   message: string,
   effective?: EngineSelectionRecord,
+  stoppedProcesses?: readonly StoppedProcess[],
 ): EngineError {
-  return new EngineError({ kind, message, effective });
+  return new EngineError({
+    kind,
+    message,
+    effective,
+    ...(stoppedProcesses === undefined ? {} : { stoppedProcesses }),
+  });
 }
 
 function transportFailure(
@@ -1115,6 +1122,8 @@ export class GrokCliEngine implements Engine {
         throw loopError(
           'invalid-config',
           `Grok returned an invalid JSON stream: ${accumulator.parseError.message}`,
+          undefined,
+          command.stoppedProcesses,
         );
       }
       const stdout = new TextDecoder().decode(command.stdout);
@@ -1139,6 +1148,8 @@ export class GrokCliEngine implements Engine {
               `Grok returned invalid JSON: ${
                 error instanceof Error ? error.message : String(error)
               }`,
+              undefined,
+              command.stoppedProcesses,
             );
           }
         }
@@ -1177,7 +1188,7 @@ export class GrokCliEngine implements Engine {
         });
       }
       if (aborted && !succeeded) {
-        throw loopError('aborted', 'Grok attempt was aborted');
+        throw loopError('aborted', 'Grok attempt was aborted', undefined, command.stoppedProcesses);
       }
       if (!succeeded) {
         const rawDetail = terminal && typeof terminal.message === 'string'
@@ -1193,10 +1204,16 @@ export class GrokCliEngine implements Engine {
           kind,
           `Grok failed${detail ? `: ${detail}` : ''}`,
           effective,
+          command.stoppedProcesses,
         );
       }
       if (terminal === null) {
-        throw loopError('invalid-config', 'Grok completed without a result');
+        throw loopError(
+          'invalid-config',
+          'Grok completed without a result',
+          undefined,
+          command.stoppedProcesses,
+        );
       }
 
       const usage = usageFromTerminal(terminal);
@@ -1204,6 +1221,8 @@ export class GrokCliEngine implements Engine {
         throw loopError(
           'invalid-config',
           'Grok effective capabilities did not match the prepared request',
+          undefined,
+          command.stoppedProcesses,
         );
       }
       onEvent({
@@ -1239,6 +1258,7 @@ export class GrokCliEngine implements Engine {
                 },
               }
             : {}),
+        stoppedProcesses: command.stoppedProcesses,
         raw: terminal,
       });
     } catch (error) {

@@ -5,6 +5,7 @@ export {
   ownedCommandIdentity,
   resolveCommandExecutable,
   runOwnedCommand,
+  type CountedProcess,
   type OwnedCommandErrorCode,
   type OwnedCommandObserver,
   type OwnedCommandRequest,

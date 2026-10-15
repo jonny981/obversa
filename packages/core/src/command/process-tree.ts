@@ -43,6 +43,17 @@ export interface StopOwnedProcessTreeRequest extends OwnedProcessTreeRequest {
   readonly graceMs: number;
   /** Only the outer command request may sweep an inherited owner. */
   readonly ownerId?: Sha256Digest;
+  /**
+   * The runner's own output pipe descriptors. On macOS each discovery pass
+   * re-finds every process still holding the child side of one of them, so
+   * a helper started while teardown is already running is still stopped.
+   */
+  readonly pipeFileDescriptors?: readonly number[];
+  /**
+   * Called after each signal pass with the processes the signal was sent
+   * to, so the caller can record what teardown stopped.
+   */
+  readonly onSignal?: (processes: readonly ProcessIdentity[]) => void;
 }
 
 export interface PipeOwnerProbe {
@@ -50,9 +61,31 @@ export interface PipeOwnerProbe {
   close(): void;
 }
 
-interface ProcessSnapshot {
+export interface ProcessSnapshot extends JsonObject {
   readonly identity: ProcessIdentity;
   readonly residentBytes: number;
+}
+
+/**
+ * A process that counted against a memory limit, with the command line and
+ * the reasons it counted. `command` holds the raw command line as read;
+ * the caller scrubs it and cuts it to 200 characters for the record.
+ */
+export interface CountedProcess extends JsonObject {
+  readonly pid: number;
+  readonly parentPid: number;
+  readonly command: string;
+  readonly residentBytes: number;
+  readonly root: boolean;
+  readonly descendant: boolean;
+  readonly groupMember: boolean;
+  readonly earlierObserved: boolean;
+}
+
+/** The total resident memory of the owned set and every process in it. */
+export interface OwnedMemoryMeasure {
+  readonly residentBytes: number;
+  readonly counted: readonly ProcessSnapshot[];
 }
 
 function windowsExecutable(...parts: readonly string[]): string {
@@ -226,14 +259,30 @@ async function processTable(): Promise<readonly ProcessSnapshot[]> {
 
 /**
  * Read one live process's identity before this call returns, to pass its
- * start time as `rootStartedAt`. Node cannot reap its own child while this
- * call blocks, so a child read right after it starts is still that child,
- * even if it has already exited. Windows has no process groups here and
- * returns nothing.
+ * start time as `rootStartedAt` and to record the process when the first
+ * signal already stops it. Node cannot reap its own child while this call
+ * blocks, so a child read right after it starts is still that child, even
+ * if it has already exited. On Windows the identity's start time is the
+ * process's creation tick count and its group is zero, and a process that
+ * is already gone reads as nothing instead of throwing.
  */
 export function readProcessIdentity(pid: number): ProcessIdentity | undefined {
-  if (process.platform === 'win32') return undefined;
   positivePid(pid, 'pid');
+  if (process.platform === 'win32') {
+    const script =
+      `Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=${pid}" ` +
+      '| ForEach-Object { Write-Output "$($_.ProcessId)`t' +
+      '$($_.ParentProcessId)`t$($_.WorkingSetSize)`t' +
+      '$($_.CreationDate.ToUniversalTime().Ticks)" }';
+    const stdout = execFileSync(
+      windowsExecutable('WindowsPowerShell', 'v1.0', 'powershell.exe'),
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      { encoding: 'utf8', maxBuffer: 1 * 1_024 * 1_024 },
+    );
+    return parseWindowsProcessRows(stdout).find(
+      (snapshot) => snapshot.identity.pid === pid,
+    )?.identity;
+  }
   const stdout = execFileSync(
     '/bin/ps',
     ['-o', 'pid=,ppid=,pgid=,rss=,lstart=', '-p', String(pid)],
@@ -504,8 +553,23 @@ async function terminateWindowsTree(
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw error;
-    // The root may already have exited. The identity scan below still finds
-    // and stops children whose recorded parent is that root.
+    // The process may already have exited; the rest are still stopped.
+  }
+}
+
+/**
+ * Signal every owned process on Windows. `taskkill /T` reaches only the
+ * tree under a live root; a root that already exited leaves observed
+ * children standing, so each other target gets the same stop by its own id.
+ */
+async function terminateWindowsTargets(
+  rootPid: number,
+  targets: readonly ProcessIdentity[],
+  force: boolean,
+): Promise<void> {
+  await terminateWindowsTree(rootPid, force);
+  for (const identity of targets) {
+    if (identity.pid !== rootPid) await terminateWindowsTree(identity.pid, force);
   }
 }
 
@@ -532,23 +596,123 @@ export async function inspectOwnedProcessTree(
 export async function measureOwnedProcessMemory(
   request: OwnedProcessTreeRequest,
 ): Promise<number> {
-  validateRequest(request);
-  const owned = ownedFromTable(await processTable(), request);
-  return owned.reduce((total, ownedProcess) => {
-    const next = total + ownedProcess.residentBytes;
-    if (!Number.isSafeInteger(next)) {
-      throw new TypeError('owned process memory must remain a safe integer');
-    }
-    return next;
-  }, 0);
+  return (await measureOwnedProcessTree(request)).residentBytes;
 }
 
-async function signalMatching(
+export async function measureOwnedProcessTree(
   request: OwnedProcessTreeRequest,
+): Promise<OwnedMemoryMeasure> {
+  validateRequest(request);
+  const owned = ownedFromTable(await processTable(), request);
+  let residentBytes = 0;
+  for (const snapshot of owned) {
+    residentBytes += snapshot.residentBytes;
+    if (!Number.isSafeInteger(residentBytes)) {
+      throw new TypeError('owned process memory must remain a safe integer');
+    }
+  }
+  return Object.freeze({
+    residentBytes,
+    counted: Object.freeze(owned),
+  });
+}
+
+async function commandLines(
+  pids: readonly number[],
+): Promise<ReadonlyMap<number, string>> {
+  if (pids.length === 0) return new Map();
+  if (process.platform === 'win32') {
+    const executable = windowsExecutable(
+      'WindowsPowerShell',
+      'v1.0',
+      'powershell.exe',
+    );
+    const filter = pids.map((pid) => `ProcessId=${pid}`).join(' OR ');
+    const script =
+      `Get-CimInstance -ClassName Win32_Process -Filter "${filter}" ` +
+      '| ForEach-Object { Write-Output "$($_.ProcessId)`t$($_.CommandLine)" }';
+    const { stdout } = await execFileAsync(
+      executable,
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      { encoding: 'utf8', maxBuffer: 4 * 1_024 * 1_024 },
+    );
+    const lines = new Map<number, string>();
+    for (const line of stdout.split(/\r?\n/u)) {
+      const tab = line.indexOf('\t');
+      if (tab < 0) continue;
+      const pid = Number(line.slice(0, tab));
+      if (Number.isSafeInteger(pid)) lines.set(pid, line.slice(tab + 1));
+    }
+    return lines;
+  }
+  const { stdout } = await execFileAsync(
+    '/bin/ps',
+    ['-o', 'pid=,command=', '-p', pids.join(',')],
+    { encoding: 'utf8', maxBuffer: 4 * 1_024 * 1_024, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } },
+  );
+  const lines = new Map<number, string>();
+  for (const line of stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(.*)$/u.exec(line);
+    if (match === null) continue;
+    const pid = Number(match[1]);
+    if (Number.isSafeInteger(pid)) lines.set(pid, match[2] ?? '');
+  }
+  return lines;
+}
+
+/**
+ * Describe every process a measure counted, for a memory-limit record.
+ * `request.observed` decides `earlierObserved`: pass the observed list from
+ * before the measure's own look, so a process carried in through an earlier
+ * sample is marked. The root seeds that list, so it never carries the mark.
+ * Each `command` is the raw command line; the caller scrubs it before the
+ * 200-character cap so a split secret cannot reach the record.
+ */
+export async function describeCountedProcesses(
+  request: OwnedProcessTreeRequest,
+  counted: readonly ProcessSnapshot[],
+): Promise<readonly CountedProcess[]> {
+  validateRequest(request);
+  const countedPids = new Set(counted.map(({ identity }) => identity.pid));
+  const observedKeys = new Set(
+    (request.observed ?? []).map((identity) => identityKey(identity)),
+  );
+  const holder = counted.find(
+    ({ identity }) => identity.pid === request.rootPid,
+  )?.identity;
+  const rootAlive =
+    process.platform === 'win32' ||
+    (request.rootStartedAt !== undefined &&
+      holder?.startedAt === request.rootStartedAt);
+  let commands: ReadonlyMap<number, string> = new Map();
+  try {
+    commands = await commandLines([...countedPids]);
+  } catch {
+    // A stopped process may be gone before its command is read; the record
+    // still holds its identity and resident memory.
+  }
+  return Object.freeze(
+    counted.map(({ identity, residentBytes }) => {
+      const root = rootAlive && identity.pid === request.rootPid;
+      return cloneFrozenJson({
+        pid: identity.pid,
+        parentPid: identity.parentPid,
+        command: commands.get(identity.pid) ?? '',
+        residentBytes,
+        root,
+        descendant: countedPids.has(identity.parentPid),
+        groupMember: identity.processGroupId === request.rootProcessGroupId,
+        earlierObserved: !root && observedKeys.has(identityKey(identity)),
+      } satisfies CountedProcess);
+    }),
+  );
+}
+
+async function signalList(
+  targets: readonly ProcessIdentity[],
   signal: NodeJS.Signals,
-): Promise<readonly ProcessIdentity[]> {
-  const owned = await inspectOwnedProcessTree(request);
-  for (const identity of owned) {
+): Promise<void> {
+  for (const identity of targets) {
     if (identity.pid === process.pid) continue;
     try {
       process.kill(positivePid(identity.pid, 'owned process id'), signal);
@@ -556,7 +720,6 @@ async function signalMatching(
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
     }
   }
-  return owned;
 }
 
 function mergeObserved(
@@ -577,9 +740,56 @@ export async function stopOwnedProcessTree(
   const graceMs = nonNegativeDuration(request.graceMs, 'graceMs');
   const ownerId = process.platform === 'linux' ? request.ownerId : undefined;
   let observed = request.observed ?? [];
+  // Identities that already received the graceful signal. A helper first
+  // seen while teardown runs gets that signal and what remains of the
+  // period; no owned process meets the forced signal first.
+  const graceful = new Set<string>();
+  const sendGraceful = async (
+    identities: readonly ProcessIdentity[],
+  ): Promise<readonly ProcessIdentity[]> => {
+    const fresh = identities.filter((identity) => !graceful.has(identityKey(identity)));
+    for (const identity of fresh) graceful.add(identityKey(identity));
+    await signalList(fresh, 'SIGTERM');
+    if (fresh.length > 0) request.onSignal?.(fresh);
+    return fresh;
+  };
+  const sendForced = async (): Promise<void> => {
+    const owned = await inspectOwnedProcessTree({ ...request, observed });
+    observed = mergeObserved(observed, owned);
+    // A process found only now, by a marker or a kept pipe, has had no
+    // signal yet; the forced pass leaves it to the next look.
+    const fresh = new Set((await sendGraceful(owned)).map(identityKey));
+    const forced = owned.filter((identity) => !fresh.has(identityKey(identity)));
+    await signalList(forced, 'SIGKILL');
+    if (forced.length > 0) request.onSignal?.(forced);
+  };
+  // On Windows the graceful stop is a plain taskkill and the forced one is
+  // taskkill /F. The same order holds: a target first found while teardown
+  // runs gets the graceful stop and the forced pass leaves it to the next
+  // look.
+  const stopWindows = async (
+    targets: readonly ProcessIdentity[],
+    force: boolean,
+  ): Promise<void> => {
+    observed = mergeObserved(observed, targets);
+    const fresh = targets.filter((identity) => !graceful.has(identityKey(identity)));
+    for (const identity of fresh) graceful.add(identityKey(identity));
+    if (fresh.length > 0) {
+      request.onSignal?.(fresh);
+      await terminateWindowsTargets(request.rootPid, fresh, false);
+    }
+    const freshKeys = new Set(fresh.map(identityKey));
+    const forced = targets.filter((identity) => !freshKeys.has(identityKey(identity)));
+    if (force && forced.length > 0) {
+      request.onSignal?.(forced);
+      await terminateWindowsTargets(request.rootPid, forced, true);
+    }
+  };
   // On Linux every process of this attempt carries the attempt's exact
   // marker, so a detached helper whose parent has already exited is still
-  // found, though no parent, group or earlier sample leads to it.
+  // found, though no parent, group or earlier sample leads to it. On macOS
+  // a helper that still holds the command's pipes is found on each pass,
+  // so one started while teardown is already running is not missed.
   const discover = async (): Promise<void> => {
     if (ownerId !== undefined) {
       observed = mergeObserved(observed, await inspectOwnerMarkedProcesses(ownerId));
@@ -587,6 +797,10 @@ export async function stopOwnedProcessTree(
     if (process.platform === 'linux') {
       observed = mergeObserved(observed, await inspectAttemptMarkedProcesses(request.attemptId));
     }
+    observed = mergeObserved(
+      observed,
+      await inspectPipeHoldingProcesses(request.pipeFileDescriptors ?? []),
+    );
   };
   // A table can show nothing owned and still miss a helper forked just
   // before its parent exited, after the discovery that came before the
@@ -595,21 +809,17 @@ export async function stopOwnedProcessTree(
   const inspectRemaining = async (): Promise<readonly ProcessIdentity[]> => {
     await discover();
     const remaining = await inspectOwnedProcessTree({ ...request, observed });
-    if (remaining.length > 0 || process.platform !== 'linux') return remaining;
+    if (remaining.length > 0 || process.platform === 'win32') return remaining;
     await discover();
     return await inspectOwnedProcessTree({ ...request, observed });
   };
   await discover();
   if (process.platform === 'win32') {
-    await terminateWindowsTree(request.rootPid, false);
-    observed = mergeObserved(
-      observed,
-      await inspectOwnedProcessTree({ ...request, observed }),
-    );
+    await stopWindows(await inspectOwnedProcessTree({ ...request, observed }), false);
   } else {
     observed = mergeObserved(
       observed,
-      await signalMatching({ ...request, observed }, 'SIGTERM'),
+      await sendGraceful(await inspectOwnedProcessTree({ ...request, observed })),
     );
   }
 
@@ -618,24 +828,27 @@ export async function stopOwnedProcessTree(
     const remaining = await inspectRemaining();
     if (remaining.length === 0 && ownerId === undefined) return Object.freeze([]);
     observed = mergeObserved(observed, remaining);
+    if (process.platform === 'win32') await stopWindows(remaining, false);
+    else await sendGraceful(remaining);
     await delay(Math.min(POLL_MS, Math.max(1, gracefulDeadline - Date.now())));
   }
 
-  await terminateWindowsTree(request.rootPid, true);
+  if (process.platform === 'win32') {
+    await stopWindows(await inspectOwnedProcessTree({ ...request, observed }), true);
+  }
   await discover();
-  observed = mergeObserved(
-    observed,
-    await signalMatching({ ...request, observed }, 'SIGKILL'),
-  );
+  if (process.platform === 'win32') {
+    await stopWindows(await inspectOwnedProcessTree({ ...request, observed }), true);
+  } else {
+    await sendForced();
+  }
   const forceDeadline = Date.now() + FORCE_KILL_WAIT_MS;
   while (Date.now() < forceDeadline) {
     const remaining = await inspectRemaining();
     if (remaining.length === 0) return Object.freeze([]);
     observed = mergeObserved(observed, remaining);
-    // On Linux a process found only now, by a marker, has had no signal yet.
-    if (process.platform === 'linux') {
-      await signalMatching({ ...request, observed }, 'SIGKILL');
-    }
+    if (process.platform === 'win32') await stopWindows(remaining, true);
+    else await sendForced();
     await delay(POLL_MS);
   }
 

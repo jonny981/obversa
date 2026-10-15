@@ -172,7 +172,9 @@ no options of its own.
 
 - **`EngineError`** carries a `kind` from `EngineFailureKind`: `auth`,
   `billing`, `quota`, `rate-limit`, `model-unavailable`, `missing-cli`,
-  `invalid-config`, `transient`, `aborted` and the rest of the union.
+  `invalid-config`, `transient`, `aborted` and the rest of the union,
+  and `stoppedProcesses`, the identities the attempt's command teardown sent
+  a signal to, when the attempt ran a command.
   `EngineIncompleteResultError` is a failed turn that still produced
   measured evidence.
 - **`GraphValidationError`**: an invalid definition, description or plan.
@@ -195,7 +197,8 @@ no options of its own.
 ## API
 
 **Engines.** `Engine`, `AgentRequest`, `AgentResult`, `AgentResultPart`,
-`EngineSelectionRecord`, `EngineFailureKind`, `isEngine`, `engineSelection`,
+`EngineSelectionRecord`, `EngineFailureKind`, `StoppedProcess`, `isEngine`,
+`engineSelection`,
 `assistantResult`, `reportedUsage`, `finalResultPart`, `finalResultText`,
 `requireFinalResultText`, `validateAgentResult`, `modelIdentity`,
 `classifyEngineFailure`, `LANE_DEAD_FAILURES`, `assertReadAccess`,

@@ -8,6 +8,7 @@ import type {
   EngineIncompleteResultEvidence,
   EngineSelectionRecord,
   EngineTransportFailure,
+  StoppedProcess,
   UsageReceipt,
 } from './contracts.js';
 import { cloneFrozenJson, type JsonValue } from './json.js';
@@ -182,6 +183,31 @@ function validateTransportFailure(
   });
 }
 
+function validateStoppedProcesses(
+  value: readonly StoppedProcess[] | undefined,
+): readonly StoppedProcess[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new TypeError('stoppedProcesses must be an array');
+  }
+  return Object.freeze(
+    value.map((entry, index) => {
+      const field = `stoppedProcesses[${index}]`;
+      if (!Number.isSafeInteger(entry.pid) || entry.pid < 1) {
+        throw new TypeError(`${field}.pid must be a positive safe integer`);
+      }
+      tokenCount(entry.parentPid, `${field}.parentPid`);
+      tokenCount(entry.processGroupId, `${field}.processGroupId`);
+      return Object.freeze({
+        pid: entry.pid,
+        parentPid: entry.parentPid,
+        processGroupId: entry.processGroupId,
+        startedAt: nonEmptyText(entry.startedAt, `${field}.startedAt`),
+      });
+    }),
+  );
+}
+
 export function validateIncompleteResultEvidence(
   result: EngineIncompleteResultEvidence,
 ): EngineIncompleteResultEvidence {
@@ -190,6 +216,7 @@ export function validateIncompleteResultEvidence(
     throw new TypeError('incomplete engine evidence cannot contain two final parts');
   }
   const transportFailure = validateTransportFailure(result.transportFailure);
+  const stoppedProcesses = validateStoppedProcesses(result.stoppedProcesses);
   return Object.freeze({
     parts: Object.freeze(parts),
     usage: validateUsage(result.usage),
@@ -201,6 +228,7 @@ export function validateIncompleteResultEvidence(
       ? {}
       : { stopReason: nonEmptyText(result.stopReason, 'stopReason') }),
     ...(transportFailure === undefined ? {} : { transportFailure }),
+    ...(stoppedProcesses === undefined ? {} : { stoppedProcesses }),
     ...(result.raw === undefined ? {} : { raw: result.raw }),
   });
 }
@@ -252,6 +280,7 @@ export function assistantResult(input: {
   effective?: EngineSelectionRecord;
   stopReason?: string;
   transportFailure?: EngineTransportFailure;
+  stoppedProcesses?: readonly StoppedProcess[];
   raw?: unknown;
 }): AgentResult {
   return validateAgentResult({
@@ -267,6 +296,9 @@ export function assistantResult(input: {
     ...(input.transportFailure === undefined
       ? {}
       : { transportFailure: input.transportFailure }),
+    ...(input.stoppedProcesses === undefined
+      ? {}
+      : { stoppedProcesses: input.stoppedProcesses }),
     ...(input.raw === undefined ? {} : { raw: input.raw }),
   });
 }
