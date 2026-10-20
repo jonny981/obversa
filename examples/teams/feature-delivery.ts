@@ -35,9 +35,11 @@ import { recordedJudge } from '@obversa/runtime/testing';
  * builder with its output. A seat from another model family checks that
  * every requirement in the ticket was met. Three reviewers from three model
  * families review the change at the same time, and their reviews become one
- * list. A judge decides each finding, and the builder gets only the
- * findings it acts on. Attended, a person approves the exact bytes before
- * the change lands; with `--unattended`, it lands without asking. Each
+ * list. A judge calls each finding: act or skip in round 1, impactful or
+ * minor after. The builder gets only the ones it acts on; a held-back one
+ * stays with the judge, collected for a person to read before the change
+ * lands. Attended, a person approves the exact bytes before the change
+ * lands; with `--unattended`, it lands without asking. Each
  * ticket runs in its own worktree, and the change lands on the current
  * branch when the run passes.
  */
@@ -129,8 +131,10 @@ export function featureTeam(ticket: BriefSource): Job {
           writes: files,
           // The node's own refinement, each round: the ticket's tests first,
           // a red one goes straight back with its output; then the goal
-          // check; then the three reviewers as one panel; then Jev decides
-          // each kept finding, a block included, with no cap.
+          // check; then the three reviewers as one panel; then Jev calls
+          // each kept finding: act or skip in round 1, impactful or minor
+          // after, a block included, with no cap; a held-back one is
+          // collected for a person to read.
           refine: review({
             checks: [['node', '--test', ...tests]],
             goal: goalCheck(goalSeat, { target: 'build', text: ticket.brief }),

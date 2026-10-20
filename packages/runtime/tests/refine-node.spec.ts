@@ -265,6 +265,97 @@ describe('a dag node with agent and refine', () => {
     expect(judgeCalls).toBe(0);
   });
 
+  it('stops retrying a builder whose engine keeps failing, past the check budget', async () => {
+    const cwd = workDir();
+    // An uncapped judge sets no bound of its own on the rounds, so a build
+    // that fails before its review can run — a retryable engine failure the
+    // review never sees — counts on the same budget a failed check draws
+    // on, three by default.
+    let builderCalls = 0;
+    const builder = seat('alpha-one', () => {
+      builderCalls += 1;
+      throw new Error('provider down');
+    });
+    let judgeCalls = 0;
+    const judgeSeat = seat('judge-one', () => {
+      judgeCalls += 1;
+      return '{}';
+    });
+    const recordPath = join(cwd, 'record.jsonl');
+    const { outcome } = await run(dag({
+      name: 'page',
+      nodes: {
+        build: {
+          agent: builder,
+          writes: ['page.md'],
+          refine: review({ reviewers: [seat('beta-one', () => JSON.stringify(PASS))], judge: judge(judgeSeat) }),
+        },
+      },
+    }), { cwd, recordTo: recordPath });
+
+    expect(outcome.status).toBe('fail');
+    expect(builderCalls).toBe(4);
+    // The node's own outcome in the record says why it stopped.
+    expect(readFileSync(recordPath, 'utf8')).toContain('the build\'s failures sent the work back 3 times before its review could run');
+    // No review of a failed build ever ran, so the judge was never asked.
+    expect(judgeCalls).toBe(0);
+  });
+
+  it('counts only a run of unreviewed failures: a review that ran resets the count', async () => {
+    const cwd = workDir();
+    // One engine failure, a build whose review sends the work back, then
+    // three more failures and a passing build: the count that ends the
+    // rounds is the run of failures no gate or review saw, so a review
+    // between them starts it over.
+    let builderCalls = 0;
+    const builder = seat('alpha-one', () => {
+      builderCalls += 1;
+      if (builderCalls === 1 || (builderCalls >= 3 && builderCalls <= 5)) throw new Error('provider down');
+      return '{"status":"pass","summary":"wrote the page"}';
+    });
+    let reviewerCalls = 0;
+    const reviewer = seat('beta-one', () => JSON.stringify((reviewerCalls += 1) === 1 ? REVISE : PASS));
+    const judgeSeat = seat('judge-one', () => JSON.stringify(round('continue')));
+    const { outcome } = await run(dag({
+      name: 'page',
+      nodes: {
+        build: {
+          agent: builder,
+          refine: review({ reviewers: [reviewer], judge: judge(judgeSeat, { perFinding: false }) }),
+        },
+      },
+    }), { cwd });
+
+    expect(outcome.status).toBe('pass');
+    expect(builderCalls).toBe(6);
+  });
+
+  it('spends a `rounds` node\'s failed builds from its own budget, not the unreviewed count', async () => {
+    const cwd = workDir();
+    // `rounds: 5` allows six builds in all; a builder that keeps failing
+    // retryably runs them all out, the same as a plain rounds budget always
+    // has — the count of unreviewed failures bounds a judged node, whose
+    // rounds have no bound of their own.
+    let builderCalls = 0;
+    const builder = seat('alpha-one', () => {
+      builderCalls += 1;
+      throw new Error('provider down');
+    });
+    const { outcome } = await run(dag({
+      name: 'page',
+      nodes: {
+        build: {
+          agent: builder,
+          refine: review({ reviewers: [seat('beta-one', () => JSON.stringify(PASS))], rounds: 5 }),
+        },
+      },
+    }), { cwd });
+
+    expect(outcome.status).toBe('fail');
+    expect(outcome.summary).toContain('ran out of rounds');
+    expect(builderCalls).toBe(6);
+  });
+
   it('passes a build that deletes a file inside its declared writes', async () => {
     const cwd = workDir();
     writeFileSync(join(cwd, 'obsolete.md'), 'old content');
@@ -575,7 +666,7 @@ describe('a dag node with agent and refine', () => {
     expect(reviewerPrompts).toHaveLength(2);
   });
 
-  it('asks the judge about each finding and sends back only the ones it acts on', async () => {
+  it('asks the judge about each finding and sends back only the ones it calls impactful', async () => {
     const cwd = workDir();
     const builderPrompts: string[] = [];
     let judgeCalls = 0;
@@ -600,14 +691,14 @@ describe('a dag node with agent and refine', () => {
     });
     const judgeSeat = seat('judge-one', (req) => {
       judgeCalls += 1;
-      const { questions } = JSON.parse(req.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+      const { questions } = JSON.parse(req.prompt) as { questions: Record<string, { type: string; instructions: string }> };
       return JSON.stringify({
         ...round('continue'),
         ...Object.fromEntries(Object.entries(questions)
-          .filter(([, question]) => 'act' in question.criteria)
+          .filter(([id]) => id.startsWith('finding-'))
           .map(([id, question]) => [id, question.instructions.includes('REAL')
-            ? { choice: 'act', reason: 'a reader cannot tell who the page is for' }
-            : { choice: 'skip', reason: 'a matter of taste' }])),
+            ? (question.type === 'choice' ? { choice: 'act', reason: 'a reader cannot tell who the page is for' } : { noul: 0.9, reason: 'a reader cannot tell who the page is for' })
+            : (question.type === 'choice' ? { choice: 'skip', reason: 'a matter of taste' } : { noul: 0.1, reason: 'a matter of taste' })])),
       });
     });
     const { outcome } = await run(dag({
@@ -624,11 +715,12 @@ describe('a dag node with agent and refine', () => {
       },
     }), { cwd });
 
-    // Round 1's block is acted on; round 2's findings are all skipped, so the work ships.
+    // Round 1's block is called impactful; the finding the judge calls
+    // minor stays held back in both rounds, and round 2's ships the work.
     expect(outcome.status).toBe('pass');
     expect(judgeCalls).toBe(2);
     expect(builderPrompts).toHaveLength(2);
-    // The builder sees only the finding the judge acted on, with its reason.
+    // The builder sees only the finding the judge called impactful, with its reason.
     expect(builderPrompts[1]).toContain('REAL: the page never says who it is for');
     expect(builderPrompts[1]).not.toContain('prefer a warmer tone');
   });

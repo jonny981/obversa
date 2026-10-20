@@ -8,9 +8,10 @@ would improve the work. Use it for a page, a plan or a shortlist when you
 can't know how many rounds it will need.
 
 The reviewer says what needs fixing. The judge reads each note and the
-history of revisions, then decides for each note whether to act on it or
-skip it. When it acts on at least one note, the workflow carries those notes
-to the writer and runs the next round. When it skips them all, the work
+history of revisions, then calls each one: act or skip in round 1,
+impactful or minor after. When at least one is sent back, the workflow
+carries those notes
+to the writer and runs the next round. When none is, the work
 stands.
 With no cap, a run ends when the judge stops it or the review passes. You
 can add a cap as a backstop. Put a person's decision where the process
@@ -25,8 +26,8 @@ and set the writer's revision limit.
 flowchart LR
   write["write: Claude seat"] -->|the page| read["read: Codex seat"]
   read -->|findings| judge{"judge: Jev"}
-  judge -->|the findings it acts on| write
-  judge -->|skips every finding| approve["approve: a person"]
+  judge -->|the findings it calls impactful| write
+  judge -->|no finding is impactful| approve["approve: a person"]
   read -->|nothing fails| approve
   approve --> done((pass))
 ```
@@ -60,17 +61,34 @@ The brief tells the reader to tag each finding `block`, `should-fix` or
 `nice-to-have`. A block is a false claim or a sentence a person would not
 understand.
 
-When a judge is set, it decides every finding on its own, a block included:
-`act` or `skip`, with a one-line reason. A taste note does not cost a round,
-and a real finding is not waved through because the rest of the list was
-trivial.
+When a judge is set, it answers one question per finding, a block included,
+with a one-line reason. In round 1 it chooses `act` or `skip`: act when a
+reader of this kind of work would stumble on, misread or distrust what the
+finding names, skip when it is taste, an edge case, or polish past the bar
+the use case sets. From the second round on it answers a yes or a no:
+is the finding impactful enough to send the work back, or minor? That
+question separates an impactful
+finding (behaviour wrong under normal use, a requirement of the brief
+unmet, a test that cannot fail, or a risk of data loss, a security hole or
+a broken rule of the work) from a minor one (wording, style, naming, an
+edge case outside real use, or a nice-to-have). A real finding is not waved
+through because the rest of the list was trivial.
 
-- **The judge acts on at least one finding.** The page goes back. The writer
-  gets only the findings the judge acts on, each with the judge's reason.
-- **The judge skips every finding.** The page stands as a pass, with the
-  judge's reason.
-- **The reader's next round.** The reader is told which findings the judge
-  skipped and why, so it does not raise them again.
+- **The judge sends at least one finding back.** The page goes back:
+  the writer gets only the findings the judge sent back, each with
+  the judge's reason.
+- **The judge holds every finding back.** The page stands as a pass,
+  with the judge's reason.
+- **The reader's next round.** The reader is told which findings did not
+  go back and why, so it does not raise them again.
+
+A finding the judge holds back never goes to the writer again, whatever
+the reviewer tagged it: it is recorded `skip` in round 1 and `minor`
+from the second round on, and each is collected on `minorFindings`
+with its reviewer and the evidence it wrote, where a file and line
+usually sit: the list a person reads before the work
+lands. The judge's own answer routes the finding; the reviewer's tag only
+informs what the judge reads.
 
 With no cap, the rounds end when the judge stops them or the reader finds
 nothing that fails. A reader that tags every finding block does not decide
@@ -113,15 +131,30 @@ it too and told that this is the last round. Its answer decides the outcome:
 - **`holds` or `over_polishing`.** The work stands as a pass with the
   judge's reason. The findings still open are on the outcome as
   `openFindings`, and in the judge's entry in the record.
-- **`product_decision`.** A person is asked, and their answer is recorded.
-  No build round follows to apply it, so the run fails, and the reason
-  quotes their answer.
-- **`continue`, `not_converging` or no clear answer.** The run fails, and
-  the reason names the cap.
+- **`product_decision`.** A person is asked, and their answer buys exactly
+  one more round, past the cap, so the builder can apply it. The record
+  marks the send-back `productDecision`. Each product decision a person
+  answers buys its own round that way.
+- **`continue` or `not_converging`, with no impactful finding acted on.**
+  When the judge is deciding each finding, as on this page, no acted
+  finding means the work stands: the per-finding answers ship the round,
+  and the cap leaves that pass in place. The run fails only when the judge does
+  not decide each finding, with custom questions and no `perFinding`, or
+  when a review raised no findings to decide, and still asks for another
+  round past the cap. The reason names the cap.
 
-When the judge decides each finding, skipping every finding lets the work
-stand, and acting on any finding fails the run. A block in the last round
-goes to the judge too, with the same rules.
+Findings the judge still calls impactful change the ending. While the
+count it acts on is smaller than the round before, the run is still
+converging: the spent cap grants one more round, marked `converging` on
+the send-back, and the record says why. When the count is not falling,
+the run pauses and asks a person, the open findings attached, as a
+resumable product decision; their answer buys the round the same way. A
+run never ends as a silent fail while findings the judge called impactful
+are still open.
+
+When the judge decides each finding on the last round, calling every
+finding minor lets the work stand. A block in the last round goes to the
+judge too, with the same rules.
 
 ## What the judge sees
 
@@ -153,7 +186,7 @@ judge's `{ state, questions }` prompt.
 - **`when`: where the rounds stand.** The round number, the cap, and
   whether this is the last round. Every earlier round, with its findings,
   the judge's decision on each and its reason, and how many lines that
-  round changed. The findings the judge skipped, with its reasons. In a git
+  round changed. The findings the judge held back, with its reasons. In a git
   workspace, the files changed since the last round.
 
 ### The size limit
@@ -169,9 +202,9 @@ only when cutting the long ones is not enough. These parts can be cut:
 - **Texts.** The brief, the use case, the `desc`, the `gate`, each diff,
   the file's content and each check's output. A text keeps its start.
 - **Lists.** A person's earlier answers, the changed files, the goal
-  check's verdicts, the earlier rounds, the findings skipped before and
+  check's verdicts, the earlier rounds, the findings held back before and
   the files changed since the last round. A list keeps whole items. The
-  earlier rounds, the skipped findings and the answers keep the latest.
+  earlier rounds, the held-back findings and the answers keep the latest.
   The other lists keep their first items.
 
 The findings to decide are never cut. When they, with the names, numbers
@@ -187,14 +220,23 @@ cuts.
 
 ## The questions
 
-For each finding in the round, the judge gets one `choice` question, keyed
-`finding-1`, `finding-2` and so on in the order of the round's findings. It
-chooses `act` or `skip`. A block keeps its severity in what the judge sees,
-and its question sets a higher bar: skip it only when the case it names is
-outside how the work is really used, or the same class of finding keeps
-returning after it was answered. Otherwise the judge acts on it. When an
+For each finding in the round, the judge gets one question, keyed
+`finding-1`, `finding-2` and so on in the order of the round's findings. In
+round 1 it chooses `act` or `skip`: act when a reader of this kind of work
+would stumble on, misread or distrust what the finding names; skip when it
+is taste, an edge case, or polish past the bar the use case sets. From the
+second round on it answers a yes or a no. A
+yes calls the finding impactful: behaviour wrong
+under normal use, a requirement of the brief unmet, a test that cannot
+fail, or a risk of data loss, a security hole or a broken rule of the work.
+A no calls it minor: wording, style, naming, an edge case outside real
+use, or a nice-to-have. A block keeps its severity in what the judge sees,
+and its question sets the same higher bar in either wording: hold it back
+only when the case it names is outside how the work is really used, or the
+same class of finding keeps returning after it was answered. Otherwise it
+goes back. When an
 answer carries no reason of its own, the
-reason is the text of the chosen option. The judge
+reason is the text of the matching criterion. The judge
 answers these in the same call as the questions about the whole round. The
 default set of those is `stopQuestions()` from
 [`@obversa/runtime`](/packages/runtime). It asks four questions:
@@ -208,11 +250,15 @@ default set of those is `stopQuestions()` from
   chooses `holds`, `over_polishing`, `not_converging`, `continue` or
   `product_decision`.
 
-The answers about each finding decide the route. When any finding is
-`act`, another round runs. When every finding is `skip`, the
-work stands as a pass. This holds whatever the round answers say, so a
-chosen `not_converging` neither drops a finding the judge acts on nor fails
-a round whose findings it skips. The one exception is `product_decision`:
+The answers about each finding decide the route. A finding the judge
+calls impactful is recorded `act`, and another round runs. One it holds
+back is recorded `skip` in the first round and `minor` after it: neither
+sends the work back, and each joins the collected list. When
+every finding is held back, the work stands as a pass, with the collected
+findings on the outcome as `minorFindings`. This holds whatever the round
+answers say, so a chosen `not_converging` neither drops a finding the judge
+called impactful nor fails a round whose findings are all held back. The
+one exception is `product_decision`:
 the judge asks a person as described below. When the judge itself cannot
 answer, the loop stops rather than spending a build. A failed judge call
 pauses the run with the engine's own error. A reply that does not parse,
@@ -224,7 +270,7 @@ again first.
 A `dag()` node takes the same `judge()` value in `review({ judge })` on its
 `refine`, which covers the node's own reviews and the send-backs other
 nodes aim at it. The node the work goes back to gets only the findings the
-judge acts on, and a stop means the same thing in both places. The judge
+judge called impactful, and a stop means the same thing in both places. The judge
 runs as part of the node that sent the work back, inside that node's time
 limit. The unmet requirements a `goalCheck()` node sends back go to the
 target without the judge.
@@ -249,11 +295,13 @@ needs a person's judgement before review can continue. Pass an `interaction`
 binding to `judge()` to open your review surface. Its request includes the
 work and the review history. After the person answers, the work goes back
 to the writer. The writer gets the person's structured feedback, their
-composed prompt and the findings they answered. With a cap, that round
-counts against it like any other round. The review then runs on the new
-draft, and only after that does the judge decide again. After the last
-review a cap allows, a person is still asked and their answer is recorded,
-but no round follows to apply it, so the run fails. Without an interaction handler,
+composed prompt and the findings they answered. The review then runs on
+the new draft, and only after that does the judge decide again. With a
+cap, the round the answer buys counts against it like any other round,
+with one exception: a product decision the judge asks after the last
+review the cap allows buys exactly one more round, past the cap, and the
+record marks the send-back `productDecision`. Each product decision a
+person answers buys its own round that way. Without an interaction handler,
 answer through the run's stored callbacks client, or on the
 [run page](/driving/monitor) with a written decision. This gets an answer while
 the work is being revised. A later human review can still require you to
@@ -268,16 +316,18 @@ printed:
 ```json Output
 {
   "status": "pass",
-  "stop": "the judge skipped every finding",
+  "stop": "the judge found only minor findings",
   "approved": true
 }
 ```
 
-Three rounds. The first reader pass found two blocks. The judge acted on
-both, so the page went back. The second found a `should-fix` (the page never
-says where to run the command) and a `nice-to-have`. The judge acted on the
-first and skipped the second, so the writer got only the first. The third
-pass found one `nice-to-have`, and the judge skipped it, so the page stood.
+Three rounds. The first reader pass found two blocks. The judge acted
+on both, so the page went back. The second found a `should-fix` (the page never
+says where to run the command) and a `nice-to-have`. The judge called the
+first impactful and the second minor, so the writer got only the first. The third
+pass found one `nice-to-have`, and the judge called it minor too, so the page stood.
+The minor findings stayed on the record as `minorFindings`, for a person
+to read before the page lands.
 
 The record holds each round's findings and the judge's answers. Each answer
 also says whether the page went back or stopped, which answer decided that,
@@ -286,8 +336,8 @@ id with the judge's decision and reason, for example:
 
 ```json
 [
-  { "id": "finding-1", "decision": "act", "reason": "A reader of this kind of work would stumble on, misread or distrust what this finding names, so the builder should fix it." },
-  { "id": "finding-2", "decision": "skip", "reason": "It is taste, an edge case, or polish past the bar the use case sets, so fixing it would not change what a reader gets." }
+  { "id": "finding-1", "decision": "act", "reason": "Impactful: behaviour wrong under normal use, a requirement of the brief unmet, a test that cannot fail, or a risk of data loss, a security hole or a broken rule of the work, so the builder should fix it." },
+  { "id": "finding-2", "decision": "minor", "reason": "Minor: wording of docs or comments, style, naming, an edge case outside real use, or a nice-to-have, so fixing it would not change what a reader gets." }
 ]
 ```
 With `JUDGE=jev`, and `TYPESAFE_ENDPOINT` and `TYPESAFE_API_KEY` in the

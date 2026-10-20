@@ -179,8 +179,8 @@ describe('judgeDecision for each finding', () => {
   it('runs another round with only the acted findings, whatever the round answer says', () => {
     const decision = judgeDecision({
       stop_reason: { choice: 'holds' },
-      'finding-a': { choice: 'act', reason: 'a reader would misread it' },
-      'finding-b': { choice: 'skip' },
+      'finding-a': { noul: 0.9, reason: 'a reader would misread it' },
+      'finding-b': { noul: 0.1 },
     }, ids);
     expect(decision).toMatchObject({ again: true, rule: 'findings: 1 act, 1 skip' });
     expect(decision.findings).toEqual([
@@ -189,51 +189,96 @@ describe('judgeDecision for each finding', () => {
     ]);
   });
 
-  it('a choice with no reason records the text of the chosen option from that finding\'s question, a block\'s included', () => {
+  it('from round 2 on, a no is recorded minor and collected, and a yes still goes back, whatever the reviewer tagged', () => {
+    // The judge's own answer routes the finding: a reviewer that under-tags
+    // a real bug nice-to-have cannot stop it going back when the judge calls
+    // it impactful, and one that over-tags a nit cannot force it back when
+    // the judge calls it minor.
+    const findings = [
+      { reviewer: 'r', severity: 'nice-to-have' as const, evidence: 'REAL: a crash on open' },
+      { reviewer: 'r', severity: 'block' as const, evidence: 'a rare edge case' },
+    ];
+    const judged = { findings, round: 2 };
+    const decision = judgeDecision({
+      'finding-a': { noul: 0.9 },
+      'finding-b': { noul: 0.1 },
+    }, ids, undefined, judged);
+    expect(decision).toMatchObject({ again: true, rule: 'findings: 1 act, 0 skip, 1 minor' });
+    expect(decision.findings).toEqual([
+      { id: 'finding-a', decision: 'act', reason: expect.stringMatching(/^Impactful/) },
+      { id: 'finding-b', decision: 'minor', reason: expect.stringMatching(/^Minor/) },
+    ]);
+    expect(decision.minorFindings).toMatchObject([
+      { evidence: 'a rare edge case', id: 'finding-b' },
+    ]);
+    // All minor ships as a pass even on a chosen continue.
+    expect(judgeDecision({
+      stop_reason: { choice: 'not_converging' },
+      'finding-a': { noul: 0.1 },
+      'finding-b': { noul: 0.1 },
+    }, ids, undefined, judged)).toMatchObject({ again: false, stop: 'ship', reason: 'the judge found only minor findings', rule: 'findings: 0 act, 0 skip, 2 minor' });
+  });
+
+  it('a yes or no with no reason records the text of that answer from the finding\'s question, a block\'s included', () => {
     const findings = [
       { reviewer: 'r', severity: 'block' as const, evidence: 'a rare case' },
       { reviewer: 'r', severity: 'should-fix' as const, evidence: 'a typo' },
     ];
     const questions = findingQuestions(findings);
     const ids = Object.keys(questions);
-    const reasons = (choice: 'act' | 'skip') => judgeDecision({ [ids[0]!]: { choice }, [ids[1]!]: { choice } }, ids, questions)
+    const reasons = (noul: number) => judgeDecision({ [ids[0]!]: { noul }, [ids[1]!]: { noul } }, ids, questions)
       .findings?.map((finding) => finding.reason);
-    const criteria = (id: string) => (questions[id] as { criteria: Record<string, string> }).criteria;
-    expect(reasons('skip')).toEqual([criteria(ids[0]!).skip, criteria(ids[1]!).skip]);
-    expect(reasons('act')).toEqual([criteria(ids[0]!).act, criteria(ids[1]!).act]);
-    expect(criteria(ids[0]!).skip).toMatch(/outside how the work is really used/);
+    const criteria = (id: string) => (questions[id] as { criteria: { true: string; false: string } }).criteria;
+    expect(reasons(0.1)).toEqual([criteria(ids[0]!).false, criteria(ids[1]!).false]);
+    expect(reasons(0.9)).toEqual([criteria(ids[0]!).true, criteria(ids[1]!).true]);
+    expect(criteria(ids[0]!).false).toMatch(/outside how the work is really used/);
   });
 
-  it('ships as a pass when every finding is skipped, even on a chosen continue', () => {
+  it('ships as a pass when every finding is held back, in either round, even on a chosen continue', () => {
+    const minors = { 'finding-a': { noul: 0.1 }, 'finding-b': { noul: 0.1 } };
+    const findings = [
+      { reviewer: 'r', severity: 'should-fix' as const, evidence: 'a style nit' },
+      { reviewer: 'r', severity: 'nice-to-have' as const, evidence: 'a shorter name' },
+    ];
+    // In round 1 the same answers are skips, and the round stands as a pass too.
+    expect(judgeDecision({ stop_reason: { choice: 'continue' }, ...minors }, ids, undefined, { findings, round: 1 }))
+      .toMatchObject({ again: false, stop: 'ship', reason: 'the judge skipped every finding', rule: 'findings: 0 act, 2 skip' });
     expect(judgeDecision({
       stop_reason: { choice: 'continue' },
-      'finding-a': { choice: 'skip' },
-      'finding-b': { choice: 'skip' },
-    }, ids)).toMatchObject({ again: false, stop: 'ship', reason: 'the judge skipped every finding', rule: 'findings: 0 act, 2 skip' });
+      ...minors,
+    }, ids, undefined, { findings, round: 2 })).toMatchObject({ again: false, stop: 'ship', reason: 'the judge found only minor findings', rule: 'findings: 0 act, 0 skip, 2 minor' });
   });
 
   it('a finding the judge did not answer follows the round answer', () => {
-    expect(judgeDecision({ stop_reason: { choice: 'continue' }, 'finding-a': { choice: 'skip' } }, ids).findings)
+    expect(judgeDecision({ stop_reason: { choice: 'continue' }, 'finding-a': { noul: 0.1 } }, ids).findings)
       .toMatchObject([{ id: 'finding-a', decision: 'skip' }, { id: 'finding-b', decision: 'act', reason: 'no answer for this finding; the judge chose continue' }]);
     expect(judgeDecision({ stop_reason: { choice: 'holds' } }, ids)).toMatchObject({ again: false, stop: 'ship' });
   });
 
   it('still asks a person on product_decision', () => {
-    const acted = { 'finding-a': { choice: 'act' }, 'finding-b': { choice: 'act' } };
+    const acted = { 'finding-a': { noul: 0.9 }, 'finding-b': { noul: 0.9 } };
     const decided = [{ id: 'finding-a', decision: 'act' }, { id: 'finding-b', decision: 'act' }];
     expect(judgeDecision({ ...acted, stop_reason: { choice: 'product_decision' } }, ids)).toMatchObject({ again: false, stop: 'product_decision', findings: decided });
   });
 
   it('a stop that would fail the round does not override the answers for each finding', () => {
-    const skipped = { 'finding-a': { choice: 'skip' }, 'finding-b': { choice: 'skip' } };
-    const acted = { 'finding-a': { choice: 'act' }, 'finding-b': { choice: 'skip' } };
-    // Every finding skipped ships, even on not_converging or a low worth_another_round.
-    expect(judgeDecision({ ...skipped, stop_reason: { choice: 'not_converging' } }, ids))
-      .toMatchObject({ again: false, stop: 'ship', rule: 'findings: 0 act, 2 skip' });
-    expect(judgeDecision({ ...skipped, worth_another_round: { noul: 0.2 } }, ids))
-      .toMatchObject({ again: false, stop: 'ship', rule: 'findings: 0 act, 2 skip' });
+    const findings = [
+      { reviewer: 'r', severity: 'should-fix' as const, evidence: 'one' },
+      { reviewer: 'r', severity: 'should-fix' as const, evidence: 'two' },
+    ];
+    const round2 = { findings, round: 2 };
+    const minors = { 'finding-a': { noul: 0.1 }, 'finding-b': { noul: 0.1 } };
+    const acted = { 'finding-a': { noul: 0.9 }, 'finding-b': { noul: 0.1 } };
+    // Every finding minor ships, even on not_converging or a low worth_another_round.
+    expect(judgeDecision({ ...minors, stop_reason: { choice: 'not_converging' } }, ids, undefined, round2))
+      .toMatchObject({ again: false, stop: 'ship', rule: 'findings: 0 act, 0 skip, 2 minor' });
+    expect(judgeDecision({ ...minors, worth_another_round: { noul: 0.2 } }, ids, undefined, round2))
+      .toMatchObject({ again: false, stop: 'ship', rule: 'findings: 0 act, 0 skip, 2 minor' });
+    // In round 1 the same answers are skips, and the round stands as a pass too.
+    expect(judgeDecision({ ...minors, stop_reason: { choice: 'not_converging' } }, ids, undefined, { findings, round: 1 }))
+      .toMatchObject({ again: false, stop: 'ship', reason: 'the judge skipped every finding', rule: 'findings: 0 act, 2 skip' });
     // An acted finding goes back, even on not_converging; the cap still ends the rounds.
-    expect(judgeDecision({ ...acted, stop_reason: { choice: 'not_converging' } }, ids))
-      .toMatchObject({ again: true, rule: 'findings: 1 act, 1 skip' });
+    expect(judgeDecision({ ...acted, stop_reason: { choice: 'not_converging' } }, ids, undefined, round2))
+      .toMatchObject({ again: true, rule: 'findings: 1 act, 0 skip, 1 minor' });
   });
 });

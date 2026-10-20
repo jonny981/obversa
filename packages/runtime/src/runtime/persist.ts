@@ -203,6 +203,9 @@ function thinOutcome(outcome: Outcome): Outcome {
   if (outcome.revision !== undefined) thin.revision = outcome.revision;
   if (outcome.discarded !== undefined) thin.discarded = outcome.discarded;
   if (outcome.openFindings !== undefined) thin.openFindings = outcome.openFindings;
+  if (outcome.minorFindings !== undefined) thin.minorFindings = outcome.minorFindings;
+  if (outcome.productDecision !== undefined) thin.productDecision = outcome.productDecision;
+  if (outcome.converging !== undefined) thin.converging = outcome.converging;
   // A resume reads the question it asked about a step back from the record,
   // so it waits for the answer instead of running the step.
   const asked = outcome.data as { requestId?: string; resumeReconciliation?: boolean; input?: JsonObject } | undefined;

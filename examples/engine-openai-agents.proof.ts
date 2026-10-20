@@ -51,8 +51,9 @@ try {
     { save: { path: 'docs/getting-started.md', text: draft2 } },
     { text: reply('Changed the two sentences the findings named.') },
   ], null, 2)}\n`);
-  // The judge is asked every round. Round 1: it acts on both blocks. Round 2:
-  // the one finding left is taste, and the judge skips it.
+  // The judge is asked every round. Round 1 keeps the act/skip call: it
+  // acts on both blocks. Round 2 asks impactful or minor: the one finding
+  // left is taste, and the judge calls it minor.
   await writeFile(join(workspace, 'judge.json'), `${JSON.stringify([
     {
       holds: { type: 'noul', noul: 0.1 },
@@ -67,7 +68,7 @@ try {
       worth_doing: { type: 'noul', noul: 0.2 },
       worth_another_round: { type: 'noul', noul: 0.1 },
       stop_reason: { type: 'choice', choice: 'holds', confidence: 0.8 },
-      'finding-1': { type: 'choice', choice: 'skip', confidence: 0.9 },
+      'finding-1': { type: 'noul', noul: 0.1, confidence: 0.9 },
     },
   ], null, 2)}\n`);
   await writeFile(
@@ -128,7 +129,7 @@ try {
   stderr: ${run.stderr}`);
   const printed = JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('\n{') + 1));
   assert.equal(printed.status, 'pass');
-  assert.equal(printed.stop, 'the judge skipped every finding');
+  assert.equal(printed.stop, 'the judge found only minor findings');
 
   const calls = (await readFile(callsLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string });
   const readerRuns = calls.filter((call) => call.role === 'codex').length;

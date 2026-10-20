@@ -20,6 +20,7 @@ import { INVALID_TEAM_DECISION, outcomeFromAgentText, withDecisionRetry } from '
 import { commandJob, predicate } from './condition.js';
 import { copyJobMeta, declaredWrites, declareWrites, jobMeta } from './describe.js';
 import { LoopError } from './errors.js';
+import { isLimitError } from './limits.js';
 import { assertDistinctChoices, seatIdentity, seatList } from './seat.js';
 import { revisionFromOutcome } from './feedback.js';
 import { reviewPanel } from './synthesis.js';
@@ -30,7 +31,7 @@ import {
   judgedFindings,
   judgeRound,
   judgeState,
-  lastRoundAnswered,
+  minorFindings,
   productDecisionFeedback,
   readJudgedWork,
   type JudgeCheck,
@@ -361,8 +362,8 @@ export function recordRoundChange(job: Job): Job {
  * stand (a synthesised pass), sends it back with its reasoning folded into
  * the existing rejection, or stops the rounds with the review's failure.
  * When it decides each finding, the send-back carries only the findings it
- * acts on, and the findings it skips go to the next round's reviewers as
- * `ctx.skippedFindings`. `before`, when set, runs ahead of the review each
+ * calls impactful, and the findings it holds back go to the next round's
+ * reviewers as `ctx.skippedFindings`. `before`, when set, runs ahead of the review each
  * round, and a result that is not a pass is the round's outcome with no
  * review and no judge.
  */
@@ -406,8 +407,13 @@ export function judgedReview(work: RefinedWork, cfgJudge: Judge, review: Job, ru
       ...(shared.skipped.length ? { skippedFindings: shared.skipped } : {}),
     });
     // Only a refusal goes to the judge: a pass stands, and a review still
-    // waiting for a person pauses the run before the judge is asked.
-    if (reviewOutcome.status !== 'fail') return reviewOutcome;
+    // waiting for a person pauses the run before the judge is asked. A pass
+    // still carries the findings the earlier rounds held back: the list a
+    // person reads before the work lands.
+    if (reviewOutcome.status !== 'fail') {
+      const minors = reviewOutcome.status === 'pass' ? minorFindings(shared.skipped) : [];
+      return minors.length ? { ...reviewOutcome, minorFindings: minors } : reviewOutcome;
+    }
     const findings = revisionFromOutcome(reviewOutcome)?.findings ?? [];
     // The round is the work's build in this run: its builds before this
     // run of it, and the rounds this one counted toward the review budget.
@@ -427,7 +433,12 @@ export function judgedReview(work: RefinedWork, cfgJudge: Judge, review: Job, ru
         ...(retry === true ? { judgeRetry: true } : {}),
       })),
     });
-    if ('paused' in result) return result.paused;
+    // A pause inside this round leaves the count the round consumed, so a
+    // resume numbers the next round after it.
+    if ('paused' in result) {
+      ctx.interactionCheckpoint?.(true);
+      return result.paused;
+    }
     checkpointInteraction(ctx, checkpointPath, identity, null);
     shared.productFeedback = result.state.productFeedback ?? [];
     shared.rounds = [...shared.rounds, judgeRound(state, changedLines, result)];
@@ -449,12 +460,13 @@ export function judgedReview(work: RefinedWork, cfgJudge: Judge, review: Job, ru
     // A person's answer goes back to the builder as the next round; the
     // judge sees the result only after that round has been reviewed.
     if ('answer' in result) {
-      // No build round is left for the answer: the stage stops here.
-      if (round.lastRound) stop(lastRoundAnswered(result.state, result.answer));
-      // The judge decided each finding before asking: the answer goes with the acted ones only.
+      // An answered product decision buys the round that applies it, on
+      // every past-cap review it lands, each time one is asked and answered:
+      // the person answering is the bound.
+      // The judge decided each finding before asking: the answer goes with the findings those decisions send back.
       const answered = judgedFindings(findings, { findings: result.state.decided }, result.state.skipped ?? [], state.round);
       shared.skipped = answered.skipped;
-      return productDecisionFeedback(result.answer, answered.acted);
+      return productDecisionFeedback(result.answer, answered.acted, { granted: round.lastRound });
     }
     const { decision } = result;
     const judged = judgedFindings(findings, decision, result.state.skipped ?? [], state.round);
@@ -463,19 +475,24 @@ export function judgedReview(work: RefinedWork, cfgJudge: Judge, review: Job, ru
       // Not converging, or any answer but a ship after the last round the
       // cap allows: the stage stops here, and the review's failure stands.
       if (decision.stop === 'fail') stop(decision.reason);
+      const minors = minorFindings(judged.skipped);
       return {
         status: 'pass', confidence: reviewOutcome.confidence, summary: decision.reason, data: reviewOutcome.data,
         ...(round.lastRound ? { openFindings: findings } : {}),
+        ...(minors.length ? { minorFindings: minors } : {}),
       };
     }
     // The review's own summary lists every finding; when the judge decided
     // each one, the one-line reason stands in for it so the builder reads
-    // only the findings it acts on.
+    // only the findings it acts on. `converging` marks the round a spent cap
+    // granted because the acted-on count fell, so the rounds rule lets it
+    // through.
     const revision = revisionFromOutcome(reviewOutcome);
     return {
       ...reviewOutcome,
       summary: `${decision.findings && revision ? revision.reason : reviewOutcome.summary} (${decision.reason})`,
       ...(revision ? { revision: { ...revision, findings: judged.acted } } : {}),
+      ...(decision.converging === true ? { converging: true as const } : {}),
     };
   };
 }
@@ -555,7 +572,14 @@ export function refinedRounds(
     // when an unmet goal sends the work back — a goal's verdict is a review
     // round in every form.
     let reviewed = 0;
+    // The error of the body's last call, when a retryable failure it
+    // carried could have gone back unanswered: a next body call is the
+    // proof the loop retried it without the round's gates, a gate or the
+    // review running in between the proof it reached them.
+    let unreviewed: LoopError | undefined;
     const countedBefore: Job | undefined = guardedBefore === undefined ? undefined : async (roundCtx: JobContext) => {
+      unreviewed = undefined;
+      shared.failed = 0;
       const outcome = await guardedBefore(roundCtx);
       if (outcome.status === 'fail' && (checkCap === undefined || revisionFromOutcome(outcome) !== undefined)) reviewed += 1;
       return outcome;
@@ -563,6 +587,8 @@ export function refinedRounds(
     // A round counts once its review has an answer: a pause inside it is the
     // same round still in flight, and a resume counts it when it ends.
     const countedReview = (job: Job): Job => copyJobMeta(async (roundCtx: JobContext) => {
+      unreviewed = undefined;
+      shared.failed = 0;
       const outcome = await job(roundCtx);
       if (outcome.status !== 'paused' && outcome.status !== 'aborted') reviewed += 1;
       return outcome;
@@ -576,9 +602,51 @@ export function refinedRounds(
     // graph routes it. Any other failure ends the rounds with the body's own
     // failure — it is not the work the reviewers judge, and no feedback
     // reaches it to build again. The error ends the loop before this round's
-    // checks and reviewers take it for a rejection of the work.
+    // checks and reviewers take it for a rejection of the work. A retryable
+    // failure the round's gates do not take goes back unanswered — the
+    // review and the judge never see it — so the loop's own retry draws on
+    // the same bound `checkRounds` sets, defaulting to 3 where a node
+    // declares no check budget of its own. Only a judged node's rounds need
+    // it: they have no bound of their own, while `rounds: N` spends each
+    // failed build from `max`. A failure the until gate sends to the
+    // round's checks draws on the check budget, not this one.
+    const failBound = checkCap ?? 3;
+    const unrunnable = (error: LoopError): Outcome => ({
+      status: 'fail',
+      summary: `${error.message} (the build's failures sent the work back ${failBound} times before its review could run)`,
+      error: new LoopError({
+        code: error.code, message: error.message, phase: error.phase, path: error.path,
+        iteration: error.iteration, cause: error.cause, retryable: false,
+        retryAfterMs: error.retryAfterMs, resetAt: error.resetAt, resetProven: error.resetProven,
+      }),
+    });
     const routed = (job: Job): Job => copyJobMeta(async (roundCtx: JobContext) => {
-      const outcome = await job(roundCtx);
+      // A body call after a retryable failure is the send-back no gate saw.
+      // The count bounds only a judged node: its rounds have no bound of
+      // their own, while `rounds: N` spends each failed build from its own
+      // `max` the way it always has. A gate or the review running between
+      // the calls cleared it instead, and resets the count it counts.
+      if (unreviewed !== undefined) {
+        const error = unreviewed;
+        unreviewed = undefined;
+        if (isJudge(refine) && (shared.failed += 1) > failBound) return unrunnable(error);
+      }
+      let outcome: Outcome;
+      try {
+        outcome = await job(roundCtx);
+      } catch (e) {
+        // A thrown failure goes back unreviewed the way a returned one
+        // does: the loop retries it under its own policy, on no bound the
+        // rounds set. A limit error keeps its own policy — the run waits it
+        // out or pauses on it.
+        const error = LoopError.from(e, { code: 'BODY', phase: 'body', path: roundCtx.path });
+        if (!isLimitError(error)) unreviewed = error;
+        throw e;
+      }
+      if (outcome.status === 'fail' && outcome.error?.retryable === true && !isLimitError(outcome.error)) {
+        unreviewed = outcome.error;
+        return outcome;
+      }
       if (outcome.status !== 'fail' || outcome.error !== undefined) return outcome;
       const routes = revisionFromOutcome(outcome)?.target !== undefined;
       const error = new LoopError({
@@ -598,7 +666,12 @@ export function refinedRounds(
       const outcome = await job(roundCtx);
       if (outcome.status === 'fail' && revisionFromOutcome(outcome)?.target === undefined) {
         const round = base + reviewed;
-        if (roundRule(round, refinements).another) {
+        // Each answered product decision past the cap buys its round, and
+        // the spent cap grants a round while the findings the judge acts on
+        // are still falling: both are marked on the send-back they bought.
+        const granted = refinements !== undefined && round > refinements
+          && (outcome.productDecision === true || outcome.converging === true);
+        if (roundRule(round, refinements).another || granted) {
           shared.builds = round;
           shared.save(outcome);
         } else {
@@ -615,13 +688,15 @@ export function refinedRounds(
       return outcome;
     }, job);
     // The loop's bound is the most builds one invocation of it can make:
-    // a first build, the review rounds a judge or `rounds` allows, and the
-    // check-backs `checkRounds` allows when the node has checks. It stays
-    // the same whatever `base` the run counts on from, so the loop's saved
-    // checkpoint matches it on a resume. The absolute budgets bind inside:
-    // `saveRejected` and the judge stop a round past `refinements`, and a
-    // red check past `checkCap` ends the rounds in `guardedBefore`.
-    const max = refinements === undefined ? undefined : refinements + 1 + (guardedBefore === undefined ? 0 : (checkCap ?? 0));
+    // a first build and the review rounds `rounds` allows, plus the
+    // check-backs `checkRounds` allows when the node has checks. A judge
+    // sets no bound here: past the cap, `saveRejected` and the judge's own
+    // routing decide each round, a product answer or a still-falling count
+    // grants one and a pause waits on a person, so the count cannot be fixed
+    // ahead of the rounds. It stays the same whatever `base` the run counts
+    // on from, so the loop's saved checkpoint matches it on a resume. A red
+    // check past `checkCap` ends the rounds in `guardedBefore`.
+    const max = refinements === undefined || isJudge(refine) ? undefined : refinements + 1 + (guardedBefore === undefined ? 0 : (checkCap ?? 0));
     let checkpointed = saved !== undefined;
     const outcome = await rounds(declareWrites(routed(body), declared), saveRejected(isJudge(refine) ? judgedReview(work, refine, countedReview(review), run, countedBefore) : countedPlain), max)({
       ...ctx,
@@ -639,7 +714,7 @@ export function refinedRounds(
     shared.builds = base + Math.max(0, reviewed - 1);
     const stop = outcome.status === 'fail' && outcome.error ? roundStops.get(outcome.error) : undefined;
     return stop ? { ...outcome, ...stop } : outcome;
-  }, rounds(body, plain, refinements === undefined ? undefined : refinements + 1 + (guardedBefore === undefined ? 0 : (checkCap ?? 0)))), declared);
+  }, rounds(body, plain, refinements === undefined || isJudge(refine) ? undefined : refinements + 1 + (guardedBefore === undefined ? 0 : (checkCap ?? 0)))), declared);
 }
 
 /* ------------------------------------------------------------------ */

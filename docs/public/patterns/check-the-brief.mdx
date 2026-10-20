@@ -21,8 +21,8 @@ flowchart LR
   goal -->|each unmet requirement, with evidence| write
   goal -->|every requirement met| review["review: the panel"]
   review -->|findings| judge{"judge, when set"}
-  judge -->|the findings it acts on| write
-  judge -->|it skips every finding| done((pass))
+  judge -->|the findings it calls impactful| write
+  judge -->|no finding is impactful| done((pass))
   review -->|nothing fails| done
 ```
 

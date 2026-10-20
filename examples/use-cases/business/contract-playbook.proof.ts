@@ -47,8 +47,8 @@ Replacement: struck; exclusivity of any kind is never signed.
 `;
 
 // The checker sends the redlines back once: two never-sign clauses had no
-// redline, two blocks the judge acts on. On the second set the
-// checker has only a taste note, and the judge skips it; the
+// redline, two findings the judge calls impactful. On the second set the
+// checker has only a taste note, and the judge calls it minor; the
 // positions note follows and is checked in its turn, and the run waits for
 // the lawyer, who answers on the run's page. The note is reviewed because deciding what to concede is the most
 // judgement-heavy step here; it used to be the only unreviewed one.
@@ -85,7 +85,7 @@ await withExample({
 
   const events = await recordEvents(run, 'records/contract-playbook.jsonl');
   const judged = events.filter((event) => event.kind === 'refine:judge');
-  assert.deepEqual(judged.map((event) => event.reason), ['the judge acts on 2 of 2 findings', 'the judge skipped every finding'], 'the judge is asked on both rounds: it acts on the blocks, then skips the taste note');
+  assert.deepEqual(judged.map((event) => event.reason), ['the judge acts on 2 of 2 findings', 'the judge found only minor findings'], 'the judge is asked on both rounds: it calls the blocks impactful, then the taste note minor');
   assert.ok(judged.every((event) => (event.path as string[]).includes('redline')), 'both judged rounds are the redline stage');
   const negotiate = events.filter((event) => event.kind === 'dag:node' && event.node === 'negotiate' && event.phase === 'done');
   assert.deepEqual(negotiate.map((event) => (event.outcome as { status: string }).status), ['paused', 'pass'], 'the run pauses at the lawyer, then the answer passes the step');

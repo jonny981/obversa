@@ -47,7 +47,7 @@ proof answering as the owner on the page, so the words are the script's and
 the shape is the run's:
 
 ```text Output, from the offline proof
-Answer the owner's question on http://127.0.0.1:63953/
+Answer the owner's question on http://127.0.0.1:55107/
 ▸ run
 backlog-groom-then-rank workflow:start
 backlog-groom-then-rank ▸ dag (3 nodes)
@@ -58,6 +58,8 @@ backlog-groom-then-rank › split › split-review • split
 
 backlog-groom-then-rank › split › split-review   stand-in: 3/1 tok
 backlog-groom-then-rank › split › split-review • split: pass  three stories from four tickets
+
+
 backlog-groom-then-rank › split › split-review · until met: split writes: true
 backlog-groom-then-rank › split › split-review › review-panel • split
 backlog-groom-then-rank › split › split-review › review-panel • split-1
@@ -65,17 +67,23 @@ backlog-groom-then-rank › split › split-review › review-panel • split-1
 backlog-groom-then-rank › split › split-review › review-panel   gpt-5.6-luna: 42/7 tok
 backlog-groom-then-rank › split › split-review › review-panel • split-1: fail  one raw ticket has no story
 backlog-groom-then-rank › split › split-review › review-panel • split: fail  Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the "Dark mode pls" ticket is not covered by any story
+
 backlog-groom-then-rank › split › split-review › refine-judge • refine:judge
 backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.8},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"choice","choice":"act","confidence":0.9}}
 backlog-groom-then-rank › split › split-review ◆ split round 1: again on findings: 1 act, 0 skip: the judge acts on 1 of 1 findings
-backlog-groom-then-rank › split › split-review › @judge-review interaction:checkpoint
+
+
 backlog-groom-then-rank › split › split-review · review: fail
-review did not pass (Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the "Dark mode pls" ticket is not covered by any story (the judge acts on 1 of 1 findings)); re-entering split-review
+review did not pass (Review panel: 0/1 reviewer(s) cleared. (the judge acts on 1 of 1 findings)); re-entering split-review
 backlog-groom-then-rank › split › split-review · iteration 2
+
+
 backlog-groom-then-rank › split › split-review • split
 
 backlog-groom-then-rank › split › split-review   stand-in: 3/1 tok
 backlog-groom-then-rank › split › split-review • split: pass  four stories, one per ticket; the dark mode wish is now a story with checks
+
+
 backlog-groom-then-rank › split › split-review · until met: split writes: true
 backlog-groom-then-rank › split › split-review › review-panel • split
 backlog-groom-then-rank › split › split-review › review-panel • split-1
@@ -83,13 +91,17 @@ backlog-groom-then-rank › split › split-review › review-panel • split-1
 backlog-groom-then-rank › split › split-review › review-panel   gpt-5.6-luna: 42/7 tok
 backlog-groom-then-rank › split › split-review › review-panel • split-1: fail  one taste note
 backlog-groom-then-rank › split › split-review › review-panel • split: fail  Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the PDF story could name the file size limit in its checks; nice to have
+
 backlog-groom-then-rank › split › split-review › refine-judge • refine:judge
-backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8},"finding-1":{"type":"choice","choice":"skip","confidence":0.9}}
-backlog-groom-then-rank › split › split-review ◆ split round 2: stop as pass on findings: 0 act, 1 skip: the judge skipped every finding
-backlog-groom-then-rank › split › split-review › @judge-review interaction:checkpoint
+backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8},"finding-1":{"type":"noul","noul":0.1,"confidence":0.9}}
+backlog-groom-then-rank › split › split-review ◆ split round 2: stop as pass on findings: 0 act, 0 skip, 1 minor: the judge found only minor findings
+
 backlog-groom-then-rank › split › split-review · review: pass
+
 backlog-groom-then-rank › split › split-review ◂ pass (2 iter)
+
 backlog-groom-then-rank · node split: done (pass)
+
 backlog-groom-then-rank · node clarify: start
 backlog-groom-then-rank › clarify › clarify-review ▸ loop (max 7)
 backlog-groom-then-rank › clarify › clarify-review · iteration 1
@@ -97,6 +109,8 @@ backlog-groom-then-rank › clarify › clarify-review • clarify
 
 backlog-groom-then-rank › clarify › clarify-review   stand-in: 3/1 tok
 backlog-groom-then-rank › clarify › clarify-review • clarify: pass  questions written with proposed answers
+
+
 backlog-groom-then-rank › clarify › clarify-review · until met: clarify writes: true
 backlog-groom-then-rank › clarify › clarify-review › review-panel • clarify
 backlog-groom-then-rank › clarify › clarify-review › review-panel • clarify-1
@@ -105,13 +119,17 @@ backlog-groom-then-rank › clarify › clarify-review › review-panel   gpt-5.
 backlog-groom-then-rank › clarify › clarify-review › review-panel • clarify-1: pass  every story has its questions or says it has none
 backlog-groom-then-rank › clarify › clarify-review › review-panel • clarify: pass  Review panel: 1/1 reviewer(s) cleared.
 backlog-groom-then-rank › clarify › clarify-review · review: pass
+
 backlog-groom-then-rank › clarify › clarify-review ◂ pass (1 iter)
+
 backlog-groom-then-rank · node clarify: done (pass)
+
 backlog-groom-then-rank · node rank: start
 backlog-groom-then-rank › rank • rank
 backlog-groom-then-rank · node rank: done (paused)
 backlog-groom-then-rank › rank • rank: pass  approved: Which of these go into the next cycle, and in what order?
 backlog-groom-then-rank · node rank: done (pass)
+
 backlog-groom-then-rank ◂ dag pass
 ◂ run pass (135/24 tok, 90 tok from cache)
 {
@@ -120,7 +138,16 @@ backlog-groom-then-rank ◂ dag pass
   "data": {
     "split": {
       "status": "pass",
-      "summary": "the judge skipped every finding"
+      "summary": "the judge found only minor findings",
+      "minorFindings": [
+        {
+          "evidence": "the PDF story could name the file size limit in its checks; nice to have",
+          "severity": "should-fix",
+          "reviewer": "split-1",
+          "judgeReason": "Minor: wording of docs or comments, style, naming, an edge case outside real use, or a nice-to-have, so fixing it would not change what a reader gets.",
+          "round": 2
+        }
+      ]
     },
     "clarify": {
       "status": "pass",

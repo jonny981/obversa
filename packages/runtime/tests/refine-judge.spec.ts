@@ -101,10 +101,22 @@ function roundAnswers(choice: string): Record<string, unknown> {
 }
 
 /**
+ * The answer a finding's question gets, in its own shape: round 1 asks
+ * `act` or `skip`, and from round 2 on a yes/no impactful-or-minor. A
+ * finding marked REAL is acted on or called impactful, the rest is held
+ * back, each with a reason that names the finding.
+ */
+function findingAnswer(question: { type: string; instructions: string }) {
+  const impactful = question.instructions.includes('REAL');
+  const reason = impactful ? 'a reader cannot tell who the page is for' : 'a matter of taste';
+  return question.type === 'choice'
+    ? { choice: impactful ? 'act' : 'skip', reason }
+    : { noul: impactful ? 0.9 : 0.1, reason };
+}
+
+/**
  * A judge that answers every question it is sent. `round` overrides the
- * round answers (`roundAnswers('continue')` when not given); each finding
- * acts when marked REAL and skips otherwise, each with a reason that names
- * the finding.
+ * round answers (`roundAnswers('continue')` when not given).
  */
 function perFinding(round: Record<string, unknown> = {}) {
   return (prompt: string) => {
@@ -112,10 +124,8 @@ function perFinding(round: Record<string, unknown> = {}) {
     const answers: Record<string, unknown> = { ...roundAnswers('continue'), ...round };
     for (const [key, question] of Object.entries(questions)) {
       if (key in answers) continue;
-      answers[key] = 'act' in question.criteria
-        ? question.instructions.includes('REAL')
-          ? { choice: 'act', reason: 'a reader cannot tell who the page is for' }
-          : { choice: 'skip', reason: 'a matter of taste' }
+      answers[key] = key.startsWith('finding-')
+        ? findingAnswer(question)
         : question.type === 'choice'
           ? { choice: 'continue' in question.criteria ? 'continue' : Object.keys(question.criteria)[0] }
           : question.type === 'score'
@@ -126,9 +136,46 @@ function perFinding(round: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * A judge that sends every finding it is asked about back: `act` on round
+ * 1's choice, impactful on the yes/no from round 2 on. `round` overrides
+ * the round answers.
+ */
+function actOn(round: Record<string, unknown> = {}) {
+  return (prompt: string) => {
+    const { questions } = JSON.parse(prompt) as { questions: Record<string, { type: string }> };
+    const answers: Record<string, unknown> = { ...roundAnswers('continue'), ...round };
+    for (const [key, question] of Object.entries(questions)) {
+      if (!(key in answers) && key.startsWith('finding-')) {
+        answers[key] = question.type === 'choice' ? { choice: 'act', reason: 'worth a round' } : { noul: 0.9, reason: 'worth a round' };
+      }
+    }
+    return answers;
+  };
+}
+
+/**
+ * A judge that acts on a finding only through round 1's act/skip choice;
+ * asked the yes/no impactful-or-minor question it calls the finding minor.
+ * A round 1 that wrongly asked the yes/no question would hold the finding
+ * back instead of sending it back.
+ */
+function actOnChoiceOnly(round: Record<string, unknown> = {}) {
+  return (prompt: string) => {
+    const { questions } = JSON.parse(prompt) as { questions: Record<string, { type: string }> };
+    const answers: Record<string, unknown> = { ...roundAnswers('continue'), ...round };
+    for (const [key, question] of Object.entries(questions)) {
+      if (!(key in answers) && key.startsWith('finding-')) {
+        answers[key] = question.type === 'choice' ? { choice: 'act', reason: 'worth a round' } : { noul: 0.1, reason: 'a matter of taste' };
+      }
+    }
+    return answers;
+  };
+}
+
 function findingQuestions(request: AgentRequest): string[] {
-  const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { criteria: Record<string, string> }> };
-  return Object.keys(questions).filter((key) => 'act' in questions[key]!.criteria);
+  const { questions } = JSON.parse(request.prompt) as { questions: Record<string, unknown> };
+  return Object.keys(questions).filter((key) => key.startsWith('finding-'));
 }
 
 function judgeEventsOf(events: readonly LoopEvent[]) {
@@ -331,11 +378,11 @@ describe('refine: judge()', () => {
     }
   });
 
-  it('uses the default question set (stopQuestions) with one act-or-skip question per finding when none is given', async () => {
+  it('uses the default question set (stopQuestions) with one per-finding question when none is given', async () => {
     const events: LoopEvent[] = [];
     const { job, judgeCalls } = scriptedTeam({
-      reviewerReplies: [REVISE()],
-      judgeReplies: [perFinding(roundAnswers('holds'))],
+      reviewerReplies: [REVISE(), REVISE()],
+      judgeReplies: [actOn(roundAnswers('continue')), perFinding(roundAnswers('holds'))],
       cap: 2,
     });
     await runTeam(job, events);
@@ -343,7 +390,27 @@ describe('refine: judge()', () => {
     expect(sent.questions).toMatchObject(stopQuestions('the draft'));
     const [id] = findingQuestions(judgeCalls[0]!);
     expect(Object.keys(sent.questions)).toEqual([...Object.keys(stopQuestions()), id]);
-    expect(sent.questions[id!]).toMatchObject({ type: 'choice', instructions: expect.stringContaining('fix this') });
+    // Round 1 keeps the act/skip choice, with its own bar and criteria.
+    expect(sent.questions[id!]).toEqual({
+      type: 'choice',
+      instructions: 'Read this one finding. For this use case, should the builder act on it in another round, or skip it? Give a one-line reason. Finding [should-fix]: fix this',
+      criteria: {
+        act: 'A reader of this kind of work would stumble on, misread or distrust what this finding names, so the builder should fix it.',
+        skip: 'It is taste, an edge case, or polish past the bar the use case sets, so fixing it would not change what a reader gets.',
+      },
+    });
+    // From round 2 on the same call is asked as the yes/no impactful-or-minor
+    // question.
+    const later = JSON.parse(judgeCalls[1]!.prompt) as { questions: Record<string, unknown> };
+    const [laterId] = findingQuestions(judgeCalls[1]!);
+    expect(later.questions[laterId!]).toMatchObject({
+      type: 'noul',
+      instructions: expect.stringContaining('fix this'),
+      criteria: {
+        true: expect.stringContaining('Impactful'),
+        false: expect.stringContaining('Minor'),
+      },
+    });
   });
 
   it('accepts a score answer in the shape the judge engines report', async () => {
@@ -397,7 +464,7 @@ describe('refine: judge()', () => {
 });
 
 describe('refine: judge() decides each finding', () => {
-  it('sends back only the finding the judge acts on, with its reason', async () => {
+  it('round 1 asks act or skip, and sends back only the findings the judge acts on, with their reason', async () => {
     const events: LoopEvent[] = [];
     const { job, writerCalls, judgeCalls } = scriptedTeam({
       reviewerReplies: [revise(REAL, TONE, TITLE), PASS],
@@ -408,7 +475,16 @@ describe('refine: judge() decides each finding', () => {
     expect(result.outcome.status).toBe('pass');
     expect(judgeCalls).toHaveLength(1);
     expect(findingQuestions(judgeCalls[0]!)).toHaveLength(3);
+    // Round 1 keeps the act/skip question: the impactful-or-minor call
+    // starts from round 2.
+    const sent = JSON.parse(judgeCalls[0]!.prompt) as { questions: Record<string, { type: string; instructions: string; criteria: Record<string, string> }> };
+    for (const id of findingQuestions(judgeCalls[0]!)) {
+      expect(sent.questions[id]).toMatchObject({ type: 'choice', criteria: { act: expect.stringContaining('stumble on'), skip: expect.any(String) } });
+      expect(sent.questions[id]!.instructions).toContain('act on it in another round, or skip it?');
+    }
     expect(writerCalls).toHaveLength(2);
+    // Round 1 sends back only the finding the judge acts on; the two it
+    // skips stay held back, recorded `skip`.
     const feedback = writerCalls[1]!.prompt;
     expect(feedback).toContain(REAL.evidence);
     expect(feedback).toContain('a reader cannot tell who the page is for');
@@ -423,7 +499,30 @@ describe('refine: judge() decides each finding', () => {
     })));
   });
 
-  it('ships the work as a pass when the judge skips every finding', async () => {
+  it('round 1: a minor acted finding still goes back', async () => {
+    // Round 1 has no minor call: a taste finding the judge acts on costs a
+    // round like any other. The judge answers act on round 1's choice but
+    // minor on the yes/no question, so a round 1 asking the wrong question
+    // holds the finding back instead.
+    const events: LoopEvent[] = [];
+    const { job, writerCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [revise(TONE), PASS],
+      judgeReplies: [actOnChoiceOnly()],
+      cap: 3,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('pass');
+    expect(writerCalls).toHaveLength(2);
+    expect(writerCalls[1]!.prompt).toContain(TONE.evidence);
+    expect(judgeCalls).toHaveLength(1);
+    const [event] = judgeEventsOf(events);
+    expect(event).toMatchObject({ route: 'again', rule: 'findings: 1 act, 0 skip' });
+    expect(event!.findings).toEqual([
+      { id: 'finding-1', decision: 'act', reason: 'worth a round' },
+    ]);
+  });
+
+  it('ships the work as a pass when the judge skips every finding in round 1, and the skips land on the list', async () => {
     const events: LoopEvent[] = [];
     const { job, writerCalls, judgeCalls } = scriptedTeam({
       reviewerReplies: [revise(TONE, TITLE)],
@@ -433,31 +532,38 @@ describe('refine: judge() decides each finding', () => {
     const result = await runTeam(job, events);
     const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
     expect(stageOutcome).toMatchObject({ status: 'pass', summary: 'the judge skipped every finding' });
+    // A skip in any round is collected: the pass carries both findings on
+    // the list a person reads before the work lands.
+    expect(stageOutcome?.minorFindings).toMatchObject([
+      { severity: 'nice-to-have', evidence: TONE.evidence, round: 1 },
+      { severity: 'nice-to-have', evidence: TITLE.evidence, round: 1 },
+    ]);
     expect(writerCalls).toHaveLength(1);
     expect(judgeCalls).toHaveLength(1);
     expect(judgeEventsOf(events)[0]).toMatchObject({ route: 'stop', status: 'pass', rule: 'findings: 0 act, 2 skip' });
   });
 
-  it('tells the next round\'s reviewers what was skipped and why, and keeps the skipped list in the judge\'s state', async () => {
+  it('tells the next round\'s reviewers what was held back and why, and keeps the held-back list in the judge\'s state', async () => {
     const events: LoopEvent[] = [];
+    const secondReal = { ...REAL, evidence: 'REAL: the second section is empty' };
     const { job, reviewCalls, judgeCalls } = scriptedTeam({
-      reviewerReplies: [revise(REAL, TONE), revise({ ...REAL, evidence: 'REAL: the second section is empty' }, TITLE), PASS],
+      reviewerReplies: [revise(REAL, TONE), revise(secondReal, TITLE), PASS],
       judgeReplies: [perFinding()],
       cap: 4,
     });
     await runTeam(job, events);
     expect(reviewCalls).toHaveLength(3);
     expect(reviewCalls[0]!.prompt).not.toContain(TONE.evidence);
+    // Round 1's skip reaches round 2's reviewers with the judge's reason.
     expect(reviewCalls[1]!.prompt).toContain(TONE.evidence);
     expect(reviewCalls[1]!.prompt).toContain('a matter of taste');
     expect(reviewCalls[1]!.prompt).not.toContain(REAL.evidence);
     expect(reviewCalls[2]!.prompt).toContain(TONE.evidence);
     expect(reviewCalls[2]!.prompt).toContain(TITLE.evidence);
     expect(judgeCalls).toHaveLength(2);
-    const firstState = JSON.parse(judgeCalls[0]!.prompt).state.when as { skipped?: unknown };
-    const secondState = JSON.parse(judgeCalls[1]!.prompt).state.when as { skipped?: unknown };
-    expect(firstState.skipped).toBeUndefined();
-    expect(secondState.skipped).toMatchObject([
+    const states = judgeCalls.map((call) => (JSON.parse(call.prompt).state.when as { skipped?: unknown }).skipped);
+    expect(states[0]).toBeUndefined();
+    expect(states[1]).toMatchObject([
       { round: 1, finding: TONE, reason: 'a matter of taste' },
     ]);
   });
@@ -477,8 +583,9 @@ describe('refine: judge() decides each finding', () => {
     expect(sent.state.how.findings[0]).toMatchObject({ severity: 'block' });
     const [blockId, titleId] = findingQuestions(judgeCalls[0]!);
     expect(sent.questions[blockId!]!.instructions).toContain(`Finding [block]: ${block.evidence}`);
-    expect(sent.questions[blockId!]!.instructions).toContain('Skip it only when the case it names is outside how the work is really used');
-    expect(sent.questions[titleId!]!.instructions).not.toContain('Skip it only when');
+    // Round 1's block keeps the higher bar to skip it.
+    expect(sent.questions[blockId!]!.instructions).toContain('the bar to skip it is higher. Skip it only when the case it names is outside how the work is really used');
+    expect(sent.questions[titleId!]!.instructions).not.toContain('the bar to skip it');
     expect(writerCalls).toHaveLength(2);
     expect(writerCalls[1]!.prompt).toContain(block.evidence);
     expect(writerCalls[1]!.prompt).toContain('a reader cannot tell who the page is for');
@@ -486,7 +593,7 @@ describe('refine: judge() decides each finding', () => {
     expect(judgeEventsOf(events)[0]).toMatchObject({ route: 'again', rule: 'findings: 1 act, 1 skip' });
   });
 
-  it('the cap still ends the loop while the judge keeps acting on a finding', async () => {
+  it('a judge still acting on a finding past the cap does not fail the run: it pauses for a person with the open findings', async () => {
     const events: LoopEvent[] = [];
     const { job, writerCalls, judgeCalls } = scriptedTeam({
       reviewerReplies: [revise(REAL, TONE)],
@@ -494,11 +601,159 @@ describe('refine: judge() decides each finding', () => {
       cap: 2,
     });
     const result = await runTeam(job, events);
-    expect((result.outcome.data as Record<string, Outcome>).write?.status).toBe('fail');
+    // One finding is acted on each round and the count never falls: the
+    // spent cap asks a person instead of failing with a finding still open.
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome?.status).toBe('paused');
     expect(judgeCalls).toHaveLength(3);
     expect(writerCalls).toHaveLength(3);
+    // The finding the judge calls minor never reaches the writer: round 1's
+    // skip and round 2's minor stay held back alike.
     expect(writerCalls[1]!.prompt).toContain(REAL.evidence);
     expect(writerCalls[1]!.prompt).not.toContain(TONE.evidence);
+    expect(writerCalls[2]!.prompt).not.toContain(TONE.evidence);
+    // The question the person gets carries the round's open findings and
+    // what the judge would do with each.
+    const request = stageOutcome?.data as { input?: { material?: unknown } } | undefined;
+    expect(request?.input?.material).toMatchObject({
+      capPause: true,
+      latestFindings: [{ evidence: REAL.evidence }, { evidence: TONE.evidence }],
+      decided: [{ decision: 'act' }, { decision: 'minor' }],
+    });
+    expect(judgeEventsOf(events)[2]).toMatchObject({ route: 'stop', reason: expect.stringContaining('a person decides') });
+  });
+
+  it('a round-1 finding the judge skips is held back, recorded as a skip, and the round stands', async () => {
+    const events: LoopEvent[] = [];
+    const { job, writerCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [revise(TONE), PASS],
+      judgeReplies: [perFinding()],
+      cap: 3,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('pass');
+    // The judge answered skip: the finding stays with the judge, so
+    // the round stands as a pass and the record keeps the call as `skip`.
+    expect(writerCalls).toHaveLength(1);
+    expect(judgeCalls).toHaveLength(1);
+    const [event] = judgeEventsOf(events);
+    expect(event).toMatchObject({ route: 'stop', status: 'pass', rule: 'findings: 0 act, 1 skip' });
+    expect(event!.findings).toEqual([
+      { id: 'finding-1', decision: 'skip', reason: 'a matter of taste' },
+    ]);
+  });
+
+  it('from round 2 on, a finding the judge calls impactful goes back even when a reviewer tagged it nice-to-have', async () => {
+    const events: LoopEvent[] = [];
+    const { job, writerCalls } = scriptedTeam({
+      reviewerReplies: [revise(REAL), revise(TONE), PASS],
+      judgeReplies: [perFinding(), actOn()],
+      cap: 5,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('pass');
+    expect(writerCalls).toHaveLength(3);
+    // The judge's own call routes the finding, not the reviewer's tag: the
+    // nice-to-have it called impactful goes back to the writer.
+    expect(writerCalls[2]!.prompt).toContain(TONE.evidence);
+    expect(judgeEventsOf(events)[1]!.findings).toEqual([
+      { id: 'finding-1', decision: 'act', reason: 'worth a round' },
+    ]);
+  });
+
+  it('from round 2 on, a finding the judge calls minor is collected instead of sent back, and the list stays on the pass that follows', async () => {
+    const events: LoopEvent[] = [];
+    const dir = workDir();
+    const record = join(dir, 'record.jsonl');
+    const { job, writerCalls, judgeCalls } = scriptedTeam({
+      reviewerReplies: [
+        revise(REAL),
+        revise({ ...REAL, evidence: 'REAL: the second section is empty' }, TONE),
+        PASS,
+      ],
+      judgeReplies: [perFinding()],
+      cap: 5,
+    });
+    const result = await run(job, { cwd: dir, recordTo: record, onEvent: (event) => events.push(event) });
+    expect(result.outcome.status).toBe('pass');
+    expect(writerCalls).toHaveLength(3);
+    expect(writerCalls[1]!.prompt).toContain(REAL.evidence);
+    // Round 2's findings: the one the judge called impactful goes back; the
+    // one it called minor is collected, not sent back.
+    expect(writerCalls[2]!.prompt).toContain('the second section is empty');
+    expect(writerCalls[2]!.prompt).not.toContain(TONE.evidence);
+    expect(judgeCalls).toHaveLength(2);
+    const event = judgeEventsOf(events)[1]!;
+    expect(event).toMatchObject({ route: 'again', rule: 'findings: 1 act, 0 skip, 1 minor' });
+    expect(event.findings).toEqual([
+      { id: 'finding-1', decision: 'act', reason: 'a reader cannot tell who the page is for' },
+      { id: 'finding-2', decision: 'minor', reason: 'a matter of taste' },
+    ]);
+    expect(event.minorFindings).toMatchObject([
+      { severity: 'nice-to-have', evidence: TONE.evidence, reviewer: expect.any(String) },
+    ]);
+    // Round 3's clean pass still carries the collected list: it is what a
+    // person reads before the work lands, and it is in the saved record.
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome?.minorFindings).toMatchObject([
+      { severity: 'nice-to-have', evidence: TONE.evidence, reviewer: expect.any(String), judgeReason: 'a matter of taste' },
+    ]);
+    const recorded = readFileSync(record, 'utf8').trim().split('\n')
+      .map((line) => JSON.parse(line) as LoopEvent & Record<string, unknown>);
+    const lastWrite = recorded.findLast((entry) => entry.kind === 'dag:node' && entry.node === 'write');
+    expect((lastWrite!.outcome as Outcome).minorFindings).toMatchObject([{ evidence: TONE.evidence }]);
+  });
+
+  it('a stop answer when every finding is minor lets the work stand as a pass, with the minors listed', async () => {
+    for (const choice of ['not_converging', 'over_polishing'] as const) {
+      const events: LoopEvent[] = [];
+      const { job, writerCalls } = scriptedTeam({
+        reviewerReplies: [revise(REAL), revise(TONE)],
+        judgeReplies: [perFinding(), perFinding({ stop_reason: { choice } })],
+        cap: 5,
+      });
+      const result = await runTeam(job, events);
+      const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+      expect(stageOutcome, choice).toMatchObject({ status: 'pass', summary: 'the judge found only minor findings' });
+      expect(writerCalls, choice).toHaveLength(2);
+      const event = judgeEventsOf(events)[1]!;
+      expect(event, choice).toMatchObject({ route: 'stop', status: 'pass', rule: 'findings: 0 act, 0 skip, 1 minor' });
+      expect(event.minorFindings).toMatchObject([{ severity: 'nice-to-have', evidence: TONE.evidence }]);
+      expect(stageOutcome?.minorFindings).toMatchObject([{ severity: 'nice-to-have', evidence: TONE.evidence, reviewer: expect.any(String) }]);
+    }
+  });
+
+  it('a stop answer still sends the work back when a finding is impactful', async () => {
+    const events: LoopEvent[] = [];
+    const { job, writerCalls } = scriptedTeam({
+      reviewerReplies: [
+        revise(REAL),
+        revise({ ...REAL, evidence: 'REAL: the second section is empty' }, TONE),
+        PASS,
+      ],
+      judgeReplies: [perFinding(), perFinding({ stop_reason: { choice: 'not_converging' } })],
+      cap: 5,
+    });
+    const result = await runTeam(job, events);
+    expect(result.outcome.status).toBe('pass');
+    expect(writerCalls).toHaveLength(3);
+    expect(writerCalls[2]!.prompt).toContain('the second section is empty');
+    expect(writerCalls[2]!.prompt).not.toContain(TONE.evidence);
+    expect(judgeEventsOf(events)[1]).toMatchObject({ route: 'again' });
+  });
+
+  it('a finding the judge calls minor from round 2 on lands on the collected list', async () => {
+    const events: LoopEvent[] = [];
+    const { job } = scriptedTeam({
+      reviewerReplies: [revise(REAL), revise(TONE)],
+      judgeReplies: [perFinding()],
+      cap: 5,
+    });
+    const result = await runTeam(job, events);
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome).toMatchObject({ status: 'pass', summary: 'the judge found only minor findings' });
+    expect(stageOutcome?.minorFindings).toMatchObject([{ severity: 'nice-to-have', evidence: TONE.evidence, reviewer: expect.any(String) }]);
+    expect(judgeEventsOf(events)[1]!.minorFindings).toMatchObject([{ evidence: TONE.evidence }]);
   });
 
   it('a custom question set routes on the whole round unless it opts in', async () => {
@@ -532,11 +787,13 @@ describe('refine: judge() decides each finding', () => {
     expect(findingQuestions(opted.judgeCalls[0]!)).toHaveLength(2);
     expect(JSON.parse(opted.judgeCalls[0]!.prompt).questions).toMatchObject(custom);
     expect(opted.writerCalls).toHaveLength(2);
+    // Round 1 sends back only the finding the judge called impactful; the
+    // one it called minor is held back.
     expect(opted.writerCalls[1]!.prompt).toContain(REAL.evidence);
     expect(opted.writerCalls[1]!.prompt).not.toContain(TONE.evidence);
   });
 
-  it('a panel stage that sends work back hears what its judge skipped', async () => {
+  it('a panel stage that sends work back hears what its judge held back', async () => {
     const writerCalls: AgentRequest[] = [];
     const checkCalls: AgentRequest[] = [];
     const replies = [revise(REAL, TONE), PASS];
@@ -564,6 +821,7 @@ describe('refine: judge() decides each finding', () => {
     expect(writerCalls).toHaveLength(2);
     expect(checkCalls).toHaveLength(2);
     expect(checkCalls[0]!.prompt).not.toContain(TONE.evidence);
+    // The round-1 skip is told to the panel's next review, with its reason.
     expect(checkCalls[1]!.prompt).toContain(TONE.evidence);
     expect(checkCalls[1]!.prompt).toContain('a matter of taste');
   });
@@ -600,7 +858,7 @@ describe('refine: judge() with no cap', () => {
     expect(judgeCalls).toHaveLength(2);
   });
 
-  it('stops a reviewer that blocks every round on a new rare case when the judge skips the blocks', async () => {
+  it('stops a reviewer that blocks every round on a new rare case when the judge calls the blocks minor', async () => {
     const events: LoopEvent[] = [];
     const rare = (what: string) => ({ severity: 'block', evidence: `rare: ${what}` }) as const;
     const real = { severity: 'block', evidence: 'REAL: the page never says who it is for' } as const;
@@ -617,20 +875,29 @@ describe('refine: judge() with no cap', () => {
     });
     const result = await runTeam(job, events);
     expect(result.outcome.status).toBe('pass');
-    expect((result.outcome.data as Record<string, Outcome>).write).toMatchObject({ status: 'pass', summary: 'the judge skipped every finding' });
+    const stageOutcome = (result.outcome.data as Record<string, Outcome>).write;
+    expect(stageOutcome).toMatchObject({ status: 'pass', summary: 'the judge found only minor findings' });
+    expect(stageOutcome?.minorFindings).toMatchObject([
+      { evidence: 'rare: a field limited to a list of values', round: 1 },
+      { evidence: 'rare: a schema nested in allOf', round: 2 },
+    ]);
     expect(writerCalls).toHaveLength(2);
     expect(reviewCalls).toHaveLength(2);
     expect(judgeCalls).toHaveLength(2);
-    // The next round's reviewers are told which block was skipped, and why.
+    // Round 1's skip stayed with the judge: the writer sees only the block
+    // called impactful, and the next round's reviewers are told which block
+    // was held back, and why. The new round-2 block the judge called minor
+    // did not go back either, and the run stood.
+    expect(writerCalls[1]!.prompt).not.toContain('rare: a field limited to a list of values');
     expect(reviewCalls[1]!.prompt).toContain('rare: a field limited to a list of values');
     expect(reviewCalls[1]!.prompt).toContain('a matter of taste');
     const judgeEvents = judgeEventsOf(events);
-    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 1 skip']);
+    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 0 skip, 1 minor']);
     expect(judgeEvents[0]!.findings).toEqual([
       { id: 'finding-1', decision: 'act', reason: 'a reader cannot tell who the page is for' },
       { id: 'finding-2', decision: 'skip', reason: 'a matter of taste' },
     ]);
-    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', findings: [{ id: 'finding-1', decision: 'skip', reason: 'a matter of taste' }] });
+    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', findings: [{ id: 'finding-1', decision: 'minor', reason: 'a matter of taste' }] });
   });
 });
 
@@ -654,7 +921,7 @@ describe('refine: judge() at its cap', () => {
     expect(JSON.parse(judgeCalls[0]!.prompt).state.when.lastRound).toBeUndefined();
     const state = JSON.parse(judgeCalls[1]!.prompt).state.when as Record<string, unknown>;
     expect(state).toMatchObject({ round: 2, cap: 1, lastRound: true });
-    expect(state.limit).toBe('This is the last round the cap of 1 allows (1 refinement after the first build): no build round follows, so your answer decides how this ends.');
+    expect(state.limit).toBe('This is the last round the cap of 1 allows (1 refinement after the first build): a product decision buys exactly one more round for the person\'s answer; every other answer decides how this ends.');
     const event = judgeEventsOf(events)[1];
     expect(event).toMatchObject({ route: 'stop', status: 'pass', openFindings: [{ ...TONE, reviewer: expect.any(String) }] });
   });
@@ -677,7 +944,7 @@ describe('refine: judge() at its cap', () => {
     expect(judgeEventsOf(events)[1]).toMatchObject({ route: 'stop', status: 'fail', reason: expect.stringContaining('the cap of 1') });
   });
 
-  it('asks the judge about a block in the last round, and a skip lets the work stand with it recorded as open', async () => {
+  it('asks the judge about a block in the last round, and calling it minor lets the work stand with it recorded as open', async () => {
     const events: LoopEvent[] = [];
     const block = { severity: 'block', evidence: 'rare: a schema nested in anyOf' } as const;
     const { job, writerCalls, judgeCalls } = scriptedTeam({
@@ -688,13 +955,16 @@ describe('refine: judge() at its cap', () => {
     const result = await runTeam(job, events);
     expect(result.outcome.status).toBe('pass');
     expect((result.outcome.data as Record<string, Outcome>).write).toMatchObject({
-      status: 'pass', summary: 'the judge skipped every finding', openFindings: [{ ...block, reviewer: expect.any(String) }],
+      status: 'pass',
+      summary: 'the judge found only minor findings',
+      openFindings: [{ ...block, reviewer: expect.any(String) }],
+      minorFindings: [{ ...block, reviewer: expect.any(String) }],
     });
     expect(writerCalls).toHaveLength(2);
     expect(judgeCalls).toHaveLength(2);
     expect(JSON.parse(judgeCalls[1]!.prompt).state.when).toMatchObject({ cap: 1, lastRound: true });
     expect(judgeEventsOf(events)[1]).toMatchObject({
-      route: 'stop', status: 'pass', findings: [{ decision: 'skip', reason: 'a matter of taste' }], openFindings: [{ ...block, reviewer: expect.any(String) }],
+      route: 'stop', status: 'pass', findings: [{ decision: 'minor', reason: 'a matter of taste' }], openFindings: [{ ...block, reviewer: expect.any(String) }],
     });
   });
 

@@ -108,9 +108,18 @@ purpose of the work and the revisions so far. `judge()` from
 Here Jev makes the judgement, and the returns to the builder end when Jev
 stops them or the review passes. Jev decides a blocking finding too. To
 bound the returns as well, pass
-`judge(judgeSeat, { cap: 4 })`: it allows four returns to the writer, Jev
-reads the review of the last one too, and the run fails unless Jev lets the
-work stand. [Know when to stop](https://obversa.ai/docs/patterns/judge-stops-the-loop)
+`judge(judgeSeat, { cap: 4 })`: it allows four returns to the writer, and
+Jev reads the review of the last one too. A `product_decision` Jev asks
+for at the cap buys exactly one more round for the person's answer.
+Findings Jev still calls impactful change the ending: a count falling
+from the round before grants one more round, and a count that is not
+falling pauses the run to ask a person, whose answer buys the round the
+same way. A run never ends as a silent fail while findings Jev called
+impactful are still open. A finding Jev holds back, skipped in round 1 or
+called minor after, does not cost a round, whatever the reviewer tagged
+it: Jev collects it on `minorFindings`, with its reviewer and the evidence
+it wrote, for a person to read before the work lands.
+[Know when to stop](https://obversa.ai/docs/patterns/judge-stops-the-loop)
 shows the questions and a complete writing example.
 
 ### Ask a panel
@@ -227,8 +236,10 @@ The feature team takes a ticket through seven steps:
 4. **Review battery.** Three reviewers from three model families review
    the change at the same time.
 5. **Synthesis.** Their reviews become one list.
-6. **Judge.** Jev decides each finding, and the builder gets only the
-   findings Jev acts on.
+6. **Judge.** In round 1 Jev asks of each finding whether to act on it or
+   skip it; an acted finding goes back. From round 2 Jev calls each
+   finding impactful or minor, and the builder gets only the impactful
+   ones.
 7. **Approval.** Attended, a person approves the exact bytes of every
    file the change adds, changes or deletes. With `--unattended`, the
    change lands without asking.
@@ -242,8 +253,10 @@ The feature team takes a ticket through seven steps:
           writes: files,
           // The node's own refinement, each round: the ticket's tests first,
           // a red one goes straight back with its output; then the goal
-          // check; then the three reviewers as one panel; then Jev decides
-          // each kept finding, a block included, with no cap.
+          // check; then the three reviewers as one panel; then Jev calls
+          // each kept finding: act or skip in round 1, impactful or minor
+          // after, a block included, with no cap; a held-back one is
+          // collected for a person to read.
           refine: review({
             checks: [['node', '--test', ...tests]],
             goal: goalCheck(goalSeat, { target: 'build', text: ticket.brief }),

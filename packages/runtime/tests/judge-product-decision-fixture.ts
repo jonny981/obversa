@@ -18,6 +18,13 @@ export interface ProductScenario {
    * then a pass; the judge acts on the REAL one and skips the other.
    */
   readonly perFinding?: boolean;
+  /**
+   * With `perFinding`: round 1 raises two REAL findings (two acts), round 2
+   * one REAL and a taste note (one act — a count falling from the round
+   * before), and every round after one REAL, so the run is still open when
+   * a granted round's review arrives.
+   */
+  readonly falling?: boolean;
 }
 export interface ProductCall {
   readonly kind: 'writer' | 'reviewer' | 'judge' | 'downstream';
@@ -43,6 +50,30 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
     const first = reviews === 0;
     record({ kind: 'reviewer', ...(prompt !== undefined ? { prompt } : {}) });
     if (scenario.perFinding) {
+      if (scenario.falling) {
+        if (reviews === 0) {
+          return {
+            status: 'revise', summary: 'Two findings',
+            findings: [
+              { severity: 'should-fix' as const, evidence: 'REAL: the page must choose one audience (round 1)' },
+              { severity: 'should-fix' as const, evidence: 'REAL: the page must say where to run it (round 1)' },
+            ],
+          };
+        }
+        if (reviews === 1) {
+          return {
+            status: 'revise', summary: 'Two findings',
+            findings: [
+              { severity: 'should-fix' as const, evidence: `REAL: the page must choose one audience (round ${reviews + 1})` },
+              { severity: 'nice-to-have' as const, evidence: `taste: a warmer tone (round ${reviews + 1})` },
+            ],
+          };
+        }
+        return {
+          status: 'revise', summary: 'One finding',
+          findings: [{ severity: 'should-fix' as const, evidence: `REAL: the page must choose one audience (round ${reviews + 1})` }],
+        };
+      }
       if (reviews >= 2) return { status: 'pass', summary: 'nothing left', findings: [] };
       return {
         status: 'revise', summary: 'Two findings',
@@ -67,9 +98,12 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
       stop_reason: { choice: scenario.choices[Math.min(count, scenario.choices.length - 1)] },
     };
     if (scenario.perFinding) {
-      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { type: string; instructions: string }> };
       for (const [id, question] of Object.entries(questions)) {
-        if ('act' in question.criteria) answers[id] = { choice: question.instructions.includes('REAL') ? 'act' : 'skip', reason: 'judged' };
+        if (!id.startsWith('finding-')) continue;
+        answers[id] = question.type === 'choice'
+          ? { choice: question.instructions.includes('REAL') ? 'act' : 'skip', reason: 'judged' }
+          : { noul: question.instructions.includes('REAL') ? 0.9 : 0.1, reason: 'judged' };
       }
     }
     return JSON.stringify(answers);

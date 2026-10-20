@@ -101,10 +101,10 @@ try {
     '```',
     '',
   ].join('\n'));
-  // The judge is asked every round, and decides each finding. Round 1: it
-  // acts on both blocks. Round 2: it acts on the missing folder (finding-1)
-  // and skips the taste note (finding-2). Round 3: it skips the one taste
-  // note left.
+  // The judge is asked every round. Round 1 keeps the act/skip call: it
+  // acts on both blocks. From round 2 the call is impactful or minor:
+  // the missing folder (finding-1) is impactful and the taste note
+  // (finding-2) is minor. Round 3: the one taste note left is minor too.
   await writeFile(join(workspace, 'judge.json'), `${JSON.stringify([
     {
       holds: { type: 'noul', noul: 0.1 },
@@ -119,15 +119,15 @@ try {
       worth_doing: { type: 'noul', noul: 0.7 },
       worth_another_round: { type: 'noul', noul: 0.7 },
       stop_reason: { type: 'choice', choice: 'continue', confidence: 0.7 },
-      'finding-1': { type: 'choice', choice: 'act', confidence: 0.8 },
-      'finding-2': { type: 'choice', choice: 'skip', confidence: 0.9 },
+      'finding-1': { type: 'noul', noul: 0.8, confidence: 0.8 },
+      'finding-2': { type: 'noul', noul: 0.1, confidence: 0.9 },
     },
     {
       holds: { type: 'noul', noul: 0.9 },
       worth_doing: { type: 'noul', noul: 0.2 },
       worth_another_round: { type: 'noul', noul: 0.1 },
       stop_reason: { type: 'choice', choice: 'holds', confidence: 0.8 },
-      'finding-1': { type: 'choice', choice: 'skip', confidence: 0.9 },
+      'finding-1': { type: 'noul', noul: 0.1, confidence: 0.9 },
     },
   ], null, 2)}\n`);
   await writeFile(join(workspace, 'approve.json'), '{"approved": true}\n');
@@ -205,7 +205,7 @@ try {
   const printed = JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('\n{') + 1));
   assert.equal(printed.status, 'pass');
   assert.equal(printed.approved, true);
-  assert.equal(printed.stop, 'the judge skipped every finding');
+  assert.equal(printed.stop, 'the judge found only minor findings');
 
   const calls = (await readFile(callsLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string; reply: string });
   const claudeCalls = calls.filter((call) => call.role === 'claude');
@@ -235,11 +235,11 @@ try {
   const judged = record.filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.findings?.map(({ id, decision }) => `${id}: ${decision}`)), [
     ['finding-1: act', 'finding-2: act'],
-    ['finding-1: act', 'finding-2: skip'],
-    ['finding-1: skip'],
-  ], 'the judge is asked on every round, the one with blocks included, and decides each finding');
+    ['finding-1: act', 'finding-2: minor'],
+    ['finding-1: minor'],
+  ], 'the judge is asked on every round, the one with blocks included: act or skip in round 1, impactful or minor after');
   assert.ok(judged.flatMap((event) => event.findings ?? []).every((finding) => finding.reason.length > 0), 'every decision has a reason');
-  assert.equal(judged[2]!.reason, 'the judge skipped every finding');
+  assert.equal(judged[2]!.reason, 'the judge found only minor findings');
   const approveEnds = record.filter((event) => event.kind === 'job:end' && event.label === 'approve');
   assert.equal(approveEnds.length, 2, 'one approval: the approve stage and the approval it calls each log one end');
   assert.ok(approveEnds.every((event) => event.outcome!.status === 'pass'), 'the approval passes');

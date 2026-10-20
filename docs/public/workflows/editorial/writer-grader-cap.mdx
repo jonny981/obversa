@@ -45,6 +45,7 @@ in for the models, so the words are the script's and the shape is the run's.
 ▸ run
 writer-grader-cap workflow:start
 writer-grader-cap ▸ dag (2 nodes)
+
 writer-grader-cap · node draft: start
 writer-grader-cap › draft › draft-review ▸ loop
 writer-grader-cap › draft › draft-review · iteration 1
@@ -52,6 +53,9 @@ writer-grader-cap › draft › draft-review • draft
 
 writer-grader-cap › draft › draft-review   stand-in: 3/1 tok
 writer-grader-cap › draft › draft-review • draft: pass  draft written
+writer-grader-cap › draft › draft-review round:change
+
+
 writer-grader-cap › draft › draft-review · until met: draft writes: true
 writer-grader-cap › draft › draft-review › review-panel • draft
 writer-grader-cap › draft › draft-review › review-panel • draft-1
@@ -59,18 +63,24 @@ writer-grader-cap › draft › draft-review › review-panel • draft-1
 writer-grader-cap › draft › draft-review › review-panel   gpt-5.6-luna: 42/7 tok
 writer-grader-cap › draft › draft-review › review-panel • draft-1: fail  one rule broken
 writer-grader-cap › draft › draft-review › review-panel • draft: fail  Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 1: "the best in the business" breaks rule 3, no superlatives
-writer-grader-cap › draft › draft-review › refine-judge • refine:judge
 
-writer-grader-cap › draft › draft-review › refine-judge   jev-latest: 10/5 tok
+writer-grader-cap › draft › draft-review › refine-judge • refine:judge
 writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.72},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"choice","choice":"act","confidence":0.9}}
 writer-grader-cap › draft › draft-review ◆ draft round 1: again on findings: 1 act, 0 skip: the judge acts on 1 of 1 findings
+
+
 writer-grader-cap › draft › draft-review · review: fail
-review did not pass (Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 1: "the best in the business" breaks rule 3, no superlatives (the judge acts on 1 of 1 findings)); re-entering draft-review
+review did not pass (Review panel: 0/1 reviewer(s) cleared. (the judge acts on 1 of 1 findings)); re-entering draft-review
 writer-grader-cap › draft › draft-review · iteration 2
+
+
 writer-grader-cap › draft › draft-review • draft
 
 writer-grader-cap › draft › draft-review   stand-in: 3/1 tok
 writer-grader-cap › draft › draft-review • draft: pass  superlative removed, the loop explained
+writer-grader-cap › draft › draft-review round:change
+
+
 writer-grader-cap › draft › draft-review · until met: draft writes: true
 writer-grader-cap › draft › draft-review › review-panel • draft
 writer-grader-cap › draft › draft-review › review-panel • draft-1
@@ -78,18 +88,24 @@ writer-grader-cap › draft › draft-review › review-panel • draft-1
 writer-grader-cap › draft › draft-review › review-panel   gpt-5.6-luna: 42/7 tok
 writer-grader-cap › draft › draft-review › review-panel • draft-1: fail  one rule broken
 writer-grader-cap › draft › draft-review › review-panel • draft: fail  Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 3: "40 percent" breaks rule 4; the brief gives no number
-writer-grader-cap › draft › draft-review › refine-judge • refine:judge
 
-writer-grader-cap › draft › draft-review › refine-judge   jev-latest: 10/5 tok
-writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.61},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"choice","choice":"act","confidence":0.9}}
+writer-grader-cap › draft › draft-review › refine-judge • refine:judge
+writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.61},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"noul","noul":0.9}}
 writer-grader-cap › draft › draft-review ◆ draft round 2: again on findings: 1 act, 0 skip: the judge acts on 1 of 1 findings
+
+
 writer-grader-cap › draft › draft-review · review: fail
-review did not pass (Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 3: "40 percent" breaks rule 4; the brief gives no number (the judge acts on 1 of 1 findings)); re-entering draft-review
+review did not pass (Review panel: 0/1 reviewer(s) cleared. (the judge acts on 1 of 1 findings)); re-entering draft-review
 writer-grader-cap › draft › draft-review · iteration 3
+
+
 writer-grader-cap › draft › draft-review • draft
 
 writer-grader-cap › draft › draft-review   stand-in: 3/1 tok
 writer-grader-cap › draft › draft-review • draft: pass  the number is gone; the closing line stands
+writer-grader-cap › draft › draft-review round:change
+
+
 writer-grader-cap › draft › draft-review · until met: draft writes: true
 writer-grader-cap › draft › draft-review › review-panel • draft
 writer-grader-cap › draft › draft-review › review-panel • draft-1
@@ -97,36 +113,49 @@ writer-grader-cap › draft › draft-review › review-panel • draft-1
 writer-grader-cap › draft › draft-review › review-panel   gpt-5.6-luna: 42/7 tok
 writer-grader-cap › draft › draft-review › review-panel • draft-1: fail  one taste note
 writer-grader-cap › draft › draft-review › review-panel • draft: fail  Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 5: the closing line could name Codex; taste, not a rule
-writer-grader-cap › draft › draft-review › refine-judge • refine:judge
 
-writer-grader-cap › draft › draft-review › refine-judge   jev-latest: 10/5 tok
-writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8},"finding-1":{"type":"choice","choice":"skip","confidence":0.9}}
-writer-grader-cap › draft › draft-review ◆ draft round 3: stop as pass on findings: 0 act, 1 skip: the judge skipped every finding
+writer-grader-cap › draft › draft-review › refine-judge • refine:judge
+writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8},"finding-1":{"type":"noul","noul":0.1,"confidence":0.9}}
+writer-grader-cap › draft › draft-review ◆ draft round 3: stop as pass on findings: 0 act, 0 skip, 1 minor: the judge found only minor findings
+
 writer-grader-cap › draft › draft-review · review: pass
+
 writer-grader-cap › draft › draft-review ◂ pass (3 iter)
+
 writer-grader-cap · node draft: done (pass)
+
 writer-grader-cap · node publish: start
 writer-grader-cap › publish • publish
 writer-grader-cap › publish • publish: paused  waiting for a person: Publish this post?
 writer-grader-cap · node publish: done (paused)
+
 writer-grader-cap ◂ dag paused
-◂ run paused (165/39 tok, 90 tok from cache)
+◂ run paused (135/24 tok, 90 tok from cache)
 {
   "status": "paused",
   "summary": "waiting for a person: Publish this post?",
   "data": {
     "draft": {
       "status": "pass",
-      "summary": "the judge skipped every finding"
+      "summary": "the judge found only minor findings",
+      "minorFindings": [
+        {
+          "evidence": "line 5: the closing line could name Codex; taste, not a rule",
+          "severity": "should-fix",
+          "reviewer": "draft-1",
+          "judgeReason": "Minor: wording of docs or comments, style, naming, an edge case outside real use, or a nice-to-have, so fixing it would not change what a reader gets.",
+          "round": 3
+        }
+      ]
     },
     "publish": {
       "status": "paused",
       "summary": "waiting for a person: Publish this post?",
       "data": {
-        "requestId": "publish#1#3502fe7387e3dee50829192d7c05d262c68969c3be63cb0b78114745666fd3e1",
+        "requestId": "publish#1#5050817b683356e4d7dffda727cca6540d2967abf1cd145f1bf7dd59bee0bed0",
         "gateId": "publish",
         "gateVersion": 1,
-        "digest": "3502fe7387e3dee50829192d7c05d262c68969c3be63cb0b78114745666fd3e1",
+        "digest": "5050817b683356e4d7dffda727cca6540d2967abf1cd145f1bf7dd59bee0bed0",
         "decisionText": "Publish this post?",
         "responseSchema": {
           "type": "object",
@@ -143,7 +172,7 @@ writer-grader-cap ◂ dag paused
           ]
         },
         "input": {
-          "draft": "the judge skipped every finding"
+          "draft": "the judge found only minor findings"
         },
         "presentation": {}
       }
@@ -157,7 +186,8 @@ first draft called the review "the best in the business", and the grader
 named the line and the rule against superlatives; the judge acted on the
 finding. The second draft explained the loop and added a number
 the brief never gave, and the grader named that; the judge acted on that
-too. The third draft drew one taste note, which the judge skipped, so the
+too. The third draft drew one taste note, which the judge called minor,
+so the
 draft stood and the run stopped for the editor. Nothing was published.
 
 ## The file
@@ -218,14 +248,14 @@ asks Jev the same questions instead:
     "worth_doing": { "type": "noul", "noul": 0.8 },
     "worth_another_round": { "type": "noul", "noul": 0.61 },
     "stop_reason": { "type": "choice", "choice": "continue", "confidence": 0.6 },
-    "finding-1": { "type": "choice", "choice": "act", "confidence": 0.9 }
+    "finding-1": { "type": "noul", "noul": 0.9 }
   },
   {
     "holds": { "type": "noul", "noul": 0.9 },
     "worth_doing": { "type": "noul", "noul": 0.2 },
     "worth_another_round": { "type": "noul", "noul": 0.1 },
     "stop_reason": { "type": "choice", "choice": "holds", "confidence": 0.8 },
-    "finding-1": { "type": "choice", "choice": "skip", "confidence": 0.9 }
+    "finding-1": { "type": "noul", "noul": 0.1, "confidence": 0.9 }
   }
 ]
 ```
@@ -414,8 +444,13 @@ To bound the rounds as well, pass a cap as a backstop:
 all. When the fourth draft does not pass, the judge is told it is the last
 round. If it lets the
 draft stand, the draft goes to the editor, with the open findings on the
-record. Any other answer fails the run, and the reason names the cap, so
-the editor is never asked.
+record. A `product_decision` buys exactly one more round for the person's
+answer. Findings the judge still calls impactful change the ending: a
+count falling from the round before grants one more round, and a count
+that is not falling pauses the run to ask a person with the open findings
+attached. And when the judge decides each finding, as here, a round it
+acts on nothing in stands as a pass with the held-back findings on the
+record.
 [A judge stops the loop](/patterns/judge-stops-the-loop) has the questions
 and the rule.
 

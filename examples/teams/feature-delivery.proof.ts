@@ -79,8 +79,8 @@ const skip = 'A comment on a three-line function is taste.';
 // Round 3: the goal check passes. The reviewers review at the same time:
 // Codex and Grok raise the same problem in other words, and Gemini, in
 // a pass, raises a comment. Grok's seat merges the first and third; each
-// reviewer votes on what it did not raise. The judge acts on the merged
-// finding and skips the comment.
+// reviewer votes on what it did not raise. The judge calls the merged
+// finding impactful and the comment minor.
 // Round 4: the goal check and all three reviewers pass.
 const featureScript = {
   claude: [
@@ -110,15 +110,15 @@ const featureScript = {
   ],
 };
 
-// The judge is asked once, after round 3. It decides each finding left
-// after the vote, in the order the synthesis lists them.
+// The judge is asked once, after round 3. It calls each finding left
+// after the vote impactful or minor, in the order the synthesis lists them.
 const judgeAnswers = [{
   holds: { type: 'noul', noul: 0.3 },
   worth_doing: { type: 'noul', noul: 0.8 },
   worth_another_round: { type: 'noul', noul: 0.8 },
   stop_reason: { type: 'choice', choice: 'continue', confidence: 0.8 },
-  'finding-1': { type: 'choice', choice: 'act', confidence: 0.9, reason: act },
-  'finding-2': { type: 'choice', choice: 'skip', confidence: 0.8, reason: skip },
+  'finding-1': { type: 'noul', noul: 0.9, reason: act },
+  'finding-2': { type: 'noul', noul: 0.1, reason: skip },
 }];
 
 interface RecordedEvent {
@@ -134,7 +134,7 @@ interface RecordedEvent {
   readonly requirements?: readonly { requirement: string; verdict: string }[];
   readonly entries?: readonly { result: string; finding: { evidence: string; raisedBy?: readonly string[]; votes?: readonly { reviewer: string; vote: string }[] } }[];
   readonly findings?: readonly { decision: string; reason: string }[];
-  readonly outcome?: { status: string; summary?: string; data?: unknown; revision?: unknown };
+  readonly outcome?: { status: string; summary?: string; data?: unknown; revision?: unknown; minorFindings?: readonly { evidence: string }[] };
 }
 
 interface Seeded {
@@ -270,13 +270,18 @@ async function assertSevenSteps(seeded: Seeded, attended: boolean) {
   assert.deepEqual(disputed!.finding.votes!.map((v) => `${v.reviewer} ${v.vote}`), ['codex disagree', 'grok agree']);
 
   // 6. Judge. Asked once, after the synthesis, never about the goal check.
-  // It acts on the merged finding and skips the comment.
+  // It calls the merged finding impactful and the comment minor: the
+  // comment is collected for a person, not sent back.
   const judges = record.flatMap((e, at) => (e.kind === 'refine:judge' ? [{ at, e }] : []));
   assert.equal(judges.length, 1, 'the judge is asked about the review only');
   assert.ok(judges[0]!.at > record.indexOf(syntheses[0]!), 'the judge reads the synthesised list');
-  assert.deepEqual(judges[0]!.e.findings!.map((f) => [f.decision, f.reason]), [['act', act], ['skip', skip]]);
-  assert.ok(toBuilder[3]!.includes(message) && toBuilder[3]!.includes(act), `the builder gets the finding the judge acts on: ${toBuilder[3]}`);
-  assert.ok(!toBuilder[3]!.includes(comment) && !toBuilder[3]!.includes(skip), `the builder never sees the finding the judge skips: ${toBuilder[3]}`);
+  assert.deepEqual(judges[0]!.e.findings!.map((f) => [f.decision, f.reason]), [['act', act], ['minor', skip]]);
+  assert.ok(toBuilder[3]!.includes(message) && toBuilder[3]!.includes(act), `the builder gets the finding the judge called impactful: ${toBuilder[3]}`);
+  assert.ok(!toBuilder[3]!.includes(comment) && !toBuilder[3]!.includes(skip), `the builder never sees the finding the judge called minor: ${toBuilder[3]}`);
+  // The minor finding lands on the build node's recorded pass, for a
+  // person to read before the change lands.
+  const buildEnds = record.filter((e) => e.kind === 'dag:node' && e.node === 'build' && e.outcome?.status === 'pass');
+  assert.ok(buildEnds.at(-1)!.outcome!.minorFindings!.some((finding) => finding.evidence === comment), 'the minor finding is collected on the build node\'s pass');
 
   // 7. Approval. Attended, a person approves the exact bytes that landed.
   const landed = await sha256(join(seeded.dir, 'src/triple.mjs'));
@@ -435,7 +440,7 @@ try {
     reviewBacks: attendedSteps.rounds.reviewBacks,
     goalChecks: ['unmet', 'met', 'met'],
     synthesis: ['kept', 'disputed'],
-    judge: ['act', 'skip'],
+    judge: ['act', 'minor'],
     approvedSha256: attendedSteps.landed.slice(0, 12),
     unattended: 'landed without asking',
     backlog: backlogRun.delivered.map((d) => `${d.ticket} ${d.status}`),

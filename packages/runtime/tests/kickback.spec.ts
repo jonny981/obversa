@@ -34,16 +34,16 @@ const roundAnswers = (choice: string): Record<string, unknown> => ({
   stop_reason: { choice },
 });
 
-/** A judge that acts on each finding marked REAL and skips the rest, each with a reason. */
+/** A judge that acts on each finding marked REAL and holds the rest back, each with a reason. */
 const decideBlocks = (request: { prompt: string }): string => {
-  const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+  const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { type: string; instructions: string }> };
   return JSON.stringify({
     ...roundAnswers('continue'),
     ...Object.fromEntries(Object.entries(questions)
-      .filter(([, question]) => 'act' in question.criteria)
+      .filter(([id]) => id.startsWith('finding-'))
       .map(([id, question]) => [id, question.instructions.includes('REAL')
-        ? { choice: 'act', reason: 'it breaks the build' }
-        : { choice: 'skip', reason: 'outside how the work is really used' }])),
+        ? (question.type === 'choice' ? { choice: 'act', reason: 'it breaks the build' } : { noul: 0.9, reason: 'it breaks the build' })
+        : (question.type === 'choice' ? { choice: 'skip', reason: 'outside how the work is really used' } : { noul: 0.1, reason: 'outside how the work is really used' })])),
   });
 };
 
@@ -675,15 +675,17 @@ describe("a judge in a dag node's refine review", () => {
     expect(round).toBe(3);
   });
 
-  it('sends the target only the findings the judge acts on, and ships when it skips them all', async () => {
-    // Act on a finding marked REAL, skip the rest; the second round has only taste notes left.
+  it('sends the target only the findings the judge calls impactful, and ships when it calls them all minor', async () => {
+    // The finding marked REAL is impactful, the rest minor; the second round has only taste notes left.
     const decide = (request: { prompt: string }) => {
-      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { type: string; instructions: string }> };
       return JSON.stringify({
         ...roundAnswers('continue'),
         ...Object.fromEntries(Object.entries(questions)
-          .filter(([, question]) => 'act' in question.criteria)
-          .map(([id, question]) => [id, question.instructions.includes('REAL') ? { choice: 'act', reason: 'it breaks the build' } : { choice: 'skip' }])),
+          .filter(([id]) => id.startsWith('finding-'))
+          .map(([id, question]) => [id, question.instructions.includes('REAL')
+            ? (question.type === 'choice' ? { choice: 'act', reason: 'it breaks the build' } : { noul: 0.9, reason: 'it breaks the build' })
+            : (question.type === 'choice' ? { choice: 'skip' } : { noul: 0.1 })])),
       });
     };
     const seen: Outcome[] = [];
@@ -714,25 +716,77 @@ describe("a judge in a dag node's refine review", () => {
     expect(outcome.status).toBe('pass');
     expect(round).toBe(2);
     expect(seen).toHaveLength(1);
+    // Round 1 sends back only the finding the judge acts on: the
+    // taste note it skips stays held back, a `skip` in the record.
     expect(seen[0]!.revision!.findings).toEqual([
       { evidence: 'REAL: the build fails', severity: 'should-fix', judgeReason: 'it breaks the build', id: 'finding-1' },
     ]);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
-    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 1 skip']);
+    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 0 skip, 1 minor']);
     expect(judgeEvents[1]!.findings).toEqual([
-      { id: 'finding-1', decision: 'skip', reason: expect.any(String) },
+      { id: 'finding-1', decision: 'minor', reason: expect.any(String) },
     ]);
-    expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge skipped every finding' } });
+    expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge found only minor findings' } });
+    // The pass the target earns after the send-backs carries the collected
+    // list too: the taste note the judge called minor in round 2.
+    expect(outcome.data).toMatchObject({
+      implement: { status: 'pass', minorFindings: [{ evidence: 'taste: rename a variable', severity: 'nice-to-have' }] },
+    });
   });
-  it('tells the review node\'s reviewers what the judge skipped, on the context and in an agent\'s prompt', async () => {
-    // Act on the finding marked REAL, skip the taste note.
+  it('adds a send-back\'s collected findings to the list a standing pass already carries', async () => {
+    // implement's own reviews collect a minor finding in round 2; the
+    // downstream check then sends back a round the judge calls all minor.
+    // The target's pass keeps both lists' entries.
+    let reviews = 0;
+    const reviewerSeat: TeamSeat = {
+      engine: new MockEngine(() => JSON.stringify(reviews++ === 0
+        ? { status: 'revise', summary: 'a real finding', findings: [{ evidence: 'REAL: the build fails', severity: 'should-fix' }] }
+        : { status: 'revise', summary: 'a taste note', findings: [{ evidence: 'taste: a warmer tone', severity: 'nice-to-have' }] })),
+      identity: { adapter: 'mock', provider: 'mock', modelFamily: 'review', model: 'review', tools: [] },
+    };
+    let checks = 0;
+    const { outcome } = await run(dag({
+      name: 'merge-minors',
+      nodes: {
+        implement: {
+          refine: review({ reviewers: [reviewerSeat], judge: judge({ engine: new MockEngine(decideBlocks), identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] } }) }),
+          job: fnJob('implement', async () => ({ status: 'pass' })),
+        },
+        check: {
+          needs: ['implement'], sendsBackTo: ['implement'],
+          job: fnJob('check', () => checks++ === 0
+            ? revisionRequest({ target: 'implement', reason: 'a taste note', findings: [{ evidence: 'docs: name the file in the README', severity: 'nice-to-have' }] })
+            : { status: 'pass' }),
+        },
+      },
+    }), mockOpts);
+
+    expect(outcome.status).toBe('pass');
+    expect(outcome.data).toMatchObject({
+      // The standing pass keeps its own collected entry and gains the
+      // send-back's; the send-back's shipped pass shows the whole list.
+      implement: { status: 'pass', minorFindings: [
+        { evidence: 'taste: a warmer tone', severity: 'nice-to-have' },
+        { evidence: 'docs: name the file in the README', severity: 'nice-to-have' },
+      ] },
+      check: { status: 'pass', minorFindings: [
+        { evidence: 'taste: a warmer tone', severity: 'nice-to-have' },
+        { evidence: 'docs: name the file in the README', severity: 'nice-to-have' },
+      ] },
+    });
+  });
+  it('tells the review node\'s reviewers what the judge held back, on the context and in an agent\'s prompt', async () => {
+    // The finding marked REAL is acted on; the taste note the judge holds
+    // back in round 1 stays held back.
     const decide = (request: { prompt: string }) => {
-      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { type: string; instructions: string }> };
       return JSON.stringify({
         ...roundAnswers('continue'),
         ...Object.fromEntries(Object.entries(questions)
-          .filter(([, question]) => 'act' in question.criteria)
-          .map(([id, question]) => [id, question.instructions.includes('REAL') ? { choice: 'act' } : { choice: 'skip', reason: 'a matter of taste' }])),
+          .filter(([id]) => id.startsWith('finding-'))
+          .map(([id, question]) => [id, question.instructions.includes('REAL')
+            ? (question.type === 'choice' ? { choice: 'act' } : { noul: 0.9 })
+            : (question.type === 'choice' ? { choice: 'skip', reason: 'a matter of taste' } : { noul: 0.1, reason: 'a matter of taste' })])),
       });
     };
     const reviewerPrompts: string[] = [];
@@ -774,6 +828,7 @@ describe("a judge in a dag node's refine review", () => {
 
     expect(outcome.status).toBe('pass');
     expect(round).toBe(2);
+    // Round 1's send-back held the taste note back; the next review hears it.
     expect(seenSkipped).toEqual([
       undefined,
       [{ round: 1, finding: { reviewer: 'checker', evidence: 'taste: rename a variable', severity: 'nice-to-have' }, reason: 'a matter of taste' }],
@@ -827,7 +882,7 @@ describe("a judge in a dag node's refine review, with no cap or at its cap", () 
     expect(calls).toHaveLength(2);
   });
 
-  it('with no cap, stops a review that blocks every round on a new rare case when the judge skips the blocks', async () => {
+  it('with no cap, stops a review that blocks every round on a new rare case when the judge calls them minor', async () => {
     const rare = ['a field limited to a list of values', 'a schema nested in allOf', 'a schema nested in anyOf', 'anyOf inside allOf', 'a schema nested in oneOf'];
     let round = 0;
     let judgeCalls = 0;
@@ -852,17 +907,26 @@ describe("a judge in a dag node's refine review, with no cap or at its cap", () 
       },
     }), { ...mockOpts, onEvent: (event) => events.push(event) });
     expect(outcome.status).toBe('pass');
-    expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge skipped every finding' } });
+    expect(outcome.data).toMatchObject({
+      review: { status: 'pass', summary: 'the judge found only minor findings', minorFindings: [
+        { evidence: 'rare: a field limited to a list of values', round: 1 },
+        { evidence: 'rare: a schema nested in allOf', round: 2 },
+      ] },
+      implement: { status: 'pass', minorFindings: [
+        { evidence: 'rare: a field limited to a list of values', round: 1 },
+        { evidence: 'rare: a schema nested in allOf', round: 2 },
+      ] },
+    });
     expect(round).toBe(2);
     expect(judgeCalls).toBe(2);
-    // The next round's review is told which block was skipped, and why.
+    // The next round's review is told which block was held back, and why.
     expect(seenSkipped).toEqual([
       undefined,
       [{ round: 1, finding: { evidence: 'rare: a field limited to a list of values', severity: 'block' }, reason: 'outside how the work is really used' }],
     ]);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
-    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 1 skip']);
-    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', findings: [{ id: 'finding-1', decision: 'skip', reason: 'outside how the work is really used' }] });
+    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 0 skip, 1 minor']);
+    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', findings: [{ id: 'finding-1', decision: 'minor', reason: 'outside how the work is really used' }] });
   });
 
   it('with a plain number, sends a block finding back without a judge', async () => {
@@ -913,7 +977,7 @@ describe("a judge in a dag node's refine review, with no cap or at its cap", () 
     const last = JSON.parse(prompts[1]!).state.when as Record<string, unknown>;
     expect(first.lastRound).toBeUndefined();
     expect(last).toMatchObject({ cap: 1, lastRound: true });
-    expect(last.limit).toBe('This is the last round the cap of 1 allows (1 refinement after the first build): no build round follows, so your answer decides how this ends.');
+    expect(last.limit).toBe('This is the last round the cap of 1 allows (1 refinement after the first build): a product decision buys exactly one more round for the person\'s answer; every other answer decides how this ends.');
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
     expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', openFindings: shouldFix });
   });
@@ -955,7 +1019,7 @@ describe("a judge in a dag node's refine review, with no cap or at its cap", () 
     expect(review.revision?.findings).toEqual(shouldFix);
   });
 
-  it('at a cap of 1, asks the judge about a block in the last round, and a skip lets the work stand with it recorded as open', async () => {
+  it('at a cap of 1, asks the judge about a block in the last round, and calling it minor lets the work stand with it recorded as open', async () => {
     const block = { evidence: 'rare: a schema nested in anyOf', severity: 'block' as const };
     let round = 0;
     let judgeCalls = 0;
@@ -973,9 +1037,12 @@ describe("a judge in a dag node's refine review, with no cap or at its cap", () 
     expect(outcome.status).toBe('pass');
     expect(round).toBe(2);
     expect(judgeCalls).toBe(2);
-    expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge skipped every finding', openFindings: [block] } });
+    expect(outcome.data).toMatchObject({
+      review: { status: 'pass', summary: 'the judge found only minor findings', openFindings: [block], minorFindings: [block] },
+      implement: { status: 'pass', minorFindings: [block] },
+    });
     expect(kbEvents(events).map((e) => e.accepted)).toEqual([true, false]);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
-    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', openFindings: [block] });
+    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', openFindings: [block], minorFindings: [block] });
   });
 });

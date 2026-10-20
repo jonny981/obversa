@@ -4,8 +4,9 @@ description: "Several models review the same work, their reviews become one, and
 ---
 
 Ask several models from different families to review the same work. Their
-reviews become one list before anyone acts on it, and a judge decides each
-finding on that list: act on it or skip it. Use it for a page, a plan or a
+reviews become one list before anyone acts on it, and a judge calls each
+finding on that list: act or skip in round 1, impactful or minor after.
+Use it for a page, a plan or a
 change where one review isn't enough.
 
 Three things go wrong when several reviews are simply added together. Two
@@ -25,8 +26,8 @@ flowchart LR
   merge -->|one finding per problem| cross["cross-review: each reviewer votes once"]
   cross -->|votes applied by rule| left{"what is left"}
   left -->|findings| judge{"judge: Jev decides each finding"}
-  judge -->|the findings it acts on| write
-  judge -->|it skips every finding| done((pass))
+  judge -->|the findings it calls impactful| write
+  judge -->|no finding is impactful| done((pass))
   left -->|nothing| done
 ```
 
@@ -54,7 +55,7 @@ and puts a judge on `refine`:
       synthesise: true,
       refine: judge(judgeSeat),
       desc: 'Rewrite the page so a person reads it once and knows what to set. On a later round, change only the sentences the findings name.',
-      gate: 'Every reviewer passes, or the judge skips every finding that is left.',
+      gate: 'Every reviewer passes, or the judge calls every finding that is left minor.',
     }),
 ```
 
@@ -103,13 +104,15 @@ run. The judge never decides an unmet requirement.
    marked `disputed`.
 5. **Judge.** When a judge is set, it decides every finding that is left,
    a `block` included. It reads each one with who raised it and how the
-   others voted. It decides each one, `act` or
-   `skip`, with a one-line reason. The writer gets only the findings the
-   judge acts on, each with the judge's reason. The next round's reviewers
-   are told which findings it skipped and why. When the judge acts on any
-   finding, another round runs. When it skips every finding, the page
-   stands as a pass. With no cap on the judge, the rounds end when it skips
-   every finding or every reviewer passes. A `block` goes straight back to
+   others voted. It calls each one, with a one-line
+   reason: act or skip in round 1, impactful or minor after. The writer gets
+   only the findings the
+   judge calls impactful, each with the judge's reason. The next round's reviewers
+   are told which findings it held back and why. When any finding is
+   impactful, another round runs; when none is,
+   the page stands as a pass. Each held-back one
+   joins the collected `minorFindings`. With no cap on the judge, the rounds end when the judge
+   lets the page stand or every reviewer passes. A `block` goes straight back to
    the writer without a judge only when there is no judge.
    [Know when to stop](/patterns/judge-stops-the-loop) has the judge's
    questions.
@@ -253,9 +256,11 @@ import { recordedJudge } from '@obversa/runtime/testing';
  * then each reviewer votes once on the findings it did not raise, and a
  * finding is dropped when the reviewers who reject it outnumber those who
  * raised or backed it, unless it is a block. A judge then
- * decides each finding that is left: act on it or skip it. The writer gets
- * only the findings the judge acts on. When the judge skips every finding,
- * the page stands. With no cap, the judge or the reviewers end the rounds.
+ * calls each finding that is left: act or skip in round 1, impactful or
+ * minor after. The writer gets only the findings the judge sends back; a
+ * held-back one stays with the judge, collected for a person to read before
+ * the page lands. When nothing is sent back, the page stands. With no cap,
+ * the judge or the reviewers end the rounds.
  */
 
 // ── The seats ───────────────────────────────────────────────────────────────
@@ -293,7 +298,7 @@ const team = workflow('review-battery', {
       synthesise: true,
       refine: judge(judgeSeat),
       desc: 'Rewrite the page so a person reads it once and knows what to set. On a later round, change only the sentences the findings name.',
-      gate: 'Every reviewer passes, or the judge skips every finding that is left.',
+      gate: 'Every reviewer passes, or the judge calls every finding that is left minor.',
     }),
   ],
 });

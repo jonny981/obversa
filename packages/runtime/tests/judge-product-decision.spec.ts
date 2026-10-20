@@ -106,11 +106,37 @@ describe('the judge can request a product decision', () => {
       const [third] = await fixture.callbacks.listPending();
       expect(third!.requestId).not.toBe(second!.requestId);
       await answer(fixture.callbacks, third!, 'Keep it for new users.');
-      // No build round follows: the answer is recorded and the run fails.
-      expect(await worker(kind, fixture, scenario, true)).toMatchObject({ status: 'fail' });
-      expect(await fixture.callbacks.listPending()).toEqual([]);
-      expect(choices(fixture.cwd)).toHaveLength(9);
-      expect(readFileSync(fixture.recordTo, 'utf8')).toContain('a person answered \\"Keep it for new users.\\", and no build round follows to apply it');
+      // The answer buys exactly one more round past the cap: the writer runs
+      // it, and the judge is asked about that round's review too.
+      expect(await worker(kind, fixture, scenario, true)).toMatchObject({ status: 'paused' });
+      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge']);
+      expect(productCalls(fixture.cwd)[9]!.prompt).toContain('"Keep it for new users."');
+      expect(judgeStates(fixture.cwd)[3]).toMatchObject({ lastRound: true });
+      const [fourth] = await fixture.callbacks.listPending();
+      expect(fourth!.requestId).not.toBe(third!.requestId);
+      await answer(fixture.callbacks, fourth!, 'Ship it as is.');
+      // Every answered product decision buys its round: this one buys a
+      // round past the cap the same way, and the judge asks a person again.
+      expect(await worker(kind, fixture, scenario, true)).toMatchObject({ status: 'paused' });
+      expect(choices(fixture.cwd)).toHaveLength(15);
+      expect(productCalls(fixture.cwd)[12]!.prompt).toContain('"Ship it as is."');
+      expect(productCalls(fixture.cwd)[12]!.prompt).toContain('granted for a product answer');
+      const [fifth] = await fixture.callbacks.listPending();
+      expect(fifth).toBeDefined();
+      if (kind === 'dag') {
+        // Only the rounds the cap could not pay for say they were granted:
+        // the mid-cap product answers send work back with no such note.
+        const kickbacks = readFileSync(fixture.recordTo, 'utf8').trim().split('\n')
+          .map((line) => JSON.parse(line) as { kind: string; count?: number; accepted?: boolean; note?: string })
+          .filter((event) => event.kind === 'dag:kickback')
+          .map(({ count, accepted, note }) => ({ count, accepted, note }));
+        expect(kickbacks).toEqual([
+          { count: 1, accepted: true, note: undefined },
+          { count: 2, accepted: true, note: undefined },
+          { count: 3, accepted: true, note: 'the round was granted for a product answer' },
+          { count: 4, accepted: true, note: 'the round was granted for a product answer' },
+        ]);
+      }
     }, 30_000);
 
     it.each(['holds', 'over_polishing', 'not_converging', 'continue'])('sends the answer to the builder, reviews and judges the result, then applies %s', async (ruling) => {
@@ -152,6 +178,8 @@ describe('the judge can request a product decision', () => {
         ...(kind === 'dag' ? ['downstream'] : []),
       ]);
       const writers = productCalls(fixture.cwd).filter((call) => call.kind === 'writer').map((call) => call.prompt!);
+      // Round 1 sends back only the finding the judge called impactful: the
+      // one it called minor stays held back, and so does round 2's.
       expect(writers[1]).toContain('REAL: the page must choose one audience (round 1)');
       expect(writers[1]).not.toContain('taste: a warmer tone');
       expect(writers[2]).toContain('REAL: the page must choose one audience (round 2)');
@@ -161,7 +189,7 @@ describe('the judge can request a product decision', () => {
       expect(states[1].skipped).toMatchObject([{ finding: { evidence: 'taste: a warmer tone (round 1)' }, reason: 'judged' }]);
       // After the person's answer the builder runs and the review passes, so the judge was asked twice.
       expect(states).toHaveLength(2);
-      // The review after the resumed answer hears every finding the judge skipped.
+      // The review after the resumed answer hears every finding the judge held back.
       const lastReview = productCalls(fixture.cwd).filter((call) => call.kind === 'reviewer').at(-1)!.prompt!;
       expect(lastReview).toContain('taste: a warmer tone (round 1)');
       expect(lastReview).toContain('taste: a warmer tone (round 2)');
@@ -187,22 +215,86 @@ describe('the judge can request a product decision', () => {
       expect(await fixture.callbacks.listPending()).toEqual([]);
     }, 30_000);
 
-    it('asks a person after the last review the cap allows, records the answer, and runs no further build round', async () => {
+    it('asks a person after the last review the cap allows, and each answered product decision buys its own round', async () => {
       const fixture = await setup();
-      // A cap of 1 allows one refinement: two writer rounds.
+      // A cap of 1 allows one refinement: two writer rounds. A product
+      // answer buys exactly one more.
       const scenario = { choices: ['continue', 'product_decision'], cap: 1 };
       expect(await worker(kind, fixture, scenario, false)).toMatchObject({ status: 'paused' });
       expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge']);
       expect(judgeStates(fixture.cwd)[1]).toMatchObject({ cap: scenario.cap, lastRound: true });
       const [request] = await fixture.callbacks.listPending();
       await answer(fixture.callbacks, request!, 'Write for new users.');
+      // The granted round carries the answer to the writer, and the judge is
+      // asked about its review: it asks a person again.
+      expect(await worker(kind, fixture, scenario, true)).toMatchObject({ status: 'paused' });
+      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge']);
+      expect(productCalls(fixture.cwd)[6]!.prompt).toContain('"Write for new users."');
+      expect(productCalls(fixture.cwd)[6]!.prompt).toContain('granted for a product answer');
+      const [next] = await fixture.callbacks.listPending();
+      await answer(fixture.callbacks, next!, 'Keep it for new users.');
+      // The second answer buys its own round the same way: the writer runs
+      // it, and the judge asks a person again.
       const outcome = await worker(kind, fixture, scenario, true);
-      expect(outcome).toMatchObject({ status: 'fail' });
-      // The returned outcome says why the run stopped, not only the record.
-      expect(JSON.stringify(outcome)).toContain(`after the last round the cap of ${scenario.cap} allows; a person answered \\"Write for new users.\\"`);
-      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge']);
-      expect(await fixture.callbacks.listPending()).toEqual([]);
-      expect(readFileSync(fixture.recordTo, 'utf8')).toContain(`after the last round the cap of ${scenario.cap} allows; a person answered \\"Write for new users.\\"`);
+      expect(outcome).toMatchObject({ status: 'paused' });
+      expect(choices(fixture.cwd)).toHaveLength(12);
+      expect(productCalls(fixture.cwd)[9]!.prompt).toContain('"Keep it for new users."');
+      expect(productCalls(fixture.cwd)[9]!.prompt).toContain('granted for a product answer');
+      expect((await fixture.callbacks.listPending())).toHaveLength(1);
+      const record = readFileSync(fixture.recordTo, 'utf8');
+      // The record marks the rounds the product answers were granted.
+      expect(record).toContain('"productDecision":true');
+    }, 30_000);
+
+    it('grants a product answer its round even when a falling count already bought the round before', async () => {
+      const fixture = await setup();
+      // A cap of 1 allows one refinement. Round 2's acted findings fall
+      // from round 1's two to one, so the spent cap grants round 3 for
+      // converging — and each product answer buys its own round after that.
+      const scenario = { choices: ['continue', 'continue', 'product_decision', 'product_decision'], cap: 1, perFinding: true, falling: true };
+      expect(await worker(kind, fixture, scenario, false)).toMatchObject({ status: 'paused' });
+      expect(choices(fixture.cwd)).toEqual([
+        'writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge',
+      ]);
+      expect(judgeStates(fixture.cwd)[2]).toMatchObject({ round: 3, cap: scenario.cap, lastRound: true });
+      // Convergence bought round 3, not a product answer, so the packet
+      // round 3 reads still says a product decision buys its round.
+      expect(judgeStates(fixture.cwd)[2].limit).toContain('a product decision still buys one more round');
+      const [request] = await fixture.callbacks.listPending();
+      await answer(fixture.callbacks, request!, 'Write for new users.');
+      // The answer buys round 4, marked as granted for a product answer.
+      expect(await worker(kind, fixture, scenario, true)).toMatchObject({ status: 'paused' });
+      expect(productCalls(fixture.cwd)[9]!.prompt).toContain('"Write for new users."');
+      expect(productCalls(fixture.cwd)[9]!.prompt).toContain('granted for a product answer');
+      expect(readFileSync(fixture.recordTo, 'utf8')).toContain('"productDecision":true');
+      // Asked again on the granted round and answered, the next product
+      // decision buys round 5 the same way.
+      const [next] = await fixture.callbacks.listPending();
+      await answer(fixture.callbacks, next!, 'Keep it for new users.');
+      const outcome = await worker(kind, fixture, scenario, true);
+      expect(outcome).toMatchObject({ status: 'paused' });
+      expect(productCalls(fixture.cwd)[12]!.prompt).toContain('"Keep it for new users."');
+      expect(productCalls(fixture.cwd)[12]!.prompt).toContain('granted for a product answer');
+      // Round 4's packet knew a product decision still buys its round.
+      expect(judgeStates(fixture.cwd)[3].limit).toContain('a product decision still buys one more round');
+      expect(choices(fixture.cwd)).toHaveLength(15);
+      expect((await fixture.callbacks.listPending())).toHaveLength(1);
+    }, 30_000);
+
+    it('grants a product answer one round past the cap, which the judge can then let stand', async () => {
+      const fixture = await setup();
+      // A cap of 1 allows one refinement: two writer rounds, plus the round
+      // the product answer buys.
+      const scenario = { choices: ['continue', 'product_decision', 'holds'], cap: 1 };
+      expect(await worker(kind, fixture, scenario, false)).toMatchObject({ status: 'paused' });
+      const [request] = await fixture.callbacks.listPending();
+      await answer(fixture.callbacks, request!, 'Write for new users.');
+      const outcome = await worker(kind, fixture, scenario, true);
+      expect(outcome).toMatchObject({ status: 'pass' });
+      expect(choices(fixture.cwd)).toEqual(['writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge', 'writer', 'reviewer', 'judge', ...(kind === 'dag' ? ['downstream'] : [])]);
+      expect(productCalls(fixture.cwd)[6]!.prompt).toContain('"Write for new users."');
+      expect(judgeStates(fixture.cwd)[2]).toMatchObject({ round: 3, cap: scenario.cap, lastRound: true });
+      expect(readFileSync(fixture.recordTo, 'utf8')).toContain('"productDecision":true');
     }, 30_000);
 
     it('recovers the pending product question after a waiting process is killed', async () => {

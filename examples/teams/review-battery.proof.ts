@@ -82,18 +82,19 @@ try {
   await mkdir(bin, { recursive: true });
   await copyFile(join(here, 'briefs/retries.md'), join(workspace, 'briefs/retries.md'));
   await writeFile(join(workspace, 'docs/retries.md'), original);
-  // The judge is asked once, after round 1, which has no block. It decides
-  // each finding left, in the order the synthesis lists them: it acts on the
-  // merged backoff finding and the last retry, and skips the disputed nit.
+  // The judge is asked once, after round 1, which has no block. Round 1
+  // keeps the act/skip call: it acts on the merged backoff finding and the
+  // last retry, in the order the synthesis lists them, and skips the
+  // disputed nit.
   await writeFile(join(workspace, 'judge.json'), `${JSON.stringify([
     {
       holds: { type: 'noul', noul: 0.2 },
       worth_doing: { type: 'noul', noul: 0.8 },
       worth_another_round: { type: 'noul', noul: 0.8 },
       stop_reason: { type: 'choice', choice: 'continue', confidence: 0.8 },
-      'finding-1': { type: 'choice', choice: 'act', confidence: 0.9, reason: actBackoff },
-      'finding-2': { type: 'choice', choice: 'act', confidence: 0.9, reason: actLastRetry },
-      'finding-3': { type: 'choice', choice: 'skip', confidence: 0.8, reason: skipNit },
+      'finding-1': { type: 'choice', choice: 'act', reason: actBackoff },
+      'finding-2': { type: 'choice', choice: 'act', reason: actLastRetry },
+      'finding-3': { type: 'choice', choice: 'skip', reason: skipNit },
     },
   ], null, 2)}\n`);
   await writeFile(join(workspace, '.obversa-stand-in.json'), `${JSON.stringify(script, null, 2)}\n`);
@@ -181,7 +182,7 @@ try {
   assert.deepEqual(
     sentBack[0]!.outcome!.revision!.findings!.map((finding) => [finding.evidence, finding.judgeReason]),
     [[backoff, actBackoff], [lastRetry, actLastRetry]],
-    'the writer gets only the findings the judge acts on, each with its reason: not the dropped table, not the skipped nit',
+    'the writer gets only the findings the judge calls impactful, each with its reason: not the dropped table, not the nit it called minor',
   );
 
   assert.equal(await readFile(join(workspace, 'docs/retries.md'), 'utf8'), draft2);

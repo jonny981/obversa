@@ -137,6 +137,26 @@ export interface Outcome {
    * the last review its cap allows.
    */
   openFindings?: readonly FeedbackFinding[];
+  /**
+   * The findings a judge held back — skipped in round 1, called minor from
+   * round 2 on: every finding that did not go back to the builder, each
+   * with the round it was held back in, collected for a person to read
+   * before the work lands. Present on a pass while the collected list is
+   * not empty.
+   */
+  minorFindings?: readonly FeedbackFinding[];
+  /**
+   * True on the send-back a product answer bought: the judge asked a person
+   * after the last review the cap allows, so this one round was granted for
+   * their answer, past the cap.
+   */
+  productDecision?: true;
+  /**
+   * True on the send-back a spent cap granted on the judge's say-so: the
+   * findings it acted on fell from the round before, so the run is still
+   * converging and one more round was granted past the cap.
+   */
+  converging?: true;
   /** Present on a `commandJob` outcome: the command it ran and how it ended. */
   command?: CommandRun;
 }
@@ -217,6 +237,8 @@ export interface FeedbackFinding {
   judgeReason?: string;
   /** The finding's id in its review round (`finding-2`), set when a judge decided each finding. */
   id?: string;
+  /** The review round a judge held this finding back in, set on a `minorFindings` entry. */
+  round?: number;
 }
 
 /** One reviewer's answer on a finding another reviewer raised. */
@@ -239,9 +261,9 @@ export interface PanelSynthesisEntry {
   finding: FeedbackFinding;
 }
 
-/** A finding a judge skipped, kept across rounds so reviewers do not raise it again. */
+/** A finding a judge held back as minor, kept across rounds so reviewers do not raise it again. */
 export interface SkippedFinding {
-  /** The review round the finding was skipped in. */
+  /** The review round the finding was held back in. */
   readonly round: number;
   readonly finding: FeedbackFinding;
   readonly reason: string;
@@ -255,10 +277,16 @@ export interface GoalRequirement {
   readonly evidence: string;
 }
 
-/** The judge's decision on one finding. */
+/**
+ * The judge's decision on one finding. `act` sends it back to the builder:
+ * the judge called it impactful. `skip` and `minor` stay with the judge:
+ * `skip` is the round-1 held-back call, `minor` a finding the judge called
+ * minor from round 2 on. Either is collected on `minorFindings` for a
+ * person to read before the work lands.
+ */
 export interface FindingDecision {
   readonly id: string;
-  readonly decision: 'act' | 'skip';
+  readonly decision: 'act' | 'skip' | 'minor';
   readonly reason: string;
 }
 
@@ -463,7 +491,8 @@ export interface JobContext {
   /** The most recent failed-review outcome, so a restart can act on it. */
   readonly lastReview?: Outcome;
   /**
-   * The findings a judge skipped in earlier rounds, with its reasons. Set on
+   * The findings a judge held back as minor in earlier rounds, with its
+   * reasons. Set on
    * the review that sent the work back, and on every job inside it. An agent
    * job adds them to its prompt and asks the agent not to raise them again.
    */
@@ -883,9 +912,10 @@ export interface Judge {
   readonly cap?: number;
   readonly questions: JudgeQuestions;
   /**
-   * Ask the judge to act on or skip each finding, and send the builder only
-   * the ones it acts on. True by default; false by default for a caller's
-   * own question set, which then routes on the whole round.
+   * Ask the judge to call each finding — act or skip in round 1, impactful
+   * or minor from round 2 on — and send the builder only the ones it acts
+   * on. True by default; false by default for a caller's own question set,
+   * which then routes on the whole round.
    */
   readonly perFinding: boolean;
   readonly interaction?: InteractionBinding;
@@ -1304,7 +1334,8 @@ export type LoopEvent =
       answers: Readonly<Record<string, JudgeAnswer>>;
       reason: string;
       // `again` sends the work back for another round; `stop` ends the
-      // rounds. After the last review a cap allows, every route is `stop`.
+      // rounds. A round the spent cap grants for a falling acted-on count
+      // routes `again` too.
       route: 'again' | 'stop';
       // The answer that decided the route: the chosen reason
       // (`stop_reason: continue`), the probability answer it fell back to
@@ -1314,16 +1345,23 @@ export type LoopEvent =
       // `fail` when the review's failure stands. Absent on `again`, and on
       // `stop_reason: product_decision`, which asks a person. Their answer
       // goes to the builder, and the judge is asked again once that round
-      // is reviewed. After the last round a cap allows, no build round and
-      // no judge call follow: the answer is recorded and the run fails.
+      // is reviewed. After the last round a cap allows, each answered
+      // product decision buys exactly one more round, marked
+      // `productDecision`.
       // `paused` ends the judge step with a failure (`failure` keeps the
       // original error): a judge call that did not pass, a reply that did
       // not parse, or a reply that left an asked question without a usable
       // answer — never empty answers routed as `no clear answer`.
       status?: 'pass' | 'fail' | 'paused';
       // When the judge decides each finding: every finding of the round, by
-      // its id, with `act` (sent back to the builder) or `skip` and why.
-      findings?: readonly { readonly id: string; readonly decision: 'act' | 'skip'; readonly reason: string }[];
+      // its id, with `act` (called impactful, sent back to the builder) or
+      // held back — `skip` (held back in round 1) or `minor` (called minor
+      // from round 2 on) — and why.
+      findings?: readonly { readonly id: string; readonly decision: 'act' | 'skip' | 'minor'; readonly reason: string }[];
+      // The findings of this round that did not go back to the builder,
+      // collected for a person to read before the work lands, each with
+      // its reviewer, severity and evidence.
+      minorFindings?: readonly FeedbackFinding[];
       // The findings still open when the judge lets the work stand after
       // the last review its cap allows.
       openFindings?: readonly FeedbackFinding[];

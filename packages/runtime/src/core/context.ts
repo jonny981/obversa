@@ -93,6 +93,14 @@ export interface TargetRounds {
    */
   checkBacks: number;
   /**
+   * The node's builds that failed before their review could run — a
+   * retryable engine or timeout failure the review never sees — in a row:
+   * a check, a goal or a review that ran resets it. Only a judged node's
+   * rounds draw on it, theirs being the rounds no `max` bounds, and by the
+   * same count `checkBacks` is.
+   */
+  failed: number;
+  /**
    * The results of the node's own checks this round (its refine's `checks`);
    * a judge of the node reads them ahead of the graph's check steps.
    */

@@ -21,6 +21,7 @@ import toposort from 'toposort';
 
 import type {
   DagConfig,
+  FeedbackFinding,
   GoalRequirement,
   DagNode,
   Job,
@@ -49,7 +50,7 @@ import type { EnvHandle } from '../env/environment.js';
 import { LoopError } from './errors.js';
 import { revisionFromOutcome } from './feedback.js';
 import { answeredFindingIds, watchRoundChange, type RoundChange } from './round-change.js';
-import { checkResult, consultJudge, goalVerdicts, judgedFindings, judgeRound, judgeState, lastRoundAnswered, productDecisionFeedback, readJudgedWork, type JudgeCheck, type JudgeRound, type JudgeState, type JudgeWork, type SkippedFinding } from './judge.js';
+import { checkResult, consultJudge, goalVerdicts, judgedFindings, judgeRound, judgeState, minorFindings, productDecisionFeedback, readJudgedWork, type JudgeCheck, type JudgeRound, type JudgeState, type JudgeWork, type SkippedFinding } from './judge.js';
 import { compileNodeJob, isReview } from './refine.js';
 import { checkpointInteraction, interactionDeclaration, interactionIdentity, jsonSnapshot, outcomeSnapshot, savedInteraction, type InteractionResponse } from './interaction.js';
 import { DEFAULT_FANOUT_CONCURRENCY } from './concurrency.js';
@@ -59,6 +60,16 @@ import { roundRule } from './rounds.js';
 /** Sanitise a name into a git-ref-safe slug. */
 function slug(s: string): string {
   return s.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/(^-+|-+$)/g, '') || 'node';
+}
+
+/**
+ * The collected findings a pass carries: the entries already on the
+ * outcome, then each collected entry the list does not have, one entry per
+ * finding (keyed by evidence, as `judgedFindings` keys them).
+ */
+function mergeMinorFindings(earlier: readonly FeedbackFinding[] | undefined, collected: readonly FeedbackFinding[]): FeedbackFinding[] {
+  const known = new Set((earlier ?? []).map((finding) => finding.evidence));
+  return [...(earlier ?? []), ...collected.filter((finding) => !known.has(finding.evidence))];
 }
 
 function normalizeNeeds(needs: DagNode['needs']): string[] {
@@ -313,6 +324,9 @@ export function dag(config: DagConfig): Job {
     // The pre-review send-backs of each node that runs checks ahead of its
     // reviewers: a failed check or a missing file, bounded by its `checkRounds`.
     const checkCounts = new Map<string, number>(Object.entries(saved?.checkCounts ?? {}) as [string, number][]);
+    // The builds of each node that failed before their review could run,
+    // bounded by the same count `checkCounts` is.
+    const failCounts = new Map<string, number>(Object.entries(saved?.failCounts ?? {}) as [string, number][]);
     // Each node's own check results of its latest round, ahead of the graph's
     // check steps in the evidence its judge reads.
     const nodeChecks = new Map<string, JudgeCheck[]>(Object.entries(saved?.nodeChecks ?? {}) as unknown as [string, JudgeCheck[]][]);
@@ -472,6 +486,8 @@ export function dag(config: DagConfig): Job {
       set builds(value) { if (value !== (targetCounts.get(name) ?? 0)) targetCounts.set(name, value); },
       get checkBacks() { return checkCounts.get(name) ?? 0; },
       set checkBacks(value) { if (value !== (checkCounts.get(name) ?? 0)) checkCounts.set(name, value); },
+      get failed() { return failCounts.get(name) ?? 0; },
+      set failed(value) { if (value !== (failCounts.get(name) ?? 0)) failCounts.set(name, value); },
       get checks() { return nodeChecks.get(name) ?? []; },
       set checks(value) { if (value.length) nodeChecks.set(name, [...value]); else nodeChecks.delete(name); },
       save(feedback) {
@@ -530,7 +546,7 @@ export function dag(config: DagConfig): Job {
         kickbacks: Object.fromEntries([...pendingKickback].map(([name, o]) => [name, outcomeSnapshot(o)])),
         readKickbacks: Object.fromEntries([...readKickback].map(([name, o]) => [name, outcomeSnapshot(o)])),
         targetCounts: Object.fromEntries(targetCounts),
-        history: Object.fromEntries(judgeHistory), skipped: Object.fromEntries(judgeSkipped), productFeedback: Object.fromEntries(productFeedback), drafts: Object.fromEntries(judgeDrafts), checkCounts: Object.fromEntries(checkCounts), nodeChecks: Object.fromEntries(nodeChecks), rejected: [...rejected],
+        history: Object.fromEntries(judgeHistory), skipped: Object.fromEntries(judgeSkipped), productFeedback: Object.fromEntries(productFeedback), drafts: Object.fromEntries(judgeDrafts), checkCounts: Object.fromEntries(checkCounts), failCounts: Object.fromEntries(failCounts), nodeChecks: Object.fromEntries(nodeChecks), rejected: [...rejected],
       }), true);
     };
 
@@ -758,13 +774,21 @@ export function dag(config: DagConfig): Job {
       outcome: Outcome,
       phase: 'done' | 'skip',
     ): Outcome => {
-      results.set(name, outcome);
+      // A pass after send-backs still carries the findings the target's
+      // judge held back from round 2 on: the list a person reads before the
+      // work lands. A pass that names its own list keeps it, with the
+      // collected entries it does not already have added on.
+      const minors = outcome.status === 'pass'
+        ? mergeMinorFindings(outcome.minorFindings, minorFindings(judgeSkipped.get(name) ?? []))
+        : [];
+      const settled = minors.length ? { ...outcome, minorFindings: minors } : outcome;
+      results.set(name, settled);
       // The record keeps the files the node wrote, as a compact record
       // drops the result data they are read from.
-      const wrote = phase === 'done' ? wroteFiles(nodes.get(name)!, outcome) : [];
+      const wrote = phase === 'done' ? wroteFiles(nodes.get(name)!, settled) : [];
       // A paused or aborted node has not finished with its send-back: it
       // reads it again when it runs again.
-      if (outcome.status !== 'paused' && outcome.status !== 'aborted') {
+      if (settled.status !== 'paused' && settled.status !== 'aborted') {
         const read = pendingKickback.get(name);
         if (read === undefined) readKickback.delete(name);
         else readKickback.set(name, read);
@@ -778,31 +802,31 @@ export function dag(config: DagConfig): Job {
         node: name,
         phase,
         ...nodeContext(name),
-        outcome,
+        outcome: settled,
         attempt: attempts.get(name),
         timeoutMs: nodes.get(name)!.timeoutMs,
         ...recordedRounds(nodeRounds(name), path.length + 1),
         ...(wrote.length ? { wrote } : {}),
       });
-      if (outcome.status !== 'paused' && outcome.status !== 'aborted') saveRounds();
+      if (settled.status !== 'paused' && settled.status !== 'aborted') saveRounds();
       // A paused node is a deliberate halt, not a failure: stop scheduling nodes
       // even when `stopOnError` is false or the node is optional.
-      if (phase === 'done' && outcome.status === 'paused') {
+      if (phase === 'done' && settled.status === 'paused') {
         stopped = true;
       }
       if (
         phase === 'done' &&
-        outcome.status !== 'pass' &&
+        settled.status !== 'pass' &&
         nodes.get(name)!.optional !== true &&
         stopOnError &&
         // A node asking to send work back is going to be re-run — don't let
         // its (provisional) non-pass abort siblings before the send-back is
         // resolved.
-        !(revisionFromOutcome(outcome)?.target)
+        !(revisionFromOutcome(settled)?.target)
       ) {
         stopped = true;
       }
-      return outcome;
+      return settled;
     };
 
     const run = (name: string): Promise<Outcome> => {
@@ -1027,6 +1051,13 @@ export function dag(config: DagConfig): Job {
       let effectiveReason = reason;
       let effectiveFindings = request.findings;
       let productDecision: Outcome | undefined;
+      // An answered product decision buys one round on every past-cap
+      // review it lands on, each time one is asked and answered: the person
+      // answering is the bound. `converging` marks a send-back the spent cap
+      // granted because the acted-on count fell. Both set only inside the
+      // judge block.
+      let granted = false;
+      let converging = false;
       if (cfgJudge !== undefined) {
         const history = judgeHistory.get(to) ?? [];
         const work = targetWork(to);
@@ -1048,7 +1079,7 @@ export function dag(config: DagConfig): Job {
             readKickbacks: Object.fromEntries([...readKickback].map(([name, o]) => [name, outcomeSnapshot(o)])),
             own: ownOutcomes([...results.keys()]),
             attempts: Object.fromEntries(attempts), targetCounts: Object.fromEntries(targetCounts),
-            history: Object.fromEntries(judgeHistory), skipped: Object.fromEntries(judgeSkipped), productFeedback: Object.fromEntries(productFeedback), drafts: Object.fromEntries(judgeDrafts), checkCounts: Object.fromEntries(checkCounts), nodeChecks: Object.fromEntries(nodeChecks), rejected: [...rejected],
+            history: Object.fromEntries(judgeHistory), skipped: Object.fromEntries(judgeSkipped), productFeedback: Object.fromEntries(productFeedback), drafts: Object.fromEntries(judgeDrafts), checkCounts: Object.fromEntries(checkCounts), failCounts: Object.fromEntries(failCounts), nodeChecks: Object.fromEntries(nodeChecks), rejected: [...rejected],
           })),
         }));
         if ('paused' in result) { judgePaused = true; record(from, result.paused, 'done'); break; }
@@ -1073,23 +1104,18 @@ export function dag(config: DagConfig): Job {
           memo.set(from, Promise.resolve(stood));
           rejected.add(from);
         };
-        if ('answer' in result && lastRound) {
-          // No kickback is left for the answer: the review's own failure stands.
-          const why = lastRoundAnswered(result.state, result.answer);
-          emitKickback(from, to, reason, false, count, limit, why);
-          stopWith(why);
-          continue;
-        }
+        granted = 'answer' in result && lastRound && limit !== undefined;
         if ('answer' in result) {
           // A person's answer goes back to the target as this round's
           // feedback; the judge sees the result only after it is reviewed.
-          // The judge decided each finding before asking: the answer goes with the acted ones only.
+          // The judge decided each finding before asking: the answer goes with the findings those decisions send back.
           const answered = judgedFindings(requestFindings, { findings: result.state.decided }, result.state.skipped ?? [], count);
           judgeSkipped.set(to, answered.skipped);
-          productDecision = productDecisionFeedback(result.answer, answered.acted, { target: to, source: request.source ?? from });
+          productDecision = productDecisionFeedback(result.answer, answered.acted, { target: to, source: request.source ?? from, granted });
           effectiveReason = `${reason} (a person answered the judge's product decision)`;
         }
         const decision = 'decision' in result ? result.decision : undefined;
+        converging = decision?.converging === true;
         // Per-finding decisions: skipped findings are remembered for the next
         // round's reviewers, and only the acted ones go to the builder.
         const judged = decision ? judgedFindings(requestFindings, decision, result.state.skipped ?? [], count) : undefined;
@@ -1102,12 +1128,23 @@ export function dag(config: DagConfig): Job {
             // and everything downstream of it (blocked by that failure in
             // the wave that already ran) gets to run fresh against it.
             const failed = results.get(from)!;
+            const minors = minorFindings(judged?.skipped ?? []);
+            // The target's standing pass carries the collected list too:
+            // it ran before the judge called these findings minor, so its
+            // recorded outcome is updated in place, keeping the entries its
+            // own reviews already collected.
+            const standing = results.get(to);
+            if (minors.length && standing?.status === 'pass') {
+              const merged = mergeMinorFindings(standing.minorFindings, minors);
+              if (merged.length) results.set(to, { ...standing, minorFindings: merged });
+            }
             const shipped = record(from, {
               status: 'pass',
               confidence: failed.confidence,
               summary: decision.reason,
               data: failed.data,
               ...(lastRound ? { openFindings: requestFindings } : {}),
+              ...(minors.length ? { minorFindings: minors } : {}),
             }, 'done');
             ownOutcome.set(shipped, ownOutcome.get(failed) ?? failed);
             // `memo` holds the settled promise every dependant already
@@ -1136,7 +1173,7 @@ export function dag(config: DagConfig): Job {
         if (judged && request.findings) effectiveFindings = judged.acted;
       }
 
-      if (!round.another) {
+      if (!round.another && productDecision === undefined && !converging) {
         // Budget spent. Reject and stop: the unresolved kickback leaves the
         // kicking node's own outcome to stand.
         emitKickback(
@@ -1153,7 +1190,10 @@ export function dag(config: DagConfig): Job {
       }
 
       targetCounts.set(to, count);
-      emitKickback(from, to, effectiveReason, true, count, limit);
+      emitKickback(from, to, effectiveReason, true, count, limit,
+        granted ? 'the round was granted for a product answer'
+          : converging ? 'the round was granted: the findings acted on are still falling'
+            : undefined);
       const dirty = dirtyFrom(to);
       for (const d of dirty) {
         memo.delete(d); // force re-run

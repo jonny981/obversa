@@ -57,7 +57,13 @@ A round is one build and the check of it. The first build is round 1.
   the rounds.
 - **A judge with a cap reads the last round too.** With `cap: N`, the judge
   is asked about the review of build N+1. Only an answer that lets the work
-  stand passes; any other answer fails the step.
+  stand passes, except `product_decision`: each product decision a person
+  answers buys exactly one more round, past the cap, and that round can
+  pass. A judge
+  that still acts on impactful findings is granted one more round while
+  their count falls from the round before; when the count is not falling,
+  the run pauses and asks a person, the open findings attached, instead of
+  failing with them open.
 - **An unmet requirement from a goal check counts as a round.** It goes
   back to the builder without the reviews or the judge.
 - **A `loop()` counts its body runs.** Its `max` is the total number of
@@ -79,7 +85,7 @@ A round is one build and the check of it. The first build is round 1.
   merges the findings that name the same problem, each reviewer votes once
   on the findings it did not raise, and a finding most of them reject is
   dropped, unless it is a block. A judge then decides each finding that is
-  left: act on it or skip it.
+  left: act on it or skip it in round 1, impactful or minor after.
   [Ask a panel](/patterns/review-panel) shows the whole process.
 - **A tournament with a judge.** Several candidates run in their own
   worktrees, a function scores each, and only the winner lands. The rest
@@ -90,14 +96,16 @@ A round is one build and the check of it. The first build is round 1.
 - **A person's decision.** Yes passes the step. No carries the person's note
   to the target as the finding. Silence pauses the run. [A person decides](/patterns/approval).
 - **A judge that says when to stop.** A small model reads what the
-  reviewer found and how the rounds have gone, and decides each finding:
-  act on it or skip it. The builder gets only the findings it acts on, each
+  reviewer found and how the rounds have gone, and calls each finding:
+  act or skip in round 1, impactful or minor after. The builder gets only
+  the findings the judge sends back, each
   with the judge's reason. When the judge gives no reason of its own, as
-  with `jev()`, the reason is what the option it chose means. Every review
-  that can send work back to that step is told what the judge skipped and
+  with `jev()`, the reason is what the matching criterion means. Every review
+  that can send work back to that step is told what the judge held back and
   why: an agent reviewer reads the list in its prompt, and your own review
-  code reads it as `ctx.skippedFindings`. When the judge skips every finding, the work
-  stands. The judge decides a block finding too. A block goes back without
+  code reads it as `ctx.skippedFindings`. When no finding is impactful, the work
+  stands; each held-back one is also collected on
+  `minorFindings`. The judge decides a block finding too. A block goes back without
   a judge only when there is no judge.
   [A judge stops the loop](/patterns/judge-stops-the-loop).
 - **A draft refined over rounds.** Translate, reflect, revise, then a person
@@ -144,7 +152,9 @@ Two of the three reviewers fail the first attempt, so their findings go to
   return to declares `review({ rounds: N })` for N
   [refinements](#counting-rounds), or `review({ judge })` to hand the call
   to a judge; a target with no `refine` refuses the send-back. The judge
-  asks before each round and sends back only the findings it acts on.
+  asks before each round and sends back only the findings it calls for
+  another round: the ones it acts on in round 1, the ones it calls
+  impactful after.
   `workflow()` compiles each stage's `refine` the same way, defaulting to
   1 on a reviewed stage or a send-back target. With no cap, a judge's
   rounds end when it stops them or the review passes.

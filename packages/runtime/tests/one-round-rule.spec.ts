@@ -309,6 +309,8 @@ const REVISE = { status: 'revise', summary: 'one finding', findings: [FINDING] }
 const PASS = { status: 'pass', summary: 'nothing to add' };
 
 const REAL = { severity: 'block', evidence: 'REAL: the page never says who it is for' } as const;
+const REAL2 = { severity: 'block', evidence: 'REAL: the page buries the point' } as const;
+const REAL3 = { severity: 'block', evidence: 'REAL: the page never lands the ask' } as const;
 const TASTE = { severity: 'nice-to-have', evidence: 'taste: prefer a warmer tone' } as const;
 
 /** A complete reply to the round questions: every probability a clear yes. */
@@ -323,7 +325,7 @@ function round(choice: string): Record<string, unknown> {
 
 /**
  * Answer every question the prompt asks: `round` overrides the round
- * answers, each finding marked REAL is acted on, the rest skipped.
+ * answers, each finding marked REAL is impactful, the rest minor.
  */
 function perFinding(overrides: Record<string, unknown> = {}) {
   return (prompt: string) => {
@@ -331,10 +333,10 @@ function perFinding(overrides: Record<string, unknown> = {}) {
     const answers: Record<string, unknown> = { ...round('continue'), ...overrides };
     for (const [key, question] of Object.entries(questions)) {
       if (key in answers) continue;
-      answers[key] = 'act' in question.criteria
+      answers[key] = key.startsWith('finding-')
         ? question.instructions.includes('REAL')
-          ? { choice: 'act', reason: 'a reader cannot tell who the page is for' }
-          : { choice: 'skip', reason: 'a matter of taste' }
+          ? (question.type === 'choice' ? { choice: 'act', reason: 'a reader cannot tell who the page is for' } : { noul: 0.9, reason: 'a reader cannot tell who the page is for' })
+          : (question.type === 'choice' ? { choice: 'skip', reason: 'a matter of taste' } : { noul: 0.1, reason: 'a matter of taste' })
         : question.type === 'choice'
           ? { choice: 'continue' in question.criteria ? 'continue' : Object.keys(question.criteria)[0] }
           : { noul: 0.9 };
@@ -412,7 +414,7 @@ describe('the same intent in every form', () => {
     }
   });
 
-  it('a block the judge acts on goes back to the writer, and what it skipped reaches the next reviewers', async () => {
+  it('a block the judge calls impactful goes back to the writer, and what it held back reaches the next reviewers', async () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[{ status: 'revise', summary: 'two findings', findings: [REAL, TASTE] }, PASS]],
       refine: { replies: [perFinding()] },
@@ -457,6 +459,105 @@ describe('the same intent in every form', () => {
     for (const { form, writer, judge: prompts } of runs) {
       expect(writer[1], form).toContain('Write for new users.');
       expect(judgeInput(prompts[1]!), form).toMatchObject({ why: { productFeedback: [{ prompt: 'Write for new users.' }] }, when: { round: 2 } });
+    }
+  });
+
+  it('at the cap, fewer impactful findings than the round before grant one more round, recorded as a grant', async () => {
+    const runs = await sameInEveryForm(['workflow', 'dag'], {
+      reviews: [[
+        { status: 'revise', summary: 'two findings', findings: [REAL, REAL2] },
+        { status: 'revise', summary: 'one finding', findings: [REAL] },
+        PASS,
+      ]],
+      refine: { cap: 1, replies: [perFinding()] },
+    }, { status: 'pass', builds: 3, judged: 2 });
+    for (const { form, writer, judge: prompts, events } of runs) {
+      // The granted round carries only the finding the judge acted on.
+      expect(writer[2], form).toContain(REAL.evidence);
+      expect(judgeInput(prompts[1]!), form).toMatchObject({ when: { round: 2, cap: 1, lastRound: true } });
+      const judged = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
+      expect(judged[1], form).toMatchObject({ route: 'again', reason: expect.stringContaining('one more round is granted') });
+    }
+  });
+
+  it('a grant repeats while the acted-on count keeps falling round to round', async () => {
+    const runs = await sameInEveryForm(['workflow', 'dag'], {
+      reviews: [[
+        { status: 'revise', summary: 'three findings', findings: [REAL, REAL2, REAL3] },
+        { status: 'revise', summary: 'two findings', findings: [REAL, REAL2] },
+        { status: 'revise', summary: 'one finding', findings: [REAL] },
+        PASS,
+      ]],
+      refine: { cap: 1, replies: [perFinding()] },
+    }, { status: 'pass', builds: 4, judged: 3 });
+    for (const { form, writer, judge: prompts } of runs) {
+      expect(writer[3], form).toContain(REAL.evidence);
+      expect(judgeInput(prompts[2]!), form).toMatchObject({ when: { round: 3, cap: 1, lastRound: true } });
+    }
+  });
+
+  it('at the cap, impactful findings not falling pause the run for a person, whose answer buys the round', async () => {
+    const materials: unknown[] = [];
+    const interaction: InteractionBinding = {
+      id: 'product-decision',
+      responseSchema: { type: 'object' },
+      async answer(request) {
+        materials.push((request.input as { material?: unknown }).material);
+        return { feedback: {}, prompt: 'Keep the audience fix.' };
+      },
+    };
+    const runs = await sameInEveryForm(['workflow', 'dag'], {
+      reviews: [[
+        { status: 'revise', summary: 'one finding', findings: [REAL] },
+        { status: 'revise', summary: 'one finding', findings: [REAL] },
+        PASS,
+      ]],
+      refine: { cap: 1, interaction, replies: [perFinding()] },
+    }, { status: 'pass', builds: 3, judged: 2 });
+    for (const { form, writer } of runs) {
+      expect(writer[2], form).toContain('Keep the audience fix.');
+      expect(writer[2], form).toContain(REAL.evidence);
+    }
+    // The pause attaches the open findings and what the judge would do with them.
+    for (const material of materials) {
+      expect(material).toMatchObject({ capPause: true, latestFindings: [{ evidence: REAL.evidence }], decided: [{ decision: 'act' }] });
+    }
+  });
+
+  it('a cap pause on a granted round asks the person again the same way', async () => {
+    const materials: unknown[] = [];
+    const interaction: InteractionBinding = {
+      id: 'product-decision',
+      responseSchema: { type: 'object' },
+      async answer(request) {
+        materials.push((request.input as { material?: unknown }).material);
+        return { feedback: {}, prompt: 'Keep the audience fix.' };
+      },
+    };
+    const runs = await sameInEveryForm(['workflow', 'dag'], {
+      reviews: [[
+        { status: 'revise', summary: 'one finding', findings: [REAL] },
+        { status: 'revise', summary: 'one finding', findings: [REAL] },
+        { status: 'revise', summary: 'one finding', findings: [REAL] },
+        PASS,
+      ]],
+      refine: { cap: 1, interaction, replies: [perFinding()] },
+    }, { status: 'pass', builds: 4, judged: 3 });
+    expect(materials).toHaveLength(4);
+  });
+
+  it('a cap pause nobody answers pauses the run, the open findings attached, never a silent fail', async () => {
+    const runs = await sameInEveryForm(['workflow', 'dag'], {
+      reviews: [[
+        { status: 'revise', summary: 'one finding', findings: [REAL] },
+        { status: 'revise', summary: 'one finding', findings: [REAL] },
+      ]],
+      refine: { cap: 1, replies: [perFinding()] },
+    }, { status: 'paused', builds: 2, judged: 2 });
+    for (const { form, verdict: outcome } of runs) {
+      expect(outcome.status, form).toBe('paused');
+      const material = (outcome.data as { input?: { material?: unknown } } | undefined)?.input?.material;
+      expect(material, form).toMatchObject({ capPause: true, latestFindings: [{ evidence: REAL.evidence }] });
     }
   });
 
@@ -513,7 +614,7 @@ describe('the same intent in every form', () => {
         skipped: [{ round: 1, finding: { evidence: TASTE.evidence } }],
       } });
       expect(judgeInput(prompts[1]!).when, form).not.toHaveProperty('lastRound');
-      // The stage's own reviewers read, on the third build, what the judge skipped.
+      // The stage's own reviewers read, on the third build, what the judge held back.
       expect(reviewer[2], form).toContain(TASTE.evidence);
       const judged = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
       expect(judged.map((e) => ({ target: e.target, round: e.round })), form).toEqual([{ target: 'write', round: 1 }, { target: 'write', round: 2 }]);
@@ -936,9 +1037,11 @@ describe('what one run keeps to itself', () => {
       reviews: [[{ status: 'revise', summary: 'two findings', findings: [REAL, TASTE] }]],
       refine: { cap: 1, replies: [perFinding()] },
     });
+    // Each run pauses at the spent cap: the judge acts on one finding twice,
+    // and a count that is not falling asks a person who never answers.
     for (let i = 0; i < 2; i += 1) {
       const result = await run(built.job, { cwd: workDir() });
-      expect(result.outcome.status).toBe('fail');
+      expect(result.outcome.status).toBe('paused');
     }
     expect(built.judge).toHaveLength(4);
     expect(judgeInput(built.judge[1]!)).toMatchObject({ when: { round: 2, rounds: [{ round: 1 }], skipped: [{ finding: { evidence: TASTE.evidence } }] } });
@@ -947,7 +1050,7 @@ describe('what one run keeps to itself', () => {
     expect(second).not.toHaveProperty('skipped');
   });
 
-  it('what the judge skipped reaches every node that sends work back to the target', async () => {
+  it('what the judge held back reaches every node that sends work back to the target', async () => {
     const seen: Record<string, unknown[]> = { a: [], b: [] };
     let builds = 0;
     const result = await run(dag({
@@ -999,6 +1102,38 @@ describe('what one run keeps to itself', () => {
     expect(judgeInput(judged[1]!)).toMatchObject({ when: { round: 1, cap: 1 } });
     expect(judgeInput(judged[1]!).when).not.toHaveProperty('lastRound');
     expect(builds).toBe(2);
+    expect(result.outcome.status).toBe('pass');
+  });
+
+  it('the cap compares the acted-on count with the previous build round, not another review of the same build', async () => {
+    const judged: string[] = [];
+    let builds = 0;
+    const result = await run(dag({
+      name: 'page',
+      nodes: {
+        write: { refine: buildReview({ judge: judge(seat(scripted([perFinding()], judged), 'judge-mock'), { cap: 1 }) }), job: fnJob('write', () => { builds += 1; return `draft ${builds}`; }) },
+        style: {
+          needs: 'write',
+          sendsBackTo: ['write'],
+          job: fnJob('style', () => (
+            builds === 1 ? revisionRequest({ target: 'write', reason: 'two findings', findings: [REAL, REAL2] })
+              : builds === 2 ? revisionRequest({ target: 'write', reason: 'tone', findings: [TASTE] })
+                : 'clean')),
+        },
+        facts: {
+          needs: 'style',
+          sendsBackTo: ['write'],
+          job: fnJob('facts', () => (builds === 2 ? revisionRequest({ target: 'write', reason: 'audience', findings: [REAL] }) : 'clean')),
+        },
+      },
+    }), { cwd: workDir() });
+    // Round 2's first send-back (style's) is all minor, so the work stands;
+    // facts then reviews the same build and acts on one finding. The count
+    // it fell from is the previous build round's two, not the zero of
+    // style's own round-2 entry, so the spent cap grants round 3 rather
+    // than pausing for a person.
+    expect(judged).toHaveLength(3);
+    expect(builds).toBe(3);
     expect(result.outcome.status).toBe('pass');
   });
 

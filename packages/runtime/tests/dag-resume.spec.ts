@@ -957,16 +957,16 @@ describe('dag resume', () => {
         ? { status: 'revise', summary: 'two findings', findings: [real, tone] }
         : { status: 'revise', summary: 'one finding', findings: [{ ...real, evidence: 'REAL: the second section is empty' }] });
     });
-    // Acts on a finding marked REAL and skips the rest; says continue.
+    // Acts on a finding marked REAL and holds the rest back; says continue.
     const judgeEngine = new MockEngine((request) => {
       judgeCalls.push(request);
-      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { type: string; instructions: string }> };
       const answers: Record<string, unknown> = roundAnswers('continue');
       for (const [key, question] of Object.entries(questions)) {
-        if (!('act' in question.criteria)) continue;
+        if (!key.startsWith('finding-')) continue;
         answers[key] = question.instructions.includes('REAL')
-          ? { choice: 'act', reason: 'a reader cannot tell who the page is for' }
-          : { choice: 'skip', reason: 'a matter of taste' };
+          ? (question.type === 'choice' ? { choice: 'act', reason: 'a reader cannot tell who the page is for' } : { noul: 0.9, reason: 'a reader cannot tell who the page is for' })
+          : (question.type === 'choice' ? { choice: 'skip', reason: 'a matter of taste' } : { noul: 0.1, reason: 'a matter of taste' });
       }
       return JSON.stringify(answers);
     });
@@ -986,7 +986,7 @@ describe('dag resume', () => {
     expect(judgeCalls).toHaveLength(1);
 
     // The resume builds the second round again with the judge's send-back.
-    // Its reviewer hears what the judge skipped, and the judge reads round
+    // Its reviewer hears what the judge held back, and the judge reads round
     // two with round one in its history.
     writerCalls.length = 0;
     reviewCalls.length = 0;

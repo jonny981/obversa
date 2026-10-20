@@ -1246,9 +1246,9 @@ function seat(engineValue: Engine, model: string, tools: readonly string[] = [])
   return { engine: engineValue, identity: { adapter: 'mock', provider: 'mock', modelFamily: model, model, tools } };
 }
 
-/** A judge that acts on a finding marked REAL and skips the rest. */
+/** A judge that acts on a finding marked REAL and holds the rest back. */
 function actOnReal(prompt: string) {
-  const { questions } = JSON.parse(prompt) as { questions: Record<string, { instructions: string; criteria: Record<string, string> }> };
+  const { questions } = JSON.parse(prompt) as { questions: Record<string, { type: string; instructions: string }> };
   const answers: Record<string, unknown> = {
     holds: { noul: 0.9 },
     worth_doing: { noul: 0.9 },
@@ -1256,10 +1256,10 @@ function actOnReal(prompt: string) {
     stop_reason: { choice: 'continue' },
   };
   for (const [key, question] of Object.entries(questions)) {
-    if (!('act' in question.criteria)) continue;
+    if (!key.startsWith('finding-')) continue;
     answers[key] = question.instructions.includes('REAL')
-      ? { choice: 'act', reason: 'a reader would stumble' }
-      : { choice: 'skip', reason: 'taste' };
+      ? (question.type === 'choice' ? { choice: 'act', reason: 'a reader would stumble' } : { noul: 0.9, reason: 'a reader would stumble' })
+      : (question.type === 'choice' ? { choice: 'skip', reason: 'taste' } : { noul: 0.1, reason: 'taste' });
   }
   return answers;
 }

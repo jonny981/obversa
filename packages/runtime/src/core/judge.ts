@@ -110,8 +110,16 @@ export function stopQuestions(what = 'the draft'): JudgeQuestions {
  * does not count.
  * The judge is asked about the review of the
  * last build too, and only a stop that lets the work stand passes. `perFinding`
- * asks the judge to act on or skip each finding as well; it defaults to true
- * with the default questions and to false with a caller's own.
+ * asks the judge to call each finding as well: in round 1 whether to act on
+ * it or skip it, and from round 2 on whether it is impactful or minor. It
+ * defaults to true with the default questions and to false with a caller's
+ * own.
+ * A finding the judge does not act on never goes back to the builder; it is
+ * collected on `minorFindings` for a person to read before the work lands.
+ * A `product_decision` the judge asks after the last review the cap allows
+ * buys one more round for the person's answer, marked `productDecision` —
+ * each time one is asked and answered, so the answer always reaches the
+ * builder.
  */
 export function judge(seat: Judge['seat'], opts: { cap?: number; questions?: JudgeQuestions; perFinding?: boolean; interaction?: InteractionBinding } = {}): Judge {
   if (opts.cap !== undefined && (!Number.isSafeInteger(opts.cap) || opts.cap < 1)) {
@@ -124,10 +132,22 @@ export function judge(seat: Judge['seat'], opts: { cap?: number; questions?: Jud
   };
 }
 
-/** What `act` and `skip` mean in each per-finding question. */
-const FINDING_CRITERIA = {
+/** What `act` and `skip` mean in round 1's per-finding question. */
+const ACT_CRITERIA = {
   act: 'A reader of this kind of work would stumble on, misread or distrust what this finding names, so the builder should fix it.',
   skip: 'It is taste, an edge case, or polish past the bar the use case sets, so fixing it would not change what a reader gets.',
+} as const;
+
+/** What `act` and `skip` mean for a finding tagged block in round 1: the bar to skip it is higher. */
+const ACT_BLOCK_CRITERIA = {
+  act: 'The case this finding names is part of how the work is really used, so the builder should fix it.',
+  skip: 'The case it names is outside how the work is really used, or the same class of finding keeps returning after it was answered.',
+} as const;
+
+/** What yes and no mean in each per-finding question from round 2 on: an impactful finding against a minor one. */
+const FINDING_CRITERIA = {
+  true: 'Impactful: behaviour wrong under normal use, a requirement of the brief unmet, a test that cannot fail, or a risk of data loss, a security hole or a broken rule of the work, so the builder should fix it.',
+  false: 'Minor: wording of docs or comments, style, naming, an edge case outside real use, or a nice-to-have, so fixing it would not change what a reader gets.',
 } as const;
 
 /**
@@ -139,26 +159,44 @@ export function findingId(index: number): string {
   return `finding-${index + 1}`;
 }
 
-/** What `act` and `skip` mean for a finding tagged block: the bar to skip it is higher. */
+/** What yes and no mean for a finding tagged block from round 2 on: the bar to call it minor is higher. */
 const BLOCK_CRITERIA = {
-  act: 'The case this finding names is part of how the work is really used, so the builder should fix it.',
-  skip: 'The case it names is outside how the work is really used, or the same class of finding keeps returning after it was answered.',
+  true: 'Impactful: the case this finding names is part of how the work is really used, so the builder should fix it.',
+  false: 'Minor: the case it names is outside how the work is really used, or the same class of finding keeps returning after it was answered.',
 } as const;
 
-/** One `choice` question per finding, keyed by the finding's id. A block's question sets the higher bar. */
-export function findingQuestions(findings: readonly FeedbackFinding[]): JudgeQuestions {
+/**
+ * One question per finding, keyed by the finding's id. Round 1 keeps the
+ * act/skip call — whether the finding should send the work back for another
+ * round or be skipped — and from round 2 on the same call is asked as a
+ * yes/no question: is the finding impactful, or minor. A block's question
+ * sets the higher bar for holding it back, in either wording.
+ */
+export function findingQuestions(findings: readonly FeedbackFinding[], round?: number): JudgeQuestions {
   const questions: Record<string, JudgeQuestion> = {};
   for (const [index, finding] of findings.entries()) {
     const severity = normalizeFeedbackSeverity(finding.severity);
     const recommendation = finding.recommendation ? ` Recommendation: ${finding.recommendation}` : '';
-    const bar = severity === 'block'
-      ? 'It is tagged block, so the bar to skip it is higher. Skip it only when the case it names is outside how the work is really used, or the same class of finding keeps returning after it was answered; otherwise act.'
-      : 'For this use case, should the builder act on it in another round, or skip it?';
-    questions[findingId(index)] = {
-      type: 'choice',
-      instructions: `Read this one finding. ${bar} Give a one-line reason. Finding [${severity}]: ${finding.evidence}${recommendation}`,
-      criteria: severity === 'block' ? BLOCK_CRITERIA : FINDING_CRITERIA,
-    };
+    // Round 1 asks the act/skip call with its own bar; from round 2 on the
+    // same call is asked as yes/no, with the minor bar on a block.
+    const bar = round === 1
+      ? (severity === 'block'
+        ? 'It is tagged block, so the bar to skip it is higher. Skip it only when the case it names is outside how the work is really used, or the same class of finding keeps returning after it was answered; otherwise act.'
+        : 'For this use case, should the builder act on it in another round, or skip it?')
+      : (severity === 'block'
+        ? 'It is tagged block, so the bar to call it minor is higher. Call it minor only when the case it names is outside how the work is really used, or the same class of finding keeps returning after it was answered; otherwise it is impactful.'
+        : 'For this use case, is it impactful enough that the builder should act on it in another round?');
+    questions[findingId(index)] = round === 1
+      ? {
+        type: 'choice',
+        instructions: `Read this one finding. ${bar} Give a one-line reason. Finding [${severity}]: ${finding.evidence}${recommendation}`,
+        criteria: severity === 'block' ? ACT_BLOCK_CRITERIA : ACT_CRITERIA,
+      }
+      : {
+        type: 'noul',
+        instructions: `Read this one finding. ${bar} Give a one-line reason. Finding [${severity}]: ${finding.evidence}${recommendation}`,
+        criteria: severity === 'block' ? BLOCK_CRITERIA : FINDING_CRITERIA,
+      };
   }
   return questions;
 }
@@ -199,15 +237,17 @@ export interface JudgeState {
   /** That file's current content, when there is one. */
   readonly draft?: string;
   readonly latestFindings: readonly FeedbackFinding[];
-  /** Findings the judge skipped in earlier rounds, with its reasons. */
+  /** Findings the judge held back in earlier rounds, with its reasons. */
   readonly skipped?: readonly SkippedFinding[];
-  /** The judge's decision on each finding of the round it sent to a person, so the answer reaches the builder with only the findings worth acting on. */
+  /** The judge's decision on each finding of the round it sent to a person, so the answer reaches the builder with the findings those decisions send back. */
   readonly decided?: readonly FindingDecision[];
   readonly rounds: readonly JudgeRound[];
   readonly round: number;
   readonly cap?: number;
-  /** This round's review is the last one the cap allows: no build round follows it. */
+  /** This round's review is the last one the cap allows: no build round follows it unless a product answer buys one. */
   readonly lastRound?: true;
+  /** The saved product question is one the spent cap raised, not one the judge chose: its answer buys a round on whatever past-cap round it lands. */
+  readonly capPause?: true;
 }
 
 /** Lines added or removed between two drafts (a set difference, not a true diff, cheap and enough to show trend). */
@@ -563,10 +603,23 @@ export interface JudgeDecision {
    * own failure stands. `product_decision` asks a person, then sends the work
    * back to the builder with their answer as another round; the judge is
    * asked again only after that round is reviewed. After the last round a
-   * cap allows, no round follows the answer and the run fails. Absent when
-   * `again` is true.
+   * cap allows, each answered product decision buys one more round, marked
+   * `productDecision` on the send-back. Absent when `again` is true.
    */
   readonly stop?: 'ship' | 'fail' | 'product_decision';
+  /**
+   * Set on an `again` a spent cap still pays for: fewer findings were acted
+   * on than the round before, so the cap grants one more round. The caller
+   * records the grant on the send-back so the rounds rule lets it through.
+   */
+  readonly converging?: true;
+  /**
+   * Set on a `product_decision` the spent cap itself raised: the judge still
+   * acted on findings and their count was not falling, so a person is asked
+   * whether the run goes on. Their answer buys a round past the cap like a
+   * judge-chosen product decision's does.
+   */
+  readonly capPause?: true;
   /**
    * The answer that decided the route: the chosen reason (`stop_reason:
    * continue`), the probability answer it fell back to
@@ -576,6 +629,13 @@ export interface JudgeDecision {
   readonly rule: string;
   /** The decision on each finding, when the judge decides each finding. */
   readonly findings?: readonly FindingDecision[];
+  /**
+   * This round's findings that do not go back to the builder: the findings
+   * the judge skipped in round 1 or called minor from round 2 on. Each
+   * carries its id and the judge's reason. For a person to read before the
+   * work lands.
+   */
+  readonly minorFindings?: readonly FeedbackFinding[];
 }
 
 /**
@@ -603,50 +663,96 @@ export interface JudgeDecision {
  * With `findingIds`, the round answer routes as above only to settle
  * `product_decision`; the answer for each finding decides the rest (see
  * `decideEachFinding`). `questions` are the questions each finding was
- * asked; a choice with no reason of its own records the text of the chosen
- * option from its finding's question.
+ * asked; an answer with no reason of its own records the text of that
+ * answer from its finding's question. `judged` names the round's findings
+ * and its round: a finding the judge holds back stays with the judge, and
+ * it is collected on `minorFindings` too.
  */
-export function judgeDecision(answers: Readonly<Record<string, JudgeAnswer>>, findingIds?: readonly string[], questions?: JudgeQuestions): JudgeDecision {
+export function judgeDecision(
+  answers: Readonly<Record<string, JudgeAnswer>>,
+  findingIds?: readonly string[],
+  questions?: JudgeQuestions,
+  judged?: { readonly findings: readonly FeedbackFinding[]; readonly round: number },
+): JudgeDecision {
   const round = roundDecision(answers);
   if (!findingIds?.length) return round;
-  return decideEachFinding(answers, findingIds, round, questions);
+  return decideEachFinding(answers, findingIds, round, questions, judged);
 }
 
 /**
  * Route on the judge's answer for each finding. `product_decision` stands as
- * the round answer gives it. Otherwise any finding the judge acts on runs
- * another round, and a round with none ships as a pass, whatever the round
- * answer says: a chosen `not_converging` does not drop acted findings, and
- * it does not fail a round whose findings are all skipped.
+ * the round answer gives it. Otherwise any finding the judge calls
+ * impactful runs another round, and a round whose findings are all held
+ * back ships as a pass, whatever the round answer says: a chosen
+ * `not_converging` does not drop a finding the judge called impactful, and
+ * it does not fail a round whose findings are all held back.
+ *
+ * A finding the judge holds back is recorded `skip` in round 1 and `minor`
+ * from round 2 on; neither goes back to the builder. Every held-back
+ * finding of the round is collected on `minorFindings` for a person to
+ * read before the work lands, so a stop answer can let the work stand as a
+ * pass with the collected list attached. The judge's own answer routes the
+ * finding: the reviewer's severity tag only informs what it reads, never
+ * what a yes or a no does.
  *
  * `askJudge` checks every asked question is answered before it decides, so
  * a call through it never reaches the fallbacks here. They stand for a
  * caller deciding on answers it did not check — one read back from a
  * record, say: a finding with no usable answer follows the round answer
- * (it goes back when that answer runs another round, and is skipped when
+ * (it goes back when that answer runs another round, and is held back when
  * it ships), and answers naming no finding at all let the round answer
  * route alone, with the same reason and rule as before.
  */
-function decideEachFinding(answers: Readonly<Record<string, JudgeAnswer>>, findingIds: readonly string[], round: JudgeDecision, questions?: JudgeQuestions): JudgeDecision {
+function decideEachFinding(
+  answers: Readonly<Record<string, JudgeAnswer>>,
+  findingIds: readonly string[],
+  round: JudgeDecision,
+  questions?: JudgeQuestions,
+  judged?: { readonly findings: readonly FeedbackFinding[]; readonly round: number },
+): JudgeDecision {
+  // The call a finding's answer makes: a round-1 `choice` names `act` or
+  // `skip` outright; from round 2 on a `noul` at or above the middle calls
+  // the finding impactful. Any other shape is no answer for the finding.
+  const call = (id: string): boolean | undefined => {
+    const answer = answers[id];
+    if (answer?.choice === 'act') return true;
+    if (answer?.choice === 'skip') return false;
+    const value = answer?.noul ?? answer?.probability;
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value >= 0.5 : undefined;
+  };
+  // A held-back finding is `skip` in round 1 and `minor` from round 2 on;
+  // neither goes back to the builder.
+  const heldBack = judged !== undefined && judged.round >= 2 ? 'minor' as const : 'skip' as const;
   const findings = findingIds.map((id): FindingDecision => {
     const answer = answers[id];
-    const choice = answer?.choice;
-    const reason = typeof answer?.reason === 'string' && answer.reason.trim() ? answer.reason.trim() : undefined;
-    if (choice === 'act' || choice === 'skip') {
-      const question = questions?.[id];
-      const criteria = question?.type === 'choice' ? question.criteria : FINDING_CRITERIA;
-      return { id, decision: choice, reason: reason ?? criteria[choice] ?? FINDING_CRITERIA[choice] };
+    const impactful = call(id);
+    if (impactful === undefined) {
+      return { id, decision: round.again ? 'act' : heldBack, reason: `no answer for this finding; ${round.reason}` };
     }
-    return { id, decision: round.again ? 'act' : 'skip', reason: `no answer for this finding; ${round.reason}` };
+    // A reason the judge gave stands; else the text of the answer it chose
+    // is recorded: the named criterion of a `choice`, the true or false
+    // text of a `noul`.
+    const reason = typeof answer?.reason === 'string' && answer.reason.trim() ? answer.reason.trim() : undefined;
+    const question = questions?.[id];
+    const chosen = question?.type === 'choice' && typeof answer?.choice === 'string' ? question.criteria[answer.choice] : undefined;
+    const criteria = question?.type === 'noul' ? question.criteria : FINDING_CRITERIA;
+    return { id, decision: impactful ? 'act' : heldBack, reason: reason ?? chosen ?? (impactful ? criteria.true : criteria.false) };
   });
-  const answered = findings.some(({ id }) => answers[id]?.choice === 'act' || answers[id]?.choice === 'skip');
+  const answered = findingIds.some((id) => call(id) !== undefined);
   // A judge that answered no finding decided nothing about them: every finding stands, as with whole-round judging.
   if (!answered) return round;
-  if (round.stop === 'product_decision') return { ...round, findings };
+  const collected = findings.flatMap((item, index) =>
+    item.decision !== 'act' && judged?.findings[index] !== undefined
+      ? [{ ...judged.findings[index]!, id: item.id, judgeReason: item.reason, round: judged.round }]
+      : []);
+  const minorFindings = collected.length ? { minorFindings: collected } : {};
+  if (round.stop === 'product_decision') return { ...round, findings, ...minorFindings };
   const acted = findings.filter((finding) => finding.decision === 'act').length;
-  const rule = `findings: ${acted} act, ${findings.length - acted} skip`;
-  if (acted) return { again: true, reason: `the judge acts on ${acted} of ${findings.length} findings`, rule, findings };
-  return { again: false, stop: 'ship', reason: 'the judge skipped every finding', rule, findings };
+  const minors = findings.filter((finding) => finding.decision === 'minor').length;
+  const rule = `findings: ${acted} act, ${findings.length - acted - minors} skip${minors ? `, ${minors} minor` : ''}`;
+  if (acted) return { again: true, reason: `the judge acts on ${acted} of ${findings.length} findings`, rule, findings, ...minorFindings };
+  const stood = judged?.round === 1 ? 'the judge skipped every finding' : 'the judge found only minor findings';
+  return { again: false, stop: 'ship', reason: stood, rule, findings, ...minorFindings };
 }
 
 function roundDecision(answers: Readonly<Record<string, JudgeAnswer>>): JudgeDecision {
@@ -677,13 +783,52 @@ function roundDecision(answers: Readonly<Record<string, JudgeAnswer>>): JudgeDec
 }
 
 /**
- * The line the judge reads about the round limit: none with no cap, and the
- * last round when no build round follows this review. Absent otherwise.
+ * The line the judge reads about the round limit: none with no cap, the
+ * last round a cap allows when only a granted round follows this review,
+ * and a granted round — each answered product decision buys one more round
+ * for a person's answer on either. Absent otherwise.
  */
 function roundLimit(state: JudgeState): string | undefined {
   if (state.cap === undefined) return 'No round limit: the rounds end when you stop them or the review passes.';
-  if (state.lastRound) return `This is the last round the cap of ${state.cap} allows (${state.cap} ${state.cap === 1 ? 'refinement' : 'refinements'} after the first build): no build round follows, so your answer decides how this ends.`;
-  return undefined;
+  if (!state.lastRound) return undefined;
+  if (state.round > state.cap + 1) {
+    return `This is a round granted past the cap of ${state.cap}: a product decision still buys one more round for the person's answer; every other answer decides how this ends.`;
+  }
+  return `This is the last round the cap of ${state.cap} allows (${state.cap} ${state.cap === 1 ? 'refinement' : 'refinements'} after the first build): a product decision buys exactly one more round for the person's answer; every other answer decides how this ends.`;
+}
+
+/**
+ * What the spent cap does with the judge's decision on the review of the
+ * last build it allowed. A stop that lets the work stand passes, and a
+ * product decision still asks a person. A judge that still acts on findings
+ * goes back for one more round while their count is falling from the round
+ * before (`converging`, granted); when it is not falling a person is asked
+ * instead, with the round's findings and the judge's calls on them attached
+ * (`capPause`, a product decision the cap itself raised). Anything else is
+ * a stop that fails, with the cap named: a whole-round `continue` or
+ * `not_converging` with nothing acted on ends there, so a run never ends as
+ * a silent fail while findings the judge called impactful are still open.
+ */
+function atTheCap(decided: JudgeDecision, state: JudgeState): JudgeDecision {
+  if (decided.stop === 'ship' || decided.stop === 'product_decision') return decided;
+  const acted = decided.findings?.filter((finding) => finding.decision === 'act').length ?? 0;
+  if (decided.again && acted > 0) {
+    // The round before is the previous build's judged round: a later entry
+    // for this same round is another review of this build, not the round
+    // its count should fall from.
+    const before = state.rounds.findLast((entry) => entry.round < state.round)?.judged?.findings?.filter((finding) => finding.decision === 'act').length;
+    if (before !== undefined && acted < before) {
+      return { ...decided, converging: true, reason: `${decided.reason}; the cap of ${state.cap} is spent, and the findings acted on fell from ${before} to ${acted}: one more round is granted` };
+    }
+    return {
+      ...decided,
+      again: false,
+      stop: 'product_decision',
+      capPause: true,
+      reason: `${decided.reason}; the cap of ${state.cap} is spent and the findings acted on are not falling${before === undefined ? '' : ` (${before} the round before, ${acted} now)`}: a person decides`,
+    };
+  }
+  return { ...decided, again: false, stop: 'fail', reason: `${decided.reason}; this was the last round the cap of ${state.cap} allows` };
 }
 
 /**
@@ -708,10 +853,12 @@ function roundLimit(state: JudgeState): string | undefined {
  * error for a bad reply — never empty answers routed as `no clear answer`,
  * never another build bought by a judge that did not decide.
  *
- * After the last review the cap allows (`state.lastRound`), only a stop
- * that lets the work stand passes, and it records the open findings; a
- * `product_decision` still asks a person; anything else is a stop that
- * fails, with the cap named in the reason.
+ * After the last review the cap allows (`state.lastRound`), `atTheCap`
+ * rewrites the decision: only a stop that lets the work stand passes, and
+ * it records the open findings; a `product_decision` still asks a person; a
+ * still-acting judge is granted one more round while the count it acts on
+ * falls, and is asked through a person when it does not; anything else is a
+ * stop that fails, with the cap named in the reason.
  */
 export async function askJudge(
   cfg: Judge,
@@ -721,7 +868,7 @@ export async function askJudge(
   target: string,
 ): Promise<{ answers: Readonly<Record<string, JudgeAnswer>>; decision: JudgeDecision } | { paused: Outcome }> {
   const perFinding = cfg.perFinding && state.latestFindings.length > 0;
-  const eachFinding = perFinding ? findingQuestions(state.latestFindings) : undefined;
+  const eachFinding = perFinding ? findingQuestions(state.latestFindings, state.round) : undefined;
   const packet = await judgePacket(state, ctx.workspace.dir, ctx.judgeContextLimit ?? DEFAULT_JUDGE_CONTEXT_LIMIT);
   const questions: JudgeQuestions = eachFinding ? { ...cfg.questions, ...eachFinding } : cfg.questions;
   let effective: AgentResult['effective'] | undefined;
@@ -815,10 +962,9 @@ export async function askJudge(
       message: `the judge's reply held no usable answer for ${missing.length} of the ${Object.keys(questions).length} questions it was asked: ${missing.join(', ')}`,
     }), 'missing answers');
   }
-  const decided = judgeDecision(answers, eachFinding ? Object.keys(eachFinding) : undefined, eachFinding);
-  const decision: JudgeDecision = state.lastRound && decided.stop !== 'ship' && decided.stop !== 'product_decision'
-    ? { ...decided, again: false, stop: 'fail', reason: `${decided.reason}; this was the last round the cap of ${state.cap} allows` }
-    : decided;
+  const decided = judgeDecision(answers, eachFinding ? Object.keys(eachFinding) : undefined, eachFinding,
+    { findings: state.latestFindings, round: state.round });
+  const decision: JudgeDecision = state.lastRound ? atTheCap(decided, state) : decided;
   const status = decision.stop === 'ship' ? 'pass' : decision.stop === 'fail' ? 'fail' : undefined;
   ctx.emit({
     kind: 'refine:judge', ts: Date.now(), path: [...path], target, round: state.round, answers, reason: decision.reason,
@@ -826,6 +972,7 @@ export async function askJudge(
     packet: { size: JSON.stringify(packet).length, ...(packet.cut ? { cut: packet.cut } : {}) },
     ...(effective === undefined ? {} : { effective }),
     ...(decision.findings ? { findings: decision.findings } : {}),
+    ...(decision.minorFindings?.length ? { minorFindings: decision.minorFindings } : {}),
     ...(state.lastRound && decision.stop === 'ship' ? { openFindings: state.latestFindings } : {}),
   });
   return { answers, decision };
@@ -833,11 +980,13 @@ export async function askJudge(
 
 /**
  * Ask the judge, or resume its pending product question. When the judge
- * chooses `product_decision`, a person is asked, and their answer comes back
- * as `answer` for the caller to send to the builder; the judge is not asked
- * again until that round has been built and reviewed. After the last review
- * the cap allows, the person is still asked, and the caller records their
- * answer and fails, since no build round follows (`lastRoundAnswered`).
+ * chooses `product_decision`, or the spent cap raises one (`capPause`), a
+ * person is asked, and their answer comes back as `answer` for the caller
+ * to send to the builder; the judge is not asked again until that round has
+ * been built and reviewed. After the last review the cap allows, the person
+ * is still asked, and the caller buys one more round for their answer, each
+ * time one is asked and answered (`productDecisionFeedback` marks it
+ * `productDecision`).
  */
 export async function consultJudge(
   cfg: Judge,
@@ -858,12 +1007,19 @@ export async function consultJudge(
     }
     const { decision } = judged;
     if (decision.stop !== 'product_decision') return { state, decision };
-    // Kept with the question, so a resumed run still knows which findings the judge would act on.
-    if (decision.findings) asked = { ...state, decided: decision.findings };
+    // Kept with the question, so a resumed run still knows which findings
+    // the judge would act on, and whether the spent cap raised the question.
+    asked = {
+      ...state,
+      ...(decision.findings ? { decided: decision.findings } : {}),
+      ...(decision.capPause === true ? { capPause: true as const } : {}),
+    };
   }
   options.save(asked);
   const answer = await requestInteraction(cfg.interaction ?? DEFAULT_INTERACTION,
-    'What product decision should guide this review?', jsonSnapshot({
+    asked.capPause === true
+      ? 'The cap of rounds is spent and the findings the judge would act on are not falling: what should the builder do about them?'
+      : 'What product decision should guide this review?', jsonSnapshot({
       requester: { path, identity: options.identity, engine: cfg.seat.identity, round: state.round },
       material: asked,
     }), ctx);
@@ -872,33 +1028,42 @@ export async function consultJudge(
 }
 
 /**
- * Why the run stops when a person answers a product decision after the last
- * review the cap allows: their answer is recorded here, and no build round
- * follows to apply it.
- */
-export function lastRoundAnswered(state: JudgeState, answer: InteractionResponse): string {
-  return `the judge requested a product decision after the last round the cap of ${state.cap} allows; a person answered "${answer.prompt}", and no build round follows to apply it`;
-}
-
-/**
  * The next round's feedback after a person answers a product decision: it
  * says it is their decision, quotes their prompt, lists the review findings
  * it answers, and carries their whole response as structured feedback.
+ * `granted` marks the round the cap could not pay for: the person was asked
+ * after the last review the cap allows, so this one round was granted for
+ * their answer, and the send-back says so.
  */
 export function productDecisionFeedback(
   answer: InteractionResponse,
   findings: readonly FeedbackFinding[],
-  over: { readonly target?: string; readonly source?: string } = {},
+  over: { readonly target?: string; readonly source?: string; readonly granted?: boolean } = {},
 ): Outcome {
-  const reason = `A person made a product decision about the findings below. Apply it in this round. Their decision: "${answer.prompt}"`;
-  return revisionRequest({ ...over, reason, findings: [...findings] }, { data: answer });
+  const { granted, ...route } = over;
+  const reason = `A person made a product decision about the findings below. Apply it in this round.${granted ? ' It was granted for a product answer, past the cap.' : ''} Their decision: "${answer.prompt}"`;
+  const outcome = revisionRequest({ ...route, reason, findings: [...findings] }, { data: answer });
+  return granted === true ? { ...outcome, productDecision: true } : outcome;
 }
 
 /**
- * What the judge's decisions on a round's findings send on: the findings it
- * acts on, each carrying its reason, and the skipped list grown by this
- * round's skips. A round the judge did not decide each finding of sends
- * every finding and skips none.
+ * The list a person reads before the work lands: every finding the judge
+ * held back, each with the judge's reason for holding it and the round it
+ * was held back in — a skip in round 1, a minor call from round 2 on. The
+ * skipped list keeps them across rounds, so it is also where they are
+ * collected from.
+ */
+export function minorFindings(skipped: readonly SkippedFinding[]): FeedbackFinding[] {
+  return skipped
+    .map(({ finding, reason, round }) => ({ ...finding, judgeReason: reason, round }));
+}
+
+/**
+ * What the judge's decisions on a round's findings send on: the findings
+ * the judge called impactful, each carrying its reason, and the skipped
+ * list grown by this round's held-back findings — a `skip` from round 1, a
+ * `minor` from round 2 on. A round the judge did not decide each finding
+ * of sends every finding and holds none back.
  */
 export function judgedFindings(
   findings: readonly FeedbackFinding[],
@@ -911,8 +1076,14 @@ export function judgedFindings(
   const next = [...skipped];
   for (const [index, finding] of findings.entries()) {
     const item = decision.findings[index]!;
-    if (item.decision === 'act') acted.push({ ...finding, judgeReason: item.reason, id: item.id });
-    else if (!next.some((entry) => entry.finding.evidence === finding.evidence)) next.push({ round, finding, reason: item.reason });
+    if (item.decision === 'act') {
+      acted.push({ ...finding, judgeReason: item.reason, id: item.id });
+      continue;
+    }
+    // The same finding raised again keeps one entry, with the latest judgment.
+    const earlier = next.findIndex((entry) => entry.finding.evidence === finding.evidence);
+    if (earlier === -1) next.push({ round, finding, reason: item.reason });
+    else next[earlier] = { round, finding, reason: item.reason };
   }
   return { acted, skipped: next };
 }
