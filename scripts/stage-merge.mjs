@@ -178,6 +178,7 @@ export const stageBranches = {
   F236: 'feat/rdc-git-history',
   F237: 'fix/rdc-git-date-format',
   F239: 'revert/engine-leftovers',
+  F240: 'feat/judge-impactful',
   F235: 'fix/grok-login-expiry',
   F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
