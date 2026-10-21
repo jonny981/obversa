@@ -263,10 +263,8 @@ describe('totals', () => {
     const events: LoopEvent[] = [];
     const judgeSeat: TeamSeat = {
       engine: new MockEngine(() => JSON.stringify({
-        holds: { noul: 0.9 },
-        worth_doing: { noul: 0.9 },
-        worth_another_round: { noul: 0.9 },
-        stop_reason: { choice: 'holds' },
+        product_decision: { noul: 0.05 },
+        stop_reason: { choice: 'holds', confidence: 0.95 },
       })),
       identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge', model: 'judge', tools: [] },
     };
@@ -1246,20 +1244,18 @@ function seat(engineValue: Engine, model: string, tools: readonly string[] = [])
   return { engine: engineValue, identity: { adapter: 'mock', provider: 'mock', modelFamily: model, model, tools } };
 }
 
-/** A judge that acts on a finding marked REAL and holds the rest back. */
+/** A judge that scores a finding marked REAL impactful and the rest cosmetic. */
 function actOnReal(prompt: string) {
   const { questions } = JSON.parse(prompt) as { questions: Record<string, { type: string; instructions: string }> };
   const answers: Record<string, unknown> = {
-    holds: { noul: 0.9 },
-    worth_doing: { noul: 0.9 },
-    worth_another_round: { noul: 0.9 },
-    stop_reason: { choice: 'continue' },
+    product_decision: { noul: 0.05 },
+    stop_reason: { choice: 'continue', confidence: 0.95 },
   };
   for (const [key, question] of Object.entries(questions)) {
     if (!key.startsWith('finding-')) continue;
     answers[key] = question.instructions.includes('REAL')
-      ? (question.type === 'choice' ? { choice: 'act', reason: 'a reader would stumble' } : { noul: 0.9, reason: 'a reader would stumble' })
-      : (question.type === 'choice' ? { choice: 'skip', reason: 'taste' } : { noul: 0.1, reason: 'taste' });
+      ? { score: 2, confidence: 0.95, reason: 'a reader would stumble' }
+      : { score: 0, confidence: 0.95, reason: 'taste' };
   }
   return answers;
 }

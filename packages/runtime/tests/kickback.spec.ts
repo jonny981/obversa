@@ -26,15 +26,13 @@ type KickbackEvent = Extract<LoopEvent, { kind: 'dag:kickback' }>;
 const kbEvents = (es: LoopEvent[]): KickbackEvent[] =>
   es.filter((e): e is KickbackEvent => e.kind === 'dag:kickback');
 
-/** A complete reply to the round questions: every probability a clear yes. */
+/** A complete reply to the round questions: no product decision, a confident route. */
 const roundAnswers = (choice: string): Record<string, unknown> => ({
-  holds: { noul: 0.9 },
-  worth_doing: { noul: 0.9 },
-  worth_another_round: { noul: 0.9 },
-  stop_reason: { choice },
+  product_decision: { noul: 0.05 },
+  stop_reason: { choice, confidence: 0.95 },
 });
 
-/** A judge that acts on each finding marked REAL and holds the rest back, each with a reason. */
+/** A judge that scores each finding marked REAL impactful and the rest cosmetic, each with a reason. */
 const decideBlocks = (request: { prompt: string }): string => {
   const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { type: string; instructions: string }> };
   return JSON.stringify({
@@ -42,8 +40,8 @@ const decideBlocks = (request: { prompt: string }): string => {
     ...Object.fromEntries(Object.entries(questions)
       .filter(([id]) => id.startsWith('finding-'))
       .map(([id, question]) => [id, question.instructions.includes('REAL')
-        ? (question.type === 'choice' ? { choice: 'act', reason: 'it breaks the build' } : { noul: 0.9, reason: 'it breaks the build' })
-        : (question.type === 'choice' ? { choice: 'skip', reason: 'outside how the work is really used' } : { noul: 0.1, reason: 'outside how the work is really used' })])),
+        ? { score: 2, confidence: 0.95, reason: 'it breaks the build' }
+        : { score: 0, confidence: 0.95, reason: 'outside how the work is really used' }])),
   });
 };
 
@@ -648,11 +646,12 @@ describe("a judge in a dag node's refine review", () => {
 
     expect(outcome.status).toBe('pass');
     expect(round).toBe(2);
-    expect(judgeCalls).toBe(1);
+    // One consultation, two calls: the finding scores, then the round questions.
+    expect(judgeCalls).toBe(2);
     expect(seen[0]!.revision!.findings).toEqual([{ id: 'finding-1', evidence: 'REAL: the build fails', severity: 'block', judgeReason: 'it breaks the build' }]);
     expect(kbEvents(events).map((e) => e.accepted)).toEqual([true]);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
-    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 0 skip']);
+    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 0 held']);
   });
 
   it('the cap stops it even when the judge always says continue: the review after the last kickback is judged and fails', async () => {
@@ -684,8 +683,8 @@ describe("a judge in a dag node's refine review", () => {
         ...Object.fromEntries(Object.entries(questions)
           .filter(([id]) => id.startsWith('finding-'))
           .map(([id, question]) => [id, question.instructions.includes('REAL')
-            ? (question.type === 'choice' ? { choice: 'act', reason: 'it breaks the build' } : { noul: 0.9, reason: 'it breaks the build' })
-            : (question.type === 'choice' ? { choice: 'skip' } : { noul: 0.1 })])),
+            ? { score: 2, confidence: 0.95, reason: 'it breaks the build' }
+            : { score: 0, confidence: 0.95 }])),
       });
     };
     const seen: Outcome[] = [];
@@ -717,16 +716,16 @@ describe("a judge in a dag node's refine review", () => {
     expect(round).toBe(2);
     expect(seen).toHaveLength(1);
     // Round 1 sends back only the finding the judge acts on: the
-    // taste note it skips stays held back, a `skip` in the record.
+    // taste note it holds stays held back, a `hold` in the record.
     expect(seen[0]!.revision!.findings).toEqual([
       { evidence: 'REAL: the build fails', severity: 'should-fix', judgeReason: 'it breaks the build', id: 'finding-1' },
     ]);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
-    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 0 skip, 1 minor']);
+    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 held', 'findings: 0 act, 1 held']);
     expect(judgeEvents[1]!.findings).toEqual([
-      { id: 'finding-1', decision: 'minor', reason: expect.any(String) },
+      { id: 'finding-1', decision: 'hold', level: 'cosmetic', confidence: 0.95, reason: expect.any(String) },
     ]);
-    expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge found only minor findings' } });
+    expect(outcome.data).toMatchObject({ review: { status: 'pass', summary: 'the judge held every finding back' } });
     // The pass the target earns after the send-backs carries the collected
     // list too: the taste note the judge called minor in round 2.
     expect(outcome.data).toMatchObject({
@@ -785,8 +784,8 @@ describe("a judge in a dag node's refine review", () => {
         ...Object.fromEntries(Object.entries(questions)
           .filter(([id]) => id.startsWith('finding-'))
           .map(([id, question]) => [id, question.instructions.includes('REAL')
-            ? (question.type === 'choice' ? { choice: 'act' } : { noul: 0.9 })
-            : (question.type === 'choice' ? { choice: 'skip', reason: 'a matter of taste' } : { noul: 0.1, reason: 'a matter of taste' })])),
+            ? { score: 2, confidence: 0.95 }
+            : { score: 0, confidence: 0.95, reason: 'a matter of taste' }])),
       });
     };
     const reviewerPrompts: string[] = [];
@@ -831,7 +830,7 @@ describe("a judge in a dag node's refine review", () => {
     // Round 1's send-back held the taste note back; the next review hears it.
     expect(seenSkipped).toEqual([
       undefined,
-      [{ round: 1, finding: { reviewer: 'checker', evidence: 'taste: rename a variable', severity: 'nice-to-have' }, reason: 'a matter of taste' }],
+      [{ round: 1, finding: { reviewer: 'checker', evidence: 'taste: rename a variable', severity: 'nice-to-have' }, reason: 'a matter of taste', level: 'cosmetic', confidence: 0.95 }],
     ]);
     expect(reviewerPrompts).toHaveLength(2);
     expect(reviewerPrompts[0]).not.toContain('taste: rename a variable');
@@ -908,7 +907,7 @@ describe("a judge in a dag node's refine review, with no cap or at its cap", () 
     }), { ...mockOpts, onEvent: (event) => events.push(event) });
     expect(outcome.status).toBe('pass');
     expect(outcome.data).toMatchObject({
-      review: { status: 'pass', summary: 'the judge found only minor findings', minorFindings: [
+      review: { status: 'pass', summary: 'the judge held every finding back', minorFindings: [
         { evidence: 'rare: a field limited to a list of values', round: 1 },
         { evidence: 'rare: a schema nested in allOf', round: 2 },
       ] },
@@ -918,15 +917,15 @@ describe("a judge in a dag node's refine review, with no cap or at its cap", () 
       ] },
     });
     expect(round).toBe(2);
-    expect(judgeCalls).toBe(2);
+    expect(judgeCalls).toBe(4);
     // The next round's review is told which block was held back, and why.
     expect(seenSkipped).toEqual([
       undefined,
-      [{ round: 1, finding: { evidence: 'rare: a field limited to a list of values', severity: 'block' }, reason: 'outside how the work is really used' }],
+      [{ round: 1, finding: { evidence: 'rare: a field limited to a list of values', severity: 'block' }, reason: 'outside how the work is really used', level: 'cosmetic', confidence: 0.95 }],
     ]);
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
-    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 skip', 'findings: 0 act, 0 skip, 1 minor']);
-    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', findings: [{ id: 'finding-1', decision: 'minor', reason: 'outside how the work is really used' }] });
+    expect(judgeEvents.map((e) => e.rule)).toEqual(['findings: 1 act, 1 held', 'findings: 0 act, 1 held']);
+    expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', findings: [{ id: 'finding-1', decision: 'hold', reason: 'outside how the work is really used' }] });
   });
 
   it('with a plain number, sends a block finding back without a judge', async () => {
@@ -977,7 +976,7 @@ describe("a judge in a dag node's refine review, with no cap or at its cap", () 
     const last = JSON.parse(prompts[1]!).state.when as Record<string, unknown>;
     expect(first.lastRound).toBeUndefined();
     expect(last).toMatchObject({ cap: 1, lastRound: true });
-    expect(last.limit).toBe('This is the last round the cap of 1 allows (1 refinement after the first build): a product decision buys exactly one more round for the person\'s answer; every other answer decides how this ends.');
+    expect(last.limit).toBe('This is the last round the cap of 1 allows (1 refinement after the first build): on a product decision, a change the person asks for buys exactly one more round; every other answer decides how this ends.');
     const judgeEvents = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
     expect(judgeEvents[1]).toMatchObject({ route: 'stop', status: 'pass', openFindings: shouldFix });
   });
@@ -1036,9 +1035,9 @@ describe("a judge in a dag node's refine review, with no cap or at its cap", () 
     }), { ...mockOpts, onEvent: (event) => events.push(event) });
     expect(outcome.status).toBe('pass');
     expect(round).toBe(2);
-    expect(judgeCalls).toBe(2);
+    expect(judgeCalls).toBe(4);
     expect(outcome.data).toMatchObject({
-      review: { status: 'pass', summary: 'the judge found only minor findings', openFindings: [block], minorFindings: [block] },
+      review: { status: 'pass', summary: 'the judge held every finding back', openFindings: [block], minorFindings: [block] },
       implement: { status: 'pass', minorFindings: [block] },
     });
     expect(kbEvents(events).map((e) => e.accepted)).toEqual([true, false]);

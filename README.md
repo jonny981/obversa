@@ -106,19 +106,31 @@ purpose of the work and the revisions so far. `judge()` from
 ```
 
 Here Jev makes the judgement, and the returns to the builder end when Jev
-stops them or the review passes. Jev decides a blocking finding too. To
+stops them or the review passes. Jev answers one question per finding, a
+`score` from cosmetic to blocking, and two about the round:
+`product_decision`, a `noul` asking whether a person must settle a
+product decision first, and `stop_reason`, a `choice` of how the run
+should end, `none_applies` included. Jev decides a blocking finding too.
+Each answer is gated on the
+confidence it reports: a finding goes back only at or over the send-back
+bar for its level, a stop that would end the run needs the stop bar, and
+a `none_applies` or an answer under the hand-off bar goes to a person. To
 bound the returns as well, pass
 `judge(judgeSeat, { cap: 4 })`: it allows four returns to the writer, and
 Jev reads the review of the last one too. A `product_decision` Jev asks
-for at the cap buys exactly one more round for the person's answer.
+for at the cap asks a person, and a change they ask for buys exactly one
+more round.
 Findings Jev still calls impactful change the ending: a count falling
 from the round before grants one more round, and a count that is not
-falling pauses the run to ask a person, whose answer buys the round the
-same way. A run never ends as a silent fail while findings Jev called
-impactful are still open. A finding Jev holds back, skipped in round 1 or
-called minor after, does not cost a round, whatever the reviewer tagged
-it: Jev collects it on `minorFindings`, with its reviewer and the evidence
-it wrote, for a person to read before the work lands.
+falling pauses the run to ask a person. The person can name `"act"` or
+`"hold"` for each finding. A finding they hold joins `minorFindings`. A
+finding Jev acted on that they do not name goes back with their answer,
+unless they approve the work. When nothing goes back, the work stands as
+a pass with no extra build. A run never ends as a silent fail while
+findings Jev called impactful are still open. A finding Jev holds back, scored cosmetic or
+minor or under its confidence bar, does not cost a round, whatever the
+reviewer tagged it: Jev collects it on `minorFindings`, with its reviewer,
+its level and its confidence, for a person to read before the work lands.
 [Know when to stop](https://obversa.ai/docs/patterns/judge-stops-the-loop)
 shows the questions and a complete writing example.
 
@@ -236,10 +248,10 @@ The feature team takes a ticket through seven steps:
 4. **Review battery.** Three reviewers from three model families review
    the change at the same time.
 5. **Synthesis.** Their reviews become one list.
-6. **Judge.** In round 1 Jev asks of each finding whether to act on it or
-   skip it; an acted finding goes back. From round 2 Jev calls each
-   finding impactful or minor, and the builder gets only the impactful
-   ones.
+6. **Judge.** Jev scores each finding cosmetic, minor, impactful or
+   blocking, each with a confidence it reports. An impactful or blocking
+   finding at or over its confidence bar goes back to the builder; every
+   other finding is held back for a person to read.
 7. **Approval.** Attended, a person approves the exact bytes of every
    file the change adds, changes or deletes. With `--unattended`, the
    change lands without asking.
@@ -253,10 +265,9 @@ The feature team takes a ticket through seven steps:
           writes: files,
           // The node's own refinement, each round: the ticket's tests first,
           // a red one goes straight back with its output; then the goal
-          // check; then the three reviewers as one panel; then Jev calls
-          // each kept finding: act or skip in round 1, impactful or minor
-          // after, a block included, with no cap; a held-back one is
-          // collected for a person to read.
+          // check; then the three reviewers as one panel; then Jev scores
+          // each kept finding cosmetic to blocking, a block included, with
+          // no cap; a held-back one is collected for a person to read.
           refine: review({
             checks: [['node', '--test', ...tests]],
             goal: goalCheck(goalSeat, { target: 'build', text: ticket.brief }),

@@ -1104,6 +1104,45 @@ export function dag(config: DagConfig): Job {
           memo.set(from, Promise.resolve(stood));
           rejected.add(from);
         };
+        // The work stands as a pass carrying the collected list, `from`'s
+        // own failure replaced — and everything downstream of it (blocked
+        // by that failure in the wave that already ran) gets to run fresh
+        // against it.
+        const shipWith = async (why: string) => {
+          const failed = results.get(from)!;
+          const minors = minorFindings(judgeSkipped.get(to) ?? []);
+          // The target's standing pass carries the collected list too: it
+          // ran before the judge called these findings minor, so its
+          // recorded outcome is updated in place, keeping the entries its
+          // own reviews already collected.
+          const standing = results.get(to);
+          if (minors.length && standing?.status === 'pass') {
+            const merged = mergeMinorFindings(standing.minorFindings, minors);
+            if (merged.length) results.set(to, { ...standing, minorFindings: merged });
+          }
+          const shipped = record(from, {
+            status: 'pass',
+            confidence: failed.confidence,
+            summary: why,
+            data: failed.data,
+            ...(lastRound ? { openFindings: requestFindings } : {}),
+            ...(minors.length ? { minorFindings: minors } : {}),
+          }, 'done');
+          ownOutcome.set(shipped, ownOutcome.get(failed) ?? failed);
+          // `memo` holds the settled promise every dependant already
+          // awaits or will await; without this, `from`'s stale failing
+          // promise still answers for it and nothing downstream unblocks.
+          memo.set(from, Promise.resolve(shipped));
+          const unblocked = dirtyFrom(from);
+          unblocked.delete(from);
+          for (const d of unblocked) {
+            memo.delete(d);
+            results.delete(d);
+            rejected.delete(d);
+          }
+          stopped = false;
+          await Promise.all(names.map(run));
+        };
         granted = 'answer' in result && lastRound && limit !== undefined;
         if ('answer' in result) {
           // A person's answer goes back to the target as this round's
@@ -1111,8 +1150,18 @@ export function dag(config: DagConfig): Job {
           // The judge decided each finding before asking: the answer goes with the findings those decisions send back.
           const answered = judgedFindings(requestFindings, { findings: result.state.decided }, result.state.skipped ?? [], count);
           judgeSkipped.set(to, answered.skipped);
-          productDecision = productDecisionFeedback(result.answer, answered.acted, { target: to, source: request.source ?? from, granted });
-          effectiveReason = `${reason} (a person answered the judge's product decision)`;
+          // The person's call can let the work stand — an approval, "hold
+          // all", or an answer that leaves only pending findings unnamed:
+          // with nothing acted on and no changes requested, `from`'s review outcome
+          // stops standing in the way and the held findings land on
+          // `minorFindings`.
+          if (answered.acted.length === 0 && result.answer.decision !== 'changes-requested') {
+            emitKickback(from, to, `${reason} (a person's answer let the work stand)`, false, count, limit, "a person's answer let the work stand");
+            await shipWith(`a person's answer let the work stand: "${result.answer.prompt}"`);
+            continue;
+          }
+          productDecision = productDecisionFeedback(result.answer, answered.acted, { target: to, source: request.source ?? from, granted, ...(result.state.handoff === true ? { handoff: true } : {}) });
+          effectiveReason = `${reason} (a person answered the judge's ${result.state.handoff === true ? 'hand-off' : 'product decision'})`;
         }
         const decision = 'decision' in result ? result.decision : undefined;
         converging = decision?.converging === true;
@@ -1123,43 +1172,8 @@ export function dag(config: DagConfig): Job {
         if (decision?.again === false) {
           emitKickback(from, to, `${reason} (${decision.reason})`, false, count, limit, decision.reason);
           if (decision.stop === 'ship') {
-            // Holds or over-polishing: the work stands. `from`'s own
-            // failure is replaced with a pass carrying the judge's reason,
-            // and everything downstream of it (blocked by that failure in
-            // the wave that already ran) gets to run fresh against it.
-            const failed = results.get(from)!;
-            const minors = minorFindings(judged?.skipped ?? []);
-            // The target's standing pass carries the collected list too:
-            // it ran before the judge called these findings minor, so its
-            // recorded outcome is updated in place, keeping the entries its
-            // own reviews already collected.
-            const standing = results.get(to);
-            if (minors.length && standing?.status === 'pass') {
-              const merged = mergeMinorFindings(standing.minorFindings, minors);
-              if (merged.length) results.set(to, { ...standing, minorFindings: merged });
-            }
-            const shipped = record(from, {
-              status: 'pass',
-              confidence: failed.confidence,
-              summary: decision.reason,
-              data: failed.data,
-              ...(lastRound ? { openFindings: requestFindings } : {}),
-              ...(minors.length ? { minorFindings: minors } : {}),
-            }, 'done');
-            ownOutcome.set(shipped, ownOutcome.get(failed) ?? failed);
-            // `memo` holds the settled promise every dependant already
-            // awaits or will await; without this, `from`'s stale failing
-            // promise still answers for it and nothing downstream unblocks.
-            memo.set(from, Promise.resolve(shipped));
-            const unblocked = dirtyFrom(from);
-            unblocked.delete(from);
-            for (const d of unblocked) {
-              memo.delete(d);
-              results.delete(d);
-              rejected.delete(d);
-            }
-            stopped = false;
-            await Promise.all(names.map(run));
+            // Holds or over-polishing: the work stands with the judge's reason.
+            await shipWith(decision.reason);
             continue;
           }
           // not_converging (or a caller-supplied question set with no

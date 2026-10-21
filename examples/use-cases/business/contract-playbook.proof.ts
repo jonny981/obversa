@@ -85,7 +85,7 @@ await withExample({
 
   const events = await recordEvents(run, 'records/contract-playbook.jsonl');
   const judged = events.filter((event) => event.kind === 'refine:judge');
-  assert.deepEqual(judged.map((event) => event.reason), ['the judge acts on 2 of 2 findings', 'the judge found only minor findings'], 'the judge is asked on both rounds: it calls the blocks impactful, then the taste note minor');
+  assert.deepEqual(judged.map((event) => event.reason), ['the judge acts on 2 of 2 findings', 'the judge chose holds'], 'the judge is asked on both rounds: it calls the blocks impactful, then the taste note minor');
   assert.ok(judged.every((event) => (event.path as string[]).includes('redline')), 'both judged rounds are the redline stage');
   const negotiate = events.filter((event) => event.kind === 'dag:node' && event.node === 'negotiate' && event.phase === 'done');
   assert.deepEqual(negotiate.map((event) => (event.outcome as { status: string }).status), ['paused', 'pass'], 'the run pauses at the lawyer, then the answer passes the step');

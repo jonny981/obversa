@@ -138,11 +138,10 @@ export interface Outcome {
    */
   openFindings?: readonly FeedbackFinding[];
   /**
-   * The findings a judge held back — skipped in round 1, called minor from
-   * round 2 on: every finding that did not go back to the builder, each
-   * with the round it was held back in, collected for a person to read
-   * before the work lands. Present on a pass while the collected list is
-   * not empty.
+   * The findings a judge held back: every finding that did not go back to
+   * the builder, each with the round it was held back in, collected for a
+   * person to read before the work lands. Present on a pass while the
+   * collected list is not empty.
    */
   minorFindings?: readonly FeedbackFinding[];
   /**
@@ -235,6 +234,10 @@ export interface FeedbackFinding {
   disputed?: boolean;
   /** Why a judge sent this finding back, when a judge decided it. */
   judgeReason?: string;
+  /** The level a judge's score landed this finding on, set on a `minorFindings` entry. */
+  judgeLevel?: FindingLevel;
+  /** The confidence that score answer carried, set on a `minorFindings` entry. */
+  judgeConfidence?: number;
   /** The finding's id in its review round (`finding-2`), set when a judge decided each finding. */
   id?: string;
   /** The review round a judge held this finding back in, set on a `minorFindings` entry. */
@@ -261,12 +264,16 @@ export interface PanelSynthesisEntry {
   finding: FeedbackFinding;
 }
 
-/** A finding a judge held back as minor, kept across rounds so reviewers do not raise it again. */
+/** A finding a judge held back, kept across rounds so reviewers do not raise it again. */
 export interface SkippedFinding {
   /** The review round the finding was held back in. */
   readonly round: number;
   readonly finding: FeedbackFinding;
   readonly reason: string;
+  /** The level the judge's score landed on, when it scored the finding. */
+  readonly level?: FindingLevel;
+  /** The confidence that score answer carried, in [0,1]. */
+  readonly confidence?: number;
 }
 
 /** One requirement a goal check found in the brief, with its verdict and the evidence for it. */
@@ -277,17 +284,41 @@ export interface GoalRequirement {
   readonly evidence: string;
 }
 
+/** The level a finding's score can land on, lowest to highest. */
+export type FindingLevel = 'cosmetic' | 'minor' | 'impactful' | 'blocking';
+
 /**
  * The judge's decision on one finding. `act` sends it back to the builder:
- * the judge called it impactful. `skip` and `minor` stay with the judge:
- * `skip` is the round-1 held-back call, `minor` a finding the judge called
- * minor from round 2 on. Either is collected on `minorFindings` for a
- * person to read before the work lands.
+ * the judge's score landed on `impactful` or `blocking` at a confidence its
+ * level's send-back bar clears. `hold` stays with the judge and is
+ * collected on `minorFindings`, with the level and confidence its answer
+ * carried, for a person to read before the work lands. `pending` settles
+ * nothing: the answer came under the hand-off floor, so the run pauses for
+ * a person, whose call sends the finding back with its evidence. It never
+ * routes onto the held list.
  */
 export interface FindingDecision {
   readonly id: string;
-  readonly decision: 'act' | 'skip' | 'minor';
+  readonly decision: 'act' | 'hold' | 'pending';
+  /** The level the judge's score landed on, when it scored the finding. */
+  readonly level?: FindingLevel;
+  /** The confidence the score answer carried, in [0,1]. */
+  readonly confidence?: number;
   readonly reason: string;
+}
+
+/**
+ * A finding raised again, computed by the runtime — the same reviewer, the
+ * same file and the same claim — so no question asks the model to compare
+ * rounds.
+ */
+export interface RepeatFinding {
+  /** This round's id of the finding raised again. */
+  readonly id: string;
+  /** The first round the same claim was raised in. */
+  readonly sinceRound: number;
+  readonly reviewer?: string;
+  readonly file?: string;
 }
 
 /** One round of the work the judge is watching converge. */
@@ -319,9 +350,8 @@ export interface JudgeCheck {
 
 /** What a judge reads, in the order it reads it. */
 export interface JudgePacket {
-  /** What the work is for. */
+  /** What the work is for. The brief itself is not sent whole: each finding carries the lines of it the finding touches. */
   readonly why: {
-    readonly brief?: string;
     readonly useCase?: string;
     readonly desc?: string;
     readonly gate?: string;
@@ -332,8 +362,6 @@ export interface JudgePacket {
   readonly what: {
     /** The files changed since the work began, in a git workspace. */
     readonly changedFiles?: readonly TreeChange[];
-    /** The diff around each file and line a finding cites. */
-    readonly diffs?: readonly { readonly file: string; readonly line?: number; readonly diff: string }[];
     readonly file?: string;
     readonly draft?: string;
   };
@@ -341,15 +369,31 @@ export interface JudgePacket {
   readonly how: {
     readonly checks?: readonly JudgeCheck[];
     readonly goal?: readonly GoalRequirement[];
-    /** This round's findings, by the id each one's question uses. */
-    readonly findings: readonly (FeedbackFinding & { readonly id: string })[];
+    /**
+     * This round's findings, by the id each one's question uses. Each
+     * carries the brief lines it touches and the diff hunk it cites, when
+     * there are any — the only evidence its question needs.
+     */
+    readonly findings: readonly (FeedbackFinding & { readonly id: string; readonly brief?: string; readonly diff?: string })[];
   };
-  /** Where the rounds stand. */
+  /** Where the rounds stand: the counts and repeats the runtime computed, so no question asks the model to count or compare. */
   readonly when: {
     readonly round: number;
     readonly cap?: number;
     readonly lastRound?: true;
     readonly limit?: string;
+    /** This round's open findings, counted in code. */
+    readonly openFindings?: number;
+    /** Findings this round's answers send back, counted in code once they are decided. */
+    readonly actedOnThisRound?: number;
+    /** Findings acted on in the last judged round, counted in code. */
+    readonly actedOnLastRound?: number;
+    /** Findings acted on in the judged round before that, counted in code. */
+    readonly actedOnRoundBefore?: number;
+    /** Whether the acted-on count is falling, computed in code: this round against the last when `actedOnThisRound` is set, else the last two judged rounds. */
+    readonly actedCountFalling?: boolean;
+    /** This round's findings that repeat an earlier one, computed in code. */
+    readonly repeats?: readonly RepeatFinding[];
     readonly rounds: readonly unknown[];
     readonly skipped?: readonly SkippedFinding[];
     /** The files changed since the judge last read the work, in a git workspace. */
@@ -892,6 +936,11 @@ export interface JudgeAnswer {
   /** The rating a `score` question's engine reports, when it reports one number. */
   readonly score?: number;
   readonly probabilities?: Readonly<Record<string, number>> | readonly { readonly label: string; readonly probability: number }[];
+  /**
+   * How sure the engine is in this answer, in [0,1]. The runtime gates
+   * every action on it; an answer that carries none reads as uncertain.
+   */
+  readonly confidence?: number;
   /** A one-line reason, when the judge gives one with its answer. */
   readonly reason?: string;
 }
@@ -912,10 +961,11 @@ export interface Judge {
   readonly cap?: number;
   readonly questions: JudgeQuestions;
   /**
-   * Ask the judge to call each finding — act or skip in round 1, impactful
-   * or minor from round 2 on — and send the builder only the ones it acts
-   * on. True by default; false by default for a caller's own question set,
-   * which then routes on the whole round.
+   * Ask the judge to score each finding from cosmetic to blocking, and send
+   * the builder only a finding scored impactful or blocking whose answer
+   * clears the send-back bar for its level. True by default; false by
+   * default for a caller's own question set, which then routes on the
+   * whole round.
    */
   readonly perFinding: boolean;
   readonly interaction?: InteractionBinding;
@@ -1345,19 +1395,22 @@ export type LoopEvent =
       // `fail` when the review's failure stands. Absent on `again`, and on
       // `stop_reason: product_decision`, which asks a person. Their answer
       // goes to the builder, and the judge is asked again once that round
-      // is reviewed. After the last round a cap allows, each answered
-      // product decision buys exactly one more round, marked
-      // `productDecision`.
+      // is reviewed. After the last round a cap allows, a change the
+      // person asks for on an answered product decision buys exactly one
+      // more round, marked `productDecision`; an answer that sends
+      // nothing back lets the work stand.
       // `paused` ends the judge step with a failure (`failure` keeps the
       // original error): a judge call that did not pass, a reply that did
       // not parse, or a reply that left an asked question without a usable
       // answer — never empty answers routed as `no clear answer`.
       status?: 'pass' | 'fail' | 'paused';
       // When the judge decides each finding: every finding of the round, by
-      // its id, with `act` (called impactful, sent back to the builder) or
-      // held back — `skip` (held back in round 1) or `minor` (called minor
-      // from round 2 on) — and why.
-      findings?: readonly { readonly id: string; readonly decision: 'act' | 'skip' | 'minor'; readonly reason: string }[];
+      // its id, with `act` (scored impactful or blocking at a confidence its
+      // level's bar clears, sent back to the builder), `hold` (stays with
+      // the judge) or `pending` (its answer sat under the hand-off floor, so
+      // a person decides it), the level and confidence its answer carried,
+      // and why.
+      findings?: readonly { readonly id: string; readonly decision: 'act' | 'hold' | 'pending'; readonly level?: FindingLevel; readonly confidence?: number; readonly reason: string }[];
       // The findings of this round that did not go back to the builder,
       // collected for a person to read before the work lands, each with
       // its reviewer, severity and evidence.
@@ -1368,7 +1421,9 @@ export type LoopEvent =
       // How many characters the judge read, and what the size limit cut,
       // when it cut anything.
       packet?: { readonly size: number; readonly cut?: readonly string[] };
-      // The model identity the judge's engine result reported.
+      // The model identity the judge's engine result reported. Its
+      // `modelSource` says whether the engine named the model that answered
+      // (`reported`) or the record keeps the requested id (`requested`).
       effective?: EngineSelectionRecord;
       // The error a stopped judge step kept: the engine failure's own code
       // and message, or the validation error for a bad reply.

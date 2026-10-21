@@ -158,10 +158,8 @@ async function until<T>(read: () => T | undefined | Promise<T | undefined>): Pro
 function productDecisionReview(prompts: string[], interaction?: InteractionBinding) {
   let judged = 0;
   const judgeEngine = new MockEngine(() => JSON.stringify({
-    holds: { noul: 0.9 },
-    worth_doing: { noul: 0.9 },
-    worth_another_round: { noul: 0.9 },
-    stop_reason: { choice: judged++ === 0 ? 'product_decision' : 'holds' },
+    product_decision: { noul: judged++ === 0 ? 0.9 : 0.05 },
+    stop_reason: { choice: 'holds', confidence: 0.95 },
   }));
   return dag({
     name: 'product-review',

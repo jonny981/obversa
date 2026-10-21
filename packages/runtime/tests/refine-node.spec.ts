@@ -42,12 +42,10 @@ const PASS = { status: 'pass', summary: 'nothing to add' };
 const FINDING = { severity: 'should-fix', evidence: 'the title is vague' } as const;
 const REVISE = { status: 'revise', summary: 'one finding', findings: [FINDING] };
 
-/** A complete reply to the round questions: every probability a clear yes. */
+/** A complete reply to the round questions: no product decision, a confident route. */
 const round = (choice: string): Record<string, unknown> => ({
-  holds: { noul: 0.9 },
-  worth_doing: { noul: 0.9 },
-  worth_another_round: { noul: 0.9 },
-  stop_reason: { choice },
+  product_decision: { noul: 0.05 },
+  stop_reason: { choice, confidence: 0.95 },
 });
 
 /** Scripted replies, one per call; the last one repeats. Every prompt is kept. */
@@ -697,8 +695,8 @@ describe('a dag node with agent and refine', () => {
         ...Object.fromEntries(Object.entries(questions)
           .filter(([id]) => id.startsWith('finding-'))
           .map(([id, question]) => [id, question.instructions.includes('REAL')
-            ? (question.type === 'choice' ? { choice: 'act', reason: 'a reader cannot tell who the page is for' } : { noul: 0.9, reason: 'a reader cannot tell who the page is for' })
-            : (question.type === 'choice' ? { choice: 'skip', reason: 'a matter of taste' } : { noul: 0.1, reason: 'a matter of taste' })])),
+            ? { score: 2, confidence: 0.95, reason: 'a reader cannot tell who the page is for' }
+            : { score: 0, confidence: 0.95, reason: 'a matter of taste' }])),
       });
     });
     const { outcome } = await run(dag({
@@ -718,7 +716,9 @@ describe('a dag node with agent and refine', () => {
     // Round 1's block is called impactful; the finding the judge calls
     // minor stays held back in both rounds, and round 2's ships the work.
     expect(outcome.status).toBe('pass');
-    expect(judgeCalls).toBe(2);
+    // Two consultations of two calls each: the finding scores, then the
+    // round questions.
+    expect(judgeCalls).toBe(4);
     expect(builderPrompts).toHaveLength(2);
     // The builder sees only the finding the judge called impactful, with its reason.
     expect(builderPrompts[1]).toContain('REAL: the page never says who it is for');

@@ -110,15 +110,14 @@ const featureScript = {
   ],
 };
 
-// The judge is asked once, after round 3. It calls each finding left
-// after the vote impactful or minor, in the order the synthesis lists them.
+// The judge is asked once, after round 3. It scores each finding left
+// after the vote, in the order the synthesis lists them: the first is
+// impactful, the second minor.
 const judgeAnswers = [{
-  holds: { type: 'noul', noul: 0.3 },
-  worth_doing: { type: 'noul', noul: 0.8 },
-  worth_another_round: { type: 'noul', noul: 0.8 },
-  stop_reason: { type: 'choice', choice: 'continue', confidence: 0.8 },
-  'finding-1': { type: 'noul', noul: 0.9, reason: act },
-  'finding-2': { type: 'noul', noul: 0.1, reason: skip },
+  product_decision: { type: 'noul', noul: 0.05 },
+  stop_reason: { type: 'choice', choice: 'continue', confidence: 0.9 },
+  'finding-1': { type: 'score', score: 2, confidence: 0.9, reason: act },
+  'finding-2': { type: 'score', score: 1, confidence: 0.9, reason: skip },
 }];
 
 interface RecordedEvent {
@@ -275,7 +274,7 @@ async function assertSevenSteps(seeded: Seeded, attended: boolean) {
   const judges = record.flatMap((e, at) => (e.kind === 'refine:judge' ? [{ at, e }] : []));
   assert.equal(judges.length, 1, 'the judge is asked about the review only');
   assert.ok(judges[0]!.at > record.indexOf(syntheses[0]!), 'the judge reads the synthesised list');
-  assert.deepEqual(judges[0]!.e.findings!.map((f) => [f.decision, f.reason]), [['act', act], ['minor', skip]]);
+  assert.deepEqual(judges[0]!.e.findings!.map((f) => [f.decision, f.reason]), [['act', act], ['hold', skip]]);
   assert.ok(toBuilder[3]!.includes(message) && toBuilder[3]!.includes(act), `the builder gets the finding the judge called impactful: ${toBuilder[3]}`);
   assert.ok(!toBuilder[3]!.includes(comment) && !toBuilder[3]!.includes(skip), `the builder never sees the finding the judge called minor: ${toBuilder[3]}`);
   // The minor finding lands on the build node's recorded pass, for a
@@ -440,7 +439,7 @@ try {
     reviewBacks: attendedSteps.rounds.reviewBacks,
     goalChecks: ['unmet', 'met', 'met'],
     synthesis: ['kept', 'disputed'],
-    judge: ['act', 'minor'],
+    judge: ['act', 'hold'],
     approvedSha256: attendedSteps.landed.slice(0, 12),
     unattended: 'landed without asking',
     backlog: backlogRun.delivered.map((d) => `${d.ticket} ${d.status}`),

@@ -59,7 +59,7 @@ await withExample({
   const judged = record.filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.reason), [
     'the judge acts on 2 of 2 findings',
-    'the judge found only minor findings',
+    'the judge chose holds',
   ]);
   const nuance = record.filter((event) => event.kind === 'dag:node' && event.node === 'nuance' && event.phase === 'done');
   assert.deepEqual(nuance.map((event) => (event.outcome as { status: string }).status), ['paused', 'pass'], 'the run pauses at the editor, then the answer passes the step');

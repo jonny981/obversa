@@ -101,33 +101,28 @@ try {
     '```',
     '',
   ].join('\n'));
-  // The judge is asked every round. Round 1 keeps the act/skip call: it
-  // acts on both blocks. From round 2 the call is impactful or minor:
-  // the missing folder (finding-1) is impactful and the taste note
-  // (finding-2) is minor. Round 3: the one taste note left is minor too.
+  // The judge is asked every round. Each finding gets a score from
+  // cosmetic to blocking: it scores both blocks impactful in round 1.
+  // Round 2: the missing folder (finding-1) is impactful and the taste
+  // note (finding-2) is minor. Round 3: the one taste note left is
+  // minor too.
   await writeFile(join(workspace, 'judge.json'), `${JSON.stringify([
     {
-      holds: { type: 'noul', noul: 0.1 },
-      worth_doing: { type: 'noul', noul: 0.9 },
-      worth_another_round: { type: 'noul', noul: 0.9 },
-      stop_reason: { type: 'choice', choice: 'continue', confidence: 0.8 },
-      'finding-1': { type: 'choice', choice: 'act', confidence: 0.9 },
-      'finding-2': { type: 'choice', choice: 'act', confidence: 0.9 },
+      product_decision: { type: 'noul', noul: 0.05 },
+      stop_reason: { type: 'choice', choice: 'continue', confidence: 0.9 },
+      'finding-1': { type: 'score', score: 2, confidence: 0.9 },
+      'finding-2': { type: 'score', score: 2, confidence: 0.9 },
     },
     {
-      holds: { type: 'noul', noul: 0.3 },
-      worth_doing: { type: 'noul', noul: 0.7 },
-      worth_another_round: { type: 'noul', noul: 0.7 },
-      stop_reason: { type: 'choice', choice: 'continue', confidence: 0.7 },
-      'finding-1': { type: 'noul', noul: 0.8, confidence: 0.8 },
-      'finding-2': { type: 'noul', noul: 0.1, confidence: 0.9 },
+      product_decision: { type: 'noul', noul: 0.05 },
+      stop_reason: { type: 'choice', choice: 'continue', confidence: 0.9 },
+      'finding-1': { type: 'score', score: 2, confidence: 0.85 },
+      'finding-2': { type: 'score', score: 1, confidence: 0.9 },
     },
     {
-      holds: { type: 'noul', noul: 0.9 },
-      worth_doing: { type: 'noul', noul: 0.2 },
-      worth_another_round: { type: 'noul', noul: 0.1 },
-      stop_reason: { type: 'choice', choice: 'holds', confidence: 0.8 },
-      'finding-1': { type: 'noul', noul: 0.1, confidence: 0.9 },
+      product_decision: { type: 'noul', noul: 0.05 },
+      stop_reason: { type: 'choice', choice: 'holds', confidence: 0.85 },
+      'finding-1': { type: 'score', score: 1, confidence: 0.9 },
     },
   ], null, 2)}\n`);
   await writeFile(join(workspace, 'approve.json'), '{"approved": true}\n');
@@ -205,7 +200,7 @@ try {
   const printed = JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('\n{') + 1));
   assert.equal(printed.status, 'pass');
   assert.equal(printed.approved, true);
-  assert.equal(printed.stop, 'the judge found only minor findings');
+  assert.equal(printed.stop, 'the judge chose holds');
 
   const calls = (await readFile(callsLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string; reply: string });
   const claudeCalls = calls.filter((call) => call.role === 'claude');
@@ -235,11 +230,11 @@ try {
   const judged = record.filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.findings?.map(({ id, decision }) => `${id}: ${decision}`)), [
     ['finding-1: act', 'finding-2: act'],
-    ['finding-1: act', 'finding-2: minor'],
-    ['finding-1: minor'],
-  ], 'the judge is asked on every round, the one with blocks included: act or skip in round 1, impactful or minor after');
+    ['finding-1: act', 'finding-2: hold'],
+    ['finding-1: hold'],
+  ], 'the judge is asked on every round, the one with blocks included: each finding scored impactful goes back, the rest are held');
   assert.ok(judged.flatMap((event) => event.findings ?? []).every((finding) => finding.reason.length > 0), 'every decision has a reason');
-  assert.equal(judged[2]!.reason, 'the judge found only minor findings');
+  assert.equal(judged[2]!.reason, 'the judge chose holds');
   const approveEnds = record.filter((event) => event.kind === 'job:end' && event.label === 'approve');
   assert.equal(approveEnds.length, 2, 'one approval: the approve stage and the approval it calls each log one end');
   assert.ok(approveEnds.every((event) => event.outcome!.status === 'pass'), 'the approval passes');

@@ -74,7 +74,7 @@ await withExample({
   assert.deepEqual(judged.map((event) => event.reason), [
     'the judge acts on 1 of 1 findings',
     'the judge acts on 1 of 1 findings',
-    'the judge found only minor findings',
+    'the judge chose holds',
   ]);
   assert.deepEqual(judged.map((event) => event.answers?.stop_reason?.choice), ['continue', 'continue', 'holds']);
 

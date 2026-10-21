@@ -50,6 +50,27 @@ function scripted(replies: readonly unknown[], calls: string[], timeouts: (numbe
   });
 }
 
+/** The judge asks the round questions in this call: not only `finding-*` scores. */
+function isRoundCall(prompt: string): boolean {
+  const { questions } = JSON.parse(prompt) as { questions: Record<string, unknown> };
+  return Object.keys(questions).some((key) => !key.startsWith('finding-'));
+}
+
+/**
+ * Scripted judge replies, one per round. With per-finding judging a round
+ * asks the judge twice — the finding scores, then the round questions — and
+ * both calls read the same round's reply. `calls` records every request.
+ */
+function scriptedJudge(replies: readonly unknown[], calls: string[], timeouts: (number | undefined)[] = []) {
+  return new MockEngine((req: AgentRequest) => {
+    const rounds = calls.filter(isRoundCall).length;
+    const reply = replies[Math.min(rounds, replies.length - 1)];
+    calls.push(req.prompt);
+    timeouts.push(req.timeoutMs);
+    return JSON.stringify(typeof reply === 'function' ? (reply as (prompt: string) => unknown)(req.prompt) : reply);
+  });
+}
+
 interface Intent {
   /** One list of replies per reviewer, by round. */
   readonly reviews: readonly (readonly unknown[])[];
@@ -123,7 +144,7 @@ function build(form: Form, intent: Intent): Built {
   const judgeOf = typeof intent.refine === 'number' ? undefined : intent.refine;
   const refine = judgeOf === undefined
     ? intent.refine as number
-    : judge(seat(scripted(judgeOf.replies, calls.judge, calls.judgeTimeouts), 'judge-mock'), {
+    : judge(seat(scriptedJudge(judgeOf.replies, calls.judge, calls.judgeTimeouts), 'judge-mock'), {
       ...(judgeOf.cap !== undefined ? { cap: judgeOf.cap } : {}),
       ...(judgeOf.interaction ? { interaction: judgeOf.interaction } : {}),
       ...(judgeOf.perFinding !== undefined ? { perFinding: judgeOf.perFinding } : {}),
@@ -294,7 +315,10 @@ async function sameInEveryForm(forms: readonly Form[], intent: Intent, expected:
     expect(ran.result.outcome.status, `${form}: outcome`).toBe(expected.status);
     expect(exitCodeFor(ran.result.outcome), `${form}: exit code`).toBe(exitCodeFor({ status: expected.status }));
     expect(ran.writer, `${form}: builds`).toHaveLength(expected.builds);
-    expect(ran.judge, `${form}: judge consultations`).toHaveLength(expected.judged ?? 0);
+    // A consultation is one round's asks of the judge: with per-finding
+    // judging that is two calls — the finding scores, then the round
+    // questions — so the count reads the round calls.
+    expect(ran.judge.filter(isRoundCall), `${form}: judge consultations`).toHaveLength(expected.judged ?? 0);
     runs.push({ form, ...ran });
   }
   const [first, ...rest] = runs;
@@ -313,33 +337,33 @@ const REAL2 = { severity: 'block', evidence: 'REAL: the page buries the point' }
 const REAL3 = { severity: 'block', evidence: 'REAL: the page never lands the ask' } as const;
 const TASTE = { severity: 'nice-to-have', evidence: 'taste: prefer a warmer tone' } as const;
 
-/** A complete reply to the round questions: every probability a clear yes. */
+/** A complete reply to the round questions: no product decision, a confident route. */
 function round(choice: string): Record<string, unknown> {
   return {
-    holds: { noul: 0.9 },
-    worth_doing: { noul: 0.9 },
-    worth_another_round: { noul: 0.9 },
-    stop_reason: { choice },
+    product_decision: { noul: 0.05 },
+    stop_reason: { choice, confidence: 0.95 },
   };
 }
 
 /**
  * Answer every question the prompt asks: `round` overrides the round
- * answers, each finding marked REAL is impactful, the rest minor.
+ * answers, each finding marked REAL is scored impactful, the rest cosmetic.
  */
 function perFinding(overrides: Record<string, unknown> = {}) {
   return (prompt: string) => {
-    const { questions } = JSON.parse(prompt) as { questions: Record<string, { type: string; instructions: string; criteria: Record<string, string> }> };
+    const { questions } = JSON.parse(prompt) as { questions: Record<string, { type: string; instructions: string; criteria: Record<string, string> | string[] }> };
     const answers: Record<string, unknown> = { ...round('continue'), ...overrides };
     for (const [key, question] of Object.entries(questions)) {
       if (key in answers) continue;
       answers[key] = key.startsWith('finding-')
         ? question.instructions.includes('REAL')
-          ? (question.type === 'choice' ? { choice: 'act', reason: 'a reader cannot tell who the page is for' } : { noul: 0.9, reason: 'a reader cannot tell who the page is for' })
-          : (question.type === 'choice' ? { choice: 'skip', reason: 'a matter of taste' } : { noul: 0.1, reason: 'a matter of taste' })
+          ? { score: 2, confidence: 0.95, reason: 'a reader cannot tell who the page is for' }
+          : { score: 0, confidence: 0.95, reason: 'a matter of taste' }
         : question.type === 'choice'
-          ? { choice: 'continue' in question.criteria ? 'continue' : Object.keys(question.criteria)[0] }
-          : { noul: 0.9 };
+          ? { choice: 'continue' in question.criteria ? 'continue' : Object.keys(question.criteria)[0], confidence: 0.95 }
+          : question.type === 'score'
+            ? { score: 0, confidence: 0.95 }
+            : { noul: 0.9 };
     }
     return answers;
   };
@@ -454,7 +478,7 @@ describe('the same intent in every form', () => {
     };
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
-      refine: { cap: 3, interaction, perFinding: false, replies: [round('product_decision'), round('holds')] },
+      refine: { cap: 3, interaction, perFinding: false, replies: [{ product_decision: { noul: 0.9 }, stop_reason: { choice: 'continue', confidence: 0.95 } }, round('holds')] },
     }, { status: 'pass', builds: 2, judged: 2 });
     for (const { form, writer, judge: prompts } of runs) {
       expect(writer[1], form).toContain('Write for new users.');
@@ -474,7 +498,7 @@ describe('the same intent in every form', () => {
     for (const { form, writer, judge: prompts, events } of runs) {
       // The granted round carries only the finding the judge acted on.
       expect(writer[2], form).toContain(REAL.evidence);
-      expect(judgeInput(prompts[1]!), form).toMatchObject({ when: { round: 2, cap: 1, lastRound: true } });
+      expect(judgeInput(prompts.filter(isRoundCall)[1]!), form).toMatchObject({ when: { round: 2, cap: 1, lastRound: true } });
       const judged = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
       expect(judged[1], form).toMatchObject({ route: 'again', reason: expect.stringContaining('one more round is granted') });
     }
@@ -492,7 +516,7 @@ describe('the same intent in every form', () => {
     }, { status: 'pass', builds: 4, judged: 3 });
     for (const { form, writer, judge: prompts } of runs) {
       expect(writer[3], form).toContain(REAL.evidence);
-      expect(judgeInput(prompts[2]!), form).toMatchObject({ when: { round: 3, cap: 1, lastRound: true } });
+      expect(judgeInput(prompts.filter(isRoundCall)[2]!), form).toMatchObject({ when: { round: 3, cap: 1, lastRound: true } });
     }
   });
 
@@ -521,6 +545,28 @@ describe('the same intent in every form', () => {
     // The pause attaches the open findings and what the judge would do with them.
     for (const material of materials) {
       expect(material).toMatchObject({ capPause: true, latestFindings: [{ evidence: REAL.evidence }], decided: [{ decision: 'act' }] });
+    }
+  });
+
+  it.each([
+    ['holds every finding by id', { feedback: { findings: { 'finding-1': 'hold' } }, prompt: 'Hold it; it can wait.' }],
+    ['approves the work, naming no finding to act on,', { decision: 'approved', feedback: {}, prompt: 'Ship it.' }],
+  ])('at the cap, a person who %s on a not-falling pause lets the work stand: a pass, `minorFindings`, no extra build', async (_, response) => {
+    const interaction: InteractionBinding = {
+      id: 'product-decision',
+      responseSchema: { type: 'object' },
+      async answer() { return response as InteractionResponse; },
+    };
+    const runs = await sameInEveryForm(['workflow', 'dag'], {
+      reviews: [[
+        { status: 'revise', summary: 'one finding', findings: [REAL] },
+        { status: 'revise', summary: 'one finding', findings: [REAL] },
+      ]],
+      refine: { cap: 1, interaction, replies: [perFinding()] },
+    }, { status: 'pass', builds: 2, judged: 2 });
+    for (const { form, result } of runs) {
+      const held = /"minorFindings":\[[^\]]*\]/.exec(JSON.stringify(result.outcome))?.[0];
+      expect(held, form).toContain(REAL.evidence);
     }
   });
 
@@ -607,13 +653,13 @@ describe('the same intent in every form', () => {
       refine: { cap: 2, replies: [perFinding()] },
     }, { status: 'pass', builds: 3, judged: 2 });
     for (const { form, judge: prompts, reviewer, events } of runs) {
-      expect(judgeInput(prompts[1]!), form).toMatchObject({ when: {
+      expect(judgeInput(prompts.filter(isRoundCall)[1]!), form).toMatchObject({ when: {
         round: 2,
         cap: 2,
         rounds: [{ round: 1 }],
         skipped: [{ round: 1, finding: { evidence: TASTE.evidence } }],
       } });
-      expect(judgeInput(prompts[1]!).when, form).not.toHaveProperty('lastRound');
+      expect(judgeInput(prompts.filter(isRoundCall)[1]!).when, form).not.toHaveProperty('lastRound');
       // The stage's own reviewers read, on the third build, what the judge held back.
       expect(reviewer[2], form).toContain(TASTE.evidence);
       const judged = events.filter((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
@@ -648,7 +694,7 @@ function editNotes(dir: string, changes: Readonly<Record<number, string>>): void
 }
 
 describe('what the judge reads, the same in every form', () => {
-  it('the why: the brief, what the work is for, and the target\'s desc and gate', async () => {
+  it('the why: what the work is for, and the target\'s desc and gate', async () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[REVISE]],
       desc: 'Write the welcome page.',
@@ -657,11 +703,15 @@ describe('what the judge reads, the same in every form', () => {
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
       expect(judgeInput(prompts[0]!).why, form).toEqual({
-        brief: BRIEF,
         useCase: 'a reader gets a clear, short page.',
         desc: 'Write the welcome page.',
         gate: 'A new reader knows who the page is for.',
       });
+      // The brief reaches the judge as the lines a finding touches; this
+      // finding shares no content word with it, so it reads the whole
+      // brief — a missed match never means no context.
+      const [finding] = judgeInput(prompts[0]!).how.findings as { brief?: string }[];
+      expect(finding!.brief, form).toBe(BRIEF);
     }
   });
 
@@ -680,10 +730,10 @@ describe('what the judge reads, the same in every form', () => {
         { path: 'page.md', added: 1, removed: 0 },
       ]);
       // Only the hunk around line 50: the change at line 5 is too far away.
-      const diffs = first.what.diffs as { file: string; line: number; diff: string }[];
-      expect(diffs.map(({ file, line }) => ({ file, line })), form).toEqual([{ file: 'notes.md', line: 50 }]);
-      expect(diffs[0]!.diff, form).toContain('+line 50 changed');
-      expect(diffs[0]!.diff, form).not.toContain('line 5 changed');
+      const [finding] = first.how.findings as { diff?: string }[];
+      expect(finding!.diff, form).toContain('notes.md');
+      expect(finding!.diff, form).toContain('+line 50 changed');
+      expect(finding!.diff, form).not.toContain('line 5 changed');
       // The second round says what changed since the first.
       expect(judgeInput(prompts[1]!).when.changedSinceLastRound, form).toEqual([
         { path: 'notes.md', added: 1, removed: 1 },
@@ -701,11 +751,10 @@ describe('what the judge reads, the same in every form', () => {
       refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
-      const { what } = judgeInput(prompts[0]!);
+      const { what, how } = judgeInput(prompts[0]!);
       expect(what.changedFiles, form).toContainEqual({ path: 'notes.md', added: 0, removed: 60 });
-      const diffs = what.diffs as { file: string; line: number; diff: string }[] | undefined;
-      expect(diffs?.map(({ file, line }) => ({ file, line })), form).toEqual([{ file: 'notes.md', line: 50 }]);
-      expect(diffs![0]!.diff, form).toContain('-line 50');
+      const [finding] = how.findings as { diff?: string }[];
+      expect(finding!.diff, form).toContain('-line 50');
     }
   });
 
@@ -724,9 +773,9 @@ describe('what the judge reads, the same in every form', () => {
         { path: 'docs/notes.md', added: 1, removed: 1 },
         { path: 'docs/page.md', added: 1, removed: 0 },
       ]);
-      const diffs = what.diffs as { file: string; line: number; diff: string }[] | undefined;
-      expect(diffs?.map(({ file, line }) => ({ file, line })), form).toEqual([{ file: 'docs/notes.md', line: 50 }]);
-      expect(diffs![0]!.diff, form).toContain('+line 50 changed');
+      const [finding] = judgeInput(prompts[0]!).how.findings as { diff?: string }[];
+      expect(finding!.diff, form).toContain('docs/notes.md');
+      expect(finding!.diff, form).toContain('+line 50 changed');
     }
   });
 
@@ -757,14 +806,13 @@ describe('what the judge reads, the same in every form', () => {
       refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
-      const diffs = judgeInput(prompts[0]!).what.diffs as { file: string; line: number; diff: string }[] | undefined;
-      expect(diffs?.map(({ file, line }) => ({ file, line })), form).toEqual([
-        { file: 'Dockerfile', line: 2 },
-        { file: 'Makefile', line: 2 },
-        { file: '.gitignore', line: 2 },
-        { file: 'app/[id]/page.tsx', line: 2 },
-      ]);
-      expect(diffs![3]!.diff, form).toContain('+app/[id]/page.tsx changed');
+      const findings = judgeInput(prompts[0]!).how.findings as { diff?: string }[];
+      expect(findings, form).toHaveLength(4);
+      for (const [index, file] of ['Dockerfile', 'Makefile', '.gitignore', 'app/[id]/page.tsx'].entries()) {
+        expect(findings[index]!.diff, form).toContain(`+${file} changed`);
+      }
+      // The bracketed folder's own file, not the api/ one that ends the same way.
+      expect(findings[3]!.diff, form).not.toContain('api/page.tsx changed');
     }
   });
 
@@ -794,13 +842,12 @@ describe('what the judge reads, the same in every form', () => {
       refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
-      const diffs = judgeInput(prompts[0]!).what.diffs as { file: string; line: number; diff: string }[] | undefined;
-      expect(diffs?.map(({ file, line }) => ({ file, line })), form).toEqual([
-        { file: 'src/index.ts', line: 2 },
-        { file: 'docs/README.md', line: 2 },
-      ]);
-      expect(diffs![0]!.diff, form).toContain('+src/index.ts changed');
-      expect(diffs![1]!.diff, form).toContain('+docs/README.md changed');
+      const findings = judgeInput(prompts[0]!).how.findings as { diff?: string }[];
+      expect(findings, form).toHaveLength(2);
+      expect(findings[0]!.diff, form).toContain('+src/index.ts changed');
+      expect(findings[0]!.diff, form).not.toContain('packages/app/src/index.ts changed');
+      expect(findings[1]!.diff, form).toContain('+docs/README.md changed');
+      expect(findings[1]!.diff, form).not.toContain('+README.md changed');
     }
   });
 
@@ -935,23 +982,31 @@ describe('what the judge reads, the same in every form', () => {
       refine: { perFinding: false, replies: [round('holds')] },
     }, { status: 'pass', builds: 1, judged: 1 });
     for (const { form, judge: prompts } of runs) {
-      expect(judgeInput(prompts[0]!).how.findings, form).toEqual([{ id: 'finding-1', reviewer: 'write-1', ...FINDING }]);
+      // The finding shares no content word with the brief, so it carries
+      // the whole brief — a missed match never means no context.
+      expect(judgeInput(prompts[0]!).how.findings, form).toEqual([{ id: 'finding-1', reviewer: 'write-1', ...FINDING, brief: BRIEF }]);
     }
   });
 
-  it('the when: every earlier round\'s findings, with the judge\'s own decision on each and its reason', async () => {
+  it('the when: every earlier round\'s acted-on count and decision, and what it held back', async () => {
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[{ status: 'revise', summary: 'two findings', findings: [REAL, TASTE] }, { status: 'revise', summary: 'one finding', findings: [TASTE] }]],
       refine: { replies: [perFinding(), perFinding(round('holds'))] },
     }, { status: 'pass', builds: 2, judged: 2 });
     for (const { form, judge: prompts } of runs) {
-      expect(judgeInput(prompts[1]!).when.rounds, form).toMatchObject([{
+      const when = judgeInput(prompts.filter(isRoundCall)[1]!).when;
+      expect(when.rounds, form).toMatchObject([{
         round: 1,
+        acted: 1,
         decision: 'the judge acts on 1 of 2 findings',
-        findings: [
-          { ...REAL, decision: 'act', reason: 'a reader cannot tell who the page is for' },
-          { ...TASTE, decision: 'skip', reason: 'a matter of taste' },
-        ],
+      }]);
+      // The finding round 1 held back keeps its reason, level and confidence.
+      expect(when.skipped, form).toMatchObject([{
+        round: 1,
+        finding: { evidence: TASTE.evidence },
+        reason: 'a matter of taste',
+        level: 'cosmetic',
+        confidence: 0.95,
       }]);
     }
   });
@@ -999,12 +1054,12 @@ describe('what the judge reads, the same in every form', () => {
     const long = { status: 'revise', summary: 'one finding', findings: [{ severity: 'should-fix', evidence: 'the title is vague '.repeat(60) }] };
     const runs = await sameInEveryForm(['workflow', 'dag'], {
       reviews: [[long]],
-      judgeContextLimit: 4_000,
+      judgeContextLimit: 1_900,
       refine: { perFinding: false, replies: [round('continue'), round('continue'), round('continue'), round('holds')] },
     }, { status: 'pass', builds: 4, judged: 4 });
     for (const { form, judge: prompts } of runs) {
       const packet = judgeInput(prompts[3]!);
-      expect(JSON.stringify(packet).length, form).toBeLessThanOrEqual(4_000);
+      expect(JSON.stringify(packet).length, form).toBeLessThanOrEqual(1_900);
       const rounds = (packet.when.rounds as { round: number }[]).map(({ round }) => round);
       expect(rounds.length, form).toBeLessThan(3);
       // The rounds kept are the latest ones.
@@ -1012,8 +1067,9 @@ describe('what the judge reads, the same in every form', () => {
       expect(packet.cut, form).toEqual([rounds.length
         ? `the earlier rounds: kept the last ${rounds.length} of 3 rounds`
         : 'the earlier rounds: left out (3 rounds)']);
-      // The findings to decide are never cut.
-      expect(packet.how.findings, form).toEqual([{ id: 'finding-1', reviewer: 'write-1', ...long.findings[0] }]);
+      // The findings to decide are never cut. This one matches no brief
+      // line, so it carries the whole brief — which fits inside the cap.
+      expect(packet.how.findings, form).toEqual([{ id: 'finding-1', reviewer: 'write-1', ...long.findings[0], brief: BRIEF }]);
     }
   });
 
@@ -1043,9 +1099,12 @@ describe('what one run keeps to itself', () => {
       const result = await run(built.job, { cwd: workDir() });
       expect(result.outcome.status).toBe('paused');
     }
-    expect(built.judge).toHaveLength(4);
-    expect(judgeInput(built.judge[1]!)).toMatchObject({ when: { round: 2, rounds: [{ round: 1 }], skipped: [{ finding: { evidence: TASTE.evidence } }] } });
-    const second = judgeInput(built.judge[2]!).when;
+    // Two runs of two consultations each: the finding scores, then the
+    // round questions.
+    expect(built.judge).toHaveLength(8);
+    const firstRunRounds = built.judge.slice(0, 4).filter(isRoundCall);
+    expect(judgeInput(firstRunRounds[1]!)).toMatchObject({ when: { round: 2, rounds: [{ round: 1 }], skipped: [{ finding: { evidence: TASTE.evidence } }] } });
+    const second = judgeInput(built.judge[4]!).when;
     expect(second).toMatchObject({ round: 1, rounds: [] });
     expect(second).not.toHaveProperty('skipped');
   });
@@ -1074,7 +1133,7 @@ describe('what one run keeps to itself', () => {
     }), { cwd: workDir() });
     expect(result.outcome.status).toBe('pass');
     expect(builds).toBe(2);
-    const skipped = [{ round: 1, finding: TASTE, reason: 'a matter of taste' }];
+    const skipped = [{ round: 1, finding: TASTE, reason: 'a matter of taste', level: 'cosmetic', confidence: 0.95 }];
     expect(seen.a).toEqual([undefined, skipped]);
     expect(seen.b).toEqual([undefined, skipped]);
   });
@@ -1132,7 +1191,7 @@ describe('what one run keeps to itself', () => {
     // it fell from is the previous build round's two, not the zero of
     // style's own round-2 entry, so the spent cap grants round 3 rather
     // than pausing for a person.
-    expect(judged).toHaveLength(3);
+    expect(judged.filter(isRoundCall)).toHaveLength(3);
     expect(builds).toBe(3);
     expect(result.outcome.status).toBe('pass');
   });
@@ -1284,7 +1343,7 @@ describe.each(['workflow', 'dag'] as const)('a person reviewer with a judge acro
     expect(page.judge).toHaveLength(2);
     expect(judgeInput(page.judge[1]!)).toMatchObject({
       how: { findings: [{ evidence: 'Name the reader in the title.' }] },
-      when: { round: 2, rounds: [{ round: 1, findings: [{ evidence: 'Say who the page is for.' }] }] },
+      when: { round: 2, rounds: [{ round: 1, decision: 'the judge chose continue' }] },
     });
   });
 

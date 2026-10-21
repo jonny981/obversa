@@ -34,12 +34,10 @@ const oneUnmet = { requirements: [MET, UNMET] };
 const PASS = { status: 'pass', summary: 'nothing to add' };
 const REVISE = { status: 'revise', summary: 'one finding', findings: [{ severity: 'should-fix', evidence: 'REVIEW: the title is vague' }] };
 
-/** A complete reply to the round questions: every probability a clear yes. */
+/** A complete reply to the round questions: no product decision, a confident route. */
 const round = (choice: string): Record<string, unknown> => ({
-  holds: { noul: 0.9 },
-  worth_doing: { noul: 0.9 },
-  worth_another_round: { noul: 0.9 },
-  stop_reason: { choice },
+  product_decision: { noul: 0.05 },
+  stop_reason: { choice, confidence: 0.95 },
 });
 
 /** The scripted reply for this call: the last one repeats if the loop runs longer. */
@@ -149,10 +147,14 @@ describe('workflow(): goal on an agent stage', () => {
     expect(writerCalls).toHaveLength(2);
     expect(reviewCalls).toHaveLength(1);
     expect(judgeCalls).toHaveLength(1);
-    // The brief names the opening hours too, so only the findings and the rounds are read.
+    // The goal check's own finding never reaches the judge — only the
+    // review's. The brief does name the opening hours, and the finding
+    // touches no brief line, so it carries the whole brief: that text is
+    // the work's own context, not the goal check's verdict.
     const { how, when } = JSON.parse(judgeCalls[0]!.prompt).state;
     expect(JSON.stringify(how.findings)).toContain('REVIEW: the title is vague');
-    expect(JSON.stringify([how.findings, when])).not.toContain('opening hours');
+    expect(JSON.stringify(how.findings)).not.toContain('MISSING');
+    expect(JSON.stringify(when)).not.toContain('opening hours');
   });
 
   it('runs the goal check again in the next round, after a fix for a reviewer', async () => {
@@ -222,7 +224,9 @@ describe('workflow(): goal on an agent stage', () => {
       const team = scriptedTeam({
         goalReplies: [allMet],
         reviewerReplies: [REVISE],
-        judgeReplies: [round(calls.judge === 0 ? 'product_decision' : 'holds')],
+        judgeReplies: [calls.judge === 0
+          ? { product_decision: { noul: 0.9 }, stop_reason: { choice: 'holds', confidence: 0.95 } }
+          : round('holds')],
       });
       const result = await run(team.job, { cwd, recordTo, callbacks, resume: again, onEvent: (event) => events.push(event) });
       calls.writer += team.writerCalls.length;

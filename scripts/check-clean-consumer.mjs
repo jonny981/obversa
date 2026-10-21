@@ -1006,11 +1006,11 @@ async function main() {
     });
     assert.deepEqual(JSON.parse(run(process.execPath, ['dist/engine-mastra.proof.js'], { cwd: consumerDirectory })), {
       status: 'pass', writerRuns: 2, readerRuns: 2, kickbacks: 1,
-      judgeReasons: ['the judge acts on 2 of 2 findings', 'the judge found only minor findings'], stop: 'the judge found only minor findings', mode: 'compiled-from-dist',
+      judgeReasons: ['the judge acts on 2 of 2 findings', 'the judge chose holds'], stop: 'the judge chose holds', mode: 'compiled-from-dist',
     });
     assert.deepEqual(JSON.parse(run(process.execPath, ['dist/engine-openai-agents.proof.js'], { cwd: consumerDirectory })), {
       status: 'pass', writerRuns: 2, readerRuns: 2, kickbacks: 1,
-      judgeReasons: ['the judge acts on 2 of 2 findings', 'the judge found only minor findings'], stop: 'the judge found only minor findings', mode: 'compiled-from-dist',
+      judgeReasons: ['the judge acts on 2 of 2 findings', 'the judge chose holds'], stop: 'the judge chose holds', mode: 'compiled-from-dist',
     });
     const productionLine = JSON.parse(
       run(process.execPath, ['dist/offline-review.js'], { cwd: consumerDirectory }),
@@ -1084,7 +1084,7 @@ async function main() {
     assert.equal(compiledTeamFeature.reviewBacks, 2);
     assert.deepEqual(compiledTeamFeature.goalChecks, ['unmet', 'met', 'met']);
     assert.deepEqual(compiledTeamFeature.synthesis, ['kept', 'disputed']);
-    assert.deepEqual(compiledTeamFeature.judge, ['act', 'minor']);
+    assert.deepEqual(compiledTeamFeature.judge, ['act', 'hold']);
     assert.deepEqual(compiledTeamFeature.backlog, ['001-triple.md pass', '002-double.md pass']);
     // The compiled mode is the one that proves the package: a repo-mode green
     // must never stand in for it.

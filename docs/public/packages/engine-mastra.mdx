@@ -167,13 +167,13 @@ replayed from `judge.json`, the example printed:
 ```json Output
 {
   "status": "pass",
-  "stop": "the judge found only minor findings"
+  "stop": "the judge chose holds"
 }
 ```
 
 Two rounds. In each, the Mastra agent called its own `saveFile` tool, then
 replied. The first reader pass found two blocks, so the page went back to
-the agent. The second found one `nice-to-have`, and the judge called it
+the agent. The second found one `nice-to-have`, and the judge scored it
 minor. The record holds both runs of the agent with the usage Mastra
 reported for each.
 

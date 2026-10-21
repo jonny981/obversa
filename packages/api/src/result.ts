@@ -123,6 +123,9 @@ function validateSelection(
   if (new Set(capabilities).size !== capabilities.length) {
     throw new TypeError(`${field}.capabilities must be unique`);
   }
+  if (value.modelSource !== undefined && value.modelSource !== 'reported' && value.modelSource !== 'requested') {
+    throw new TypeError(`${field}.modelSource must be reported or requested`);
+  }
   return Object.freeze({
     adapter: nonEmptyText(value.adapter, `${field}.adapter`),
     adapterVersion:
@@ -134,6 +137,7 @@ function validateSelection(
     model: nullableText(value.model, `${field}.model`),
     executable: nullableExecutable(value.executable, `${field}.executable`),
     capabilities: Object.freeze(capabilities),
+    ...(value.modelSource === undefined ? {} : { modelSource: value.modelSource }),
     ...(value.effort === undefined
       ? {}
       : { effort: nonEmptyText(value.effort, `${field}.effort`) }),
@@ -220,6 +224,7 @@ export function engineSelection(input: {
   model?: string | null;
   executable?: string | null;
   capabilities?: readonly string[];
+  modelSource?: 'reported' | 'requested';
   effort?: string;
 }): EngineSelectionRecord {
   return validateSelection({
@@ -230,6 +235,7 @@ export function engineSelection(input: {
     model: input.model ?? null,
     executable: input.executable ?? null,
     capabilities: input.capabilities ?? [],
+    ...(input.modelSource === undefined ? {} : { modelSource: input.modelSource }),
     ...(input.effort === undefined ? {} : { effort: input.effort }),
   }, 'selection');
 }

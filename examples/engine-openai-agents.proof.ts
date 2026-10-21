@@ -51,24 +51,21 @@ try {
     { save: { path: 'docs/getting-started.md', text: draft2 } },
     { text: reply('Changed the two sentences the findings named.') },
   ], null, 2)}\n`);
-  // The judge is asked every round. Round 1 keeps the act/skip call: it
-  // acts on both blocks. Round 2 asks impactful or minor: the one finding
-  // left is taste, and the judge calls it minor.
+  // The judge is asked every round. Each finding gets a score from
+  // cosmetic to blocking: it scores both blocks impactful in round 1.
+  // Round 2: the one finding left is taste, and the judge scores it
+  // minor.
   await writeFile(join(workspace, 'judge.json'), `${JSON.stringify([
     {
-      holds: { type: 'noul', noul: 0.1 },
-      worth_doing: { type: 'noul', noul: 0.9 },
-      worth_another_round: { type: 'noul', noul: 0.9 },
-      stop_reason: { type: 'choice', choice: 'continue', confidence: 0.8 },
-      'finding-1': { type: 'choice', choice: 'act', confidence: 0.9 },
-      'finding-2': { type: 'choice', choice: 'act', confidence: 0.9 },
+      product_decision: { type: 'noul', noul: 0.05 },
+      stop_reason: { type: 'choice', choice: 'continue', confidence: 0.9 },
+      'finding-1': { type: 'score', score: 2, confidence: 0.9 },
+      'finding-2': { type: 'score', score: 2, confidence: 0.9 },
     },
     {
-      holds: { type: 'noul', noul: 0.9 },
-      worth_doing: { type: 'noul', noul: 0.2 },
-      worth_another_round: { type: 'noul', noul: 0.1 },
-      stop_reason: { type: 'choice', choice: 'holds', confidence: 0.8 },
-      'finding-1': { type: 'noul', noul: 0.1, confidence: 0.9 },
+      product_decision: { type: 'noul', noul: 0.05 },
+      stop_reason: { type: 'choice', choice: 'holds', confidence: 0.85 },
+      'finding-1': { type: 'score', score: 1, confidence: 0.9 },
     },
   ], null, 2)}\n`);
   await writeFile(
@@ -129,7 +126,7 @@ try {
   stderr: ${run.stderr}`);
   const printed = JSON.parse(run.stdout.slice(run.stdout.lastIndexOf('\n{') + 1));
   assert.equal(printed.status, 'pass');
-  assert.equal(printed.stop, 'the judge found only minor findings');
+  assert.equal(printed.stop, 'the judge chose holds');
 
   const calls = (await readFile(callsLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string });
   const readerRuns = calls.filter((call) => call.role === 'codex').length;

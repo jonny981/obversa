@@ -5,7 +5,7 @@ description: "Several models review the same work, their reviews become one, and
 
 Ask several models from different families to review the same work. Their
 reviews become one list before anyone acts on it, and a judge calls each
-finding on that list: act or skip in round 1, impactful or minor after.
+finding on that list: cosmetic to blocking, every round.
 Use it for a page, a plan or a
 change where one review isn't enough.
 
@@ -27,7 +27,7 @@ flowchart LR
   cross -->|votes applied by rule| left{"what is left"}
   left -->|findings| judge{"judge: Jev decides each finding"}
   judge -->|the findings it calls impactful| write
-  judge -->|no finding is impactful| done((pass))
+  judge -->|nothing goes back and the judge lets it stand| done((pass))
   left -->|nothing| done
 ```
 
@@ -105,12 +105,14 @@ run. The judge never decides an unmet requirement.
 5. **Judge.** When a judge is set, it decides every finding that is left,
    a `block` included. It reads each one with who raised it and how the
    others voted. It calls each one, with a one-line
-   reason: act or skip in round 1, impactful or minor after. The writer gets
+   reason: cosmetic to blocking, every round. The writer gets
    only the findings the
    judge calls impactful, each with the judge's reason. The next round's reviewers
    are told which findings it held back and why. When any finding is
    impactful, another round runs; when none is,
-   the page stands as a pass. Each held-back one
+   the page stands as a pass unless the judge's stop answer ends the run
+   in a fail, or a weak or `none_applies` answer pauses it for a person.
+   Each held-back one
    joins the collected `minorFindings`. With no cap on the judge, the rounds end when the judge
    lets the page stand or every reviewer passes. A `block` goes straight back to
    the writer without a judge only when there is no judge.
@@ -195,7 +197,7 @@ OpenCode command line tools, and the judge replays the answers recorded in
       "findings": [
         "act: \"The client uses exponential backoff between attempts.\" The reader has not met \"exponential backoff\". (A reader who has not met the term cannot tell what the client does.)",
         "act: The page never says what happens when every retry fails. (A reader needs to know what the call does after the last retry.)",
-        "skip: \"Set max_retries to the number of extra attempts you want.\" could be shorter. (The sentence is clear as it is; a shorter one is taste.)"
+        "hold: \"Set max_retries to the number of extra attempts you want.\" could be shorter. (The sentence is clear as it is; a shorter one is taste.)"
       ]
     }
   ]
@@ -256,8 +258,7 @@ import { recordedJudge } from '@obversa/runtime/testing';
  * then each reviewer votes once on the findings it did not raise, and a
  * finding is dropped when the reviewers who reject it outnumber those who
  * raised or backed it, unless it is a block. A judge then
- * calls each finding that is left: act or skip in round 1, impactful or
- * minor after. The writer gets only the findings the judge sends back; a
+ * scores each finding that is left, cosmetic to blocking, every round. The writer gets only the findings the judge sends back; a
  * held-back one stays with the judge, collected for a person to read before
  * the page lands. When nothing is sent back, the page stands. With no cap,
  * the judge or the reviewers end the rounds.

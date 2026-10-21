@@ -69,8 +69,8 @@ backlog-groom-then-rank › split › split-review › review-panel • split-1:
 backlog-groom-then-rank › split › split-review › review-panel • split: fail  Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the "Dark mode pls" ticket is not covered by any story
 
 backlog-groom-then-rank › split › split-review › refine-judge • refine:judge
-backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.8},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"choice","choice":"act","confidence":0.9}}
-backlog-groom-then-rank › split › split-review ◆ split round 1: again on findings: 1 act, 0 skip: the judge acts on 1 of 1 findings
+backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"product_decision":{"type":"noul","noul":0.05},"stop_reason":{"type":"choice","choice":"continue","confidence":0.9},"finding-1":{"type":"score","score":2,"confidence":0.9}}
+backlog-groom-then-rank › split › split-review ◆ split round 1: again on findings: 1 act, 0 held: the judge acts on 1 of 1 findings
 
 
 backlog-groom-then-rank › split › split-review · review: fail
@@ -93,8 +93,8 @@ backlog-groom-then-rank › split › split-review › review-panel • split-1:
 backlog-groom-then-rank › split › split-review › review-panel • split: fail  Review panel: 0/1 reviewer(s) cleared. - split-1 [should-fix]: the PDF story could name the file size limit in its checks; nice to have
 
 backlog-groom-then-rank › split › split-review › refine-judge • refine:judge
-backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8},"finding-1":{"type":"noul","noul":0.1,"confidence":0.9}}
-backlog-groom-then-rank › split › split-review ◆ split round 2: stop as pass on findings: 0 act, 0 skip, 1 minor: the judge found only minor findings
+backlog-groom-then-rank › split › split-review › refine-judge • refine:judge: pass  {"product_decision":{"type":"noul","noul":0.05},"stop_reason":{"type":"choice","choice":"holds","confidence":0.85},"finding-1":{"type":"score","score":1,"confidence":0.9}}
+backlog-groom-then-rank › split › split-review ◆ split round 2: stop as pass on stop_reason: holds: the judge chose holds
 
 backlog-groom-then-rank › split › split-review · review: pass
 
@@ -138,14 +138,16 @@ backlog-groom-then-rank ◂ dag pass
   "data": {
     "split": {
       "status": "pass",
-      "summary": "the judge found only minor findings",
+      "summary": "the judge chose holds",
       "minorFindings": [
         {
           "evidence": "the PDF story could name the file size limit in its checks; nice to have",
           "severity": "should-fix",
           "reviewer": "split-1",
-          "judgeReason": "Minor: wording of docs or comments, style, naming, an edge case outside real use, or a nice-to-have, so fixing it would not change what a reader gets.",
-          "round": 2
+          "judgeReason": "Minor: a real fault a reader of this work rarely meets, an edge case outside normal use, or a nice-to-have.",
+          "round": 2,
+          "judgeLevel": "minor",
+          "judgeConfidence": 0.9
         }
       ]
     },

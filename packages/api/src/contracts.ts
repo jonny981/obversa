@@ -75,6 +75,13 @@ export interface EngineSelectionRecord {
   readonly model: string | null;
   readonly executable: string | null;
   readonly capabilities: readonly string[];
+  /**
+   * Where `model` on an `effective` record came from: `reported` when the
+   * engine named the model that answered, `requested` when it reported
+   * none and the record keeps the model id the request sent. A request
+   * that named no model leaves the pair null with no marker.
+   */
+  readonly modelSource?: 'reported' | 'requested';
   /** The reasoning effort the engine was asked to use, when one was set. */
   readonly effort?: string;
 }

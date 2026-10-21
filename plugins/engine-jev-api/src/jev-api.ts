@@ -373,20 +373,27 @@ function readUsage(usage: unknown): UsageReceipt {
   return reportedUsage({ inputTokens: input, outputTokens: output });
 }
 
+/**
+ * The identity the record holds for the call. A model Jev reports is the
+ * effective one (`modelSource: 'reported'`); a reply that names none, or an
+ * unreadable one, keeps the model id the request sent, marked
+ * `'requested'` — the record always says which.
+ */
 function effectiveSelection(
   requested: EngineSelectionRecord,
   echo: unknown,
 ): EngineSelectionRecord {
   if (typeof echo !== 'string') {
-    return engineSelection({ ...requested, model: null, modelFamily: null });
+    return engineSelection({ ...requested, modelSource: 'requested' });
   }
   try {
     return engineSelection({
       ...requested,
       model: echo,
       modelFamily: modelIdentity(echo).modelFamily,
+      modelSource: 'reported',
     });
   } catch {
-    return engineSelection({ ...requested, model: null, modelFamily: null });
+    return engineSelection({ ...requested, modelSource: 'requested' });
   }
 }

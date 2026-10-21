@@ -8,11 +8,14 @@ would improve the work. Use it for a page, a plan or a shortlist when you
 can't know how many rounds it will need.
 
 The reviewer says what needs fixing. The judge reads each note and the
-history of revisions, then calls each one: act or skip in round 1,
-impactful or minor after. When at least one is sent back, the workflow
-carries those notes
-to the writer and runs the next round. When none is, the work
-stands.
+history of revisions, then scores each one from cosmetic to blocking,
+with a confidence on each call. A note goes back to the writer only when
+its score is impactful or blocking and its confidence clears the bar for
+its level. When at least one is sent back, the workflow carries those
+notes to the writer and runs the next round. When none is, the work
+stands unless the judge's stop answer ends the run in a fail, or an
+answer too weak to route it, or `none_applies`, pauses the run for a
+person.
 With no cap, a run ends when the judge stops it or the review passes. You
 can add a cap as a backstop. Put a person's decision where the process
 needs one; this example asks before publication.
@@ -27,7 +30,7 @@ flowchart LR
   write["write: Claude seat"] -->|the page| read["read: Codex seat"]
   read -->|findings| judge{"judge: Jev"}
   judge -->|the findings it calls impactful| write
-  judge -->|no finding is impactful| approve["approve: a person"]
+  judge -->|nothing goes back and the judge lets it stand| approve["approve: a person"]
   read -->|nothing fails| approve
   approve --> done((pass))
 ```
@@ -62,33 +65,56 @@ The brief tells the reader to tag each finding `block`, `should-fix` or
 understand.
 
 When a judge is set, it answers one question per finding, a block included,
-with a one-line reason. In round 1 it chooses `act` or `skip`: act when a
-reader of this kind of work would stumble on, misread or distrust what the
-finding names, skip when it is taste, an edge case, or polish past the bar
-the use case sets. From the second round on it answers a yes or a no:
-is the finding impactful enough to send the work back, or minor? That
-question separates an impactful
-finding (behaviour wrong under normal use, a requirement of the brief
+with a one-line reason and a confidence. The question is a `score` over four
+ordered levels, the same scale in every round: `cosmetic` (wording, style,
+naming or polish past the bar), `minor` (a real fault a reader of this work
+rarely meets, an edge case outside normal use, or a nice-to-have),
+`impactful` (behaviour wrong under normal use, a requirement of the brief
 unmet, a test that cannot fail, or a risk of data loss, a security hole or
-a broken rule of the work) from a minor one (wording, style, naming, an
-edge case outside real use, or a nice-to-have). A real finding is not waved
+a broken rule of the work) and `blocking` (so wrong the work must not land
+while it stands). A real finding is not waved
 through because the rest of the list was trivial.
 
 - **The judge sends at least one finding back.** The page goes back:
   the writer gets only the findings the judge sent back, each with
   the judge's reason.
-- **The judge holds every finding back.** The page stands as a pass,
-  with the judge's reason.
+- **The judge holds every finding back.** A confident `holds`,
+  `over_polishing`, `not_converging` or `continue` stands the page as a
+  pass, with the held findings attached, and an answer too weak to route
+  it, or `none_applies`, pauses it for a person.
 - **The reader's next round.** The reader is told which findings did not
   go back and why, so it does not raise them again.
 
 A finding the judge holds back never goes to the writer again, whatever
-the reviewer tagged it: it is recorded `skip` in round 1 and `minor`
-from the second round on, and each is collected on `minorFindings`
+the reviewer tagged it: it is recorded `hold` with the level its score
+landed on and the confidence the answer carried, and each is collected on
+`minorFindings`
 with its reviewer and the evidence it wrote, where a file and line
 usually sit: the list a person reads before the work
 lands. The judge's own answer routes the finding; the reviewer's tag only
 informs what the judge reads.
+
+Every route the judge's answer drives is gated on its confidence, with the
+bars in `JUDGE_CONFIDENCE`. A finding scored impactful goes back at or
+above the send-back bar (0.7); a blocking one clears a lower bar (0.6),
+because a missed blocker is the worst miss. A stop answer that would end
+the run needs the stop bar (0.8). Anything under the hand-off bar (0.6),
+a `none_applies` choice, and a reply that cannot be read go to a person.
+The floor covers a finding's answer too: under it the call cannot be
+trusted to route the finding either way, back or onto the held list, so
+the finding is marked `pending` instead of held, and the run pauses with
+the question and the judge's answer attached, never spending another
+build on a call it could not trust. The person's call then decides each
+finding on its own. An `"act"` named under the finding's id in
+`feedback.findings` sends it back to the writer with its evidence. A
+`"hold"` keeps it back on `minorFindings`, even when the judge acted on
+it. A pending finding the answer does not name is held. A finding the
+judge acted on that the answer does not name goes back, unless the answer
+approves the work (`decision: "approved"`), which holds it. When the call
+sends no finding back, the run ends there as a pass and buys no extra
+build. The
+values are starting bars, tuned against labelled findings with
+`tools/calibrate-judge.mjs`.
 
 With no cap, the rounds end when the judge stops them or the reader finds
 nothing that fails. A reader that tags every finding block does not decide
@@ -126,35 +152,46 @@ check budget, not the cap: up to `checkRounds` more builds (3 by default,
 and on a `workflow()` stage a panel reviews).
 
 When the review of the last build does not pass, the judge is asked about
-it too and told that this is the last round. Its answer decides the outcome:
+it too and told that this is the last round. Its answers decide the outcome:
 
-- **`holds` or `over_polishing`.** The work stands as a pass with the
-  judge's reason. The findings still open are on the outcome as
+- **`holds` or `over_polishing`, confident.** The work stands as a pass
+  with the judge's reason. The findings still open are on the outcome as
   `openFindings`, and in the judge's entry in the record.
-- **`product_decision`.** A person is asked, and their answer buys exactly
-  one more round, past the cap, so the builder can apply it. The record
-  marks the send-back `productDecision`. Each product decision a person
-  answers buys its own round that way.
-- **`continue` or `not_converging`, with no impactful finding acted on.**
-  When the judge is deciding each finding, as on this page, no acted
-  finding means the work stands: the per-finding answers ship the round,
-  and the cap leaves that pass in place. The run fails only when the judge does
-  not decide each finding, with custom questions and no `perFinding`, or
-  when a review raised no findings to decide, and still asks for another
-  round past the cap. The reason names the cap.
+- **`product_decision`.** A person is asked, and a change they ask for
+  buys exactly one more round, past the cap, so the builder can apply it.
+  The record marks the send-back `productDecision`. An answer that holds
+  every finding, or approves the work and names none to act on, sends
+  nothing back and lets the work stand as a pass.
+- **A hand-off.** An answer under its bar, `none_applies`, or a reply the
+  runtime could not read pauses the run for a person, at the cap as before
+  it. A run never ends as a silent fail on an answer it could not trust.
+- **Every finding held back.** The per-finding answers send nothing
+  back, so the work stands, same as before the cap: a confident `holds`,
+  `over_polishing`, `not_converging` or `continue` stands the work as a
+  pass, with the held findings attached, and a weak stop answer or
+  `none_applies` pauses the run for a person. The run fails, with the cap named, when the
+  judge does not decide each finding, with custom questions and no
+  `perFinding`, or when a review raised no findings to decide, and still
+  asks for another round past the cap.
 
 Findings the judge still calls impactful change the ending. While the
-count it acts on is smaller than the round before, the run is still
+count it acts on is smaller than the round before (the runtime counts,
+not the model), the run is still
 converging: the spent cap grants one more round, marked `converging` on
 the send-back, and the record says why. When the count is not falling,
 the run pauses and asks a person, the open findings attached, as a
-resumable product decision; their answer buys the round the same way. A
-run never ends as a silent fail while findings the judge called impactful
-are still open.
+resumable product decision. Their call decides each finding the same way
+as on any pause. The acted findings they do not hold go back with their
+answer, in one more round past the cap. When they hold every acted
+finding, or approve the work and name none to act on, nothing goes back
+and the work stands as a pass, with the held findings on `minorFindings`.
+A run never ends as a silent fail while findings the judge called
+impactful are still open.
 
-When the judge decides each finding on the last round, calling every
-finding minor lets the work stand. A block in the last round goes to the
-judge too, with the same rules.
+When the judge decides each finding on the last round, holding every
+finding back lets the work stand on any confident stop answer, a
+`not_converging` included. A block in the last round goes to the judge
+too, with the same rules.
 
 ## What the judge sees
 
@@ -165,28 +202,36 @@ labelled parts, always in this order, and then the questions. The four
 parts, and `cut` when the size limit cut something, are the `state` of the
 judge's `{ state, questions }` prompt.
 
-- **`why`: what the work is for.** The brief, the use case, and the
-  target's `desc` and `gate`. A `workflow()` passes its `brief`, and takes
-  the use case from the brief's `Use case:` paragraph. A `dag()` passes its
-  own `brief` and `useCase`. A person's answers to the judge's earlier
-  product decisions are here too.
-- **`what`: the change.** In a git workspace, each file changed since the
-  run of the workflow or dag began, with the lines added and removed. For
-  each changed file and line a finding cites, such as `src/app.ts:42`, the
-  parts of the diff within ten lines of that line. A finding that cites a
-  file with no line gets that file's whole diff. When the target writes a
+- **`why`: what the work is for.** The use case, and the target's `desc`
+  and `gate`. A `workflow()` takes the use case from the brief's
+  `Use case:` paragraph; a `dag()` passes its own `useCase`. A person's
+  answers to the judge's earlier product decisions are here too. The whole
+  brief is not sent: the lines of it a finding touches ride on that
+  finding's own entry.
+- **`what`: the change.** In a git workspace, the list of files changed
+  since the run of the workflow or dag began. When the target writes a
   file, the judge also gets its content: the first file a stage `writes`,
-  or a dag node's `file`.
+  or a dag node's `file`. The diffs themselves ride on the findings that
+  cite them.
 - **`how`: this round's evidence.** The latest result of each check step
   in the graph, a `run:` stage or a `commandJob`: its command, its status
   and, when it did not pass, its output. The verdicts of the target's own
-  goal check, when it has one. Each finding, with the id its question uses, who
-  raised it and its severity. When the panel synthesised, each finding
-  also carries the other reviewers' votes and their reasons.
+  goal check, when it has one. Each finding, with the id its question
+  uses, who raised it, its severity, the lines of the brief it touches,
+  and the hunks of the diff it cites: for each changed file and line a
+  finding cites, such as `src/app.ts:42`, the
+  parts of that file's diff within ten lines of that line, and the whole
+  diff when it cites a file with no line. When the panel synthesised, each
+  finding also carries the other reviewers' votes and their reasons.
 - **`when`: where the rounds stand.** The round number, the cap, and
-  whether this is the last round. Every earlier round, with its findings,
-  the judge's decision on each and its reason, and how many lines that
-  round changed. The findings the judge held back, with its reasons. In a git
+  whether this is the last round. The numbers the runtime computed, so no
+  question asks the model to count or compare: how many findings are open,
+  how many the judge acted on in this round and in the round before,
+  whether that count is falling, and which findings repeat: a repeat is
+  the same reviewer, the same file and the same claim, normalised so a
+  moved line still counts. Then every earlier round summarised to its
+  counts, how many findings it acted on and its decision, the findings the
+  judge held back with its reasons and levels, and in a git
   workspace, the files changed since the last round.
 
 ### The size limit
@@ -195,19 +240,23 @@ What the judge reads can be large, so it is kept to 50000 characters,
 counted as JSON. Set another limit with the `judgeContextLimit` option of
 `run()`, for example `run(job, { judgeContextLimit: 20000 })`.
 
-When the four parts are over the limit, the runtime cuts every long part
-down to one shared length, set so that the whole fits. A short part is cut
-only when cutting the long ones is not enough. These parts can be cut:
+When the four parts are over the limit, the runtime cuts every long prose
+part down to one shared length, set so that the whole fits. A short part
+is cut only when cutting the long ones is not enough. The prose is cut
+first; only when no length of prose can fit the packet are the round lists
+cut too. These parts can be cut:
 
-- **Texts.** The brief, the use case, the `desc`, the `gate`, each diff,
-  the file's content and each check's output. A text keeps its start.
+- **Texts.** The use case, the `desc`, the `gate`, the file's content,
+  each check's output, and on each finding the brief lines and the diff
+  hunk attached to it. A text keeps its start.
 - **Lists.** A person's earlier answers, the changed files, the goal
   check's verdicts, the earlier rounds, the findings held back before and
   the files changed since the last round. A list keeps whole items. The
   earlier rounds, the held-back findings and the answers keep the latest.
   The other lists keep their first items.
 
-The findings to decide are never cut. When they, with the names, numbers
+The findings to decide are never cut, nor the computed counts and repeats
+in `when`. When they, with the names, numbers
 and commands around them, are over the limit on their own, what the judge
 reads stays over it, and the last note says so.
 
@@ -221,51 +270,55 @@ cuts.
 ## The questions
 
 For each finding in the round, the judge gets one question, keyed
-`finding-1`, `finding-2` and so on in the order of the round's findings. In
-round 1 it chooses `act` or `skip`: act when a reader of this kind of work
-would stumble on, misread or distrust what the finding names; skip when it
-is taste, an edge case, or polish past the bar the use case sets. From the
-second round on it answers a yes or a no. A
-yes calls the finding impactful: behaviour wrong
-under normal use, a requirement of the brief unmet, a test that cannot
-fail, or a risk of data loss, a security hole or a broken rule of the work.
-A no calls it minor: wording, style, naming, an edge case outside real
-use, or a nice-to-have. A block keeps its severity in what the judge sees,
-and its question sets the same higher bar in either wording: hold it back
-only when the case it names is outside how the work is really used, or the
-same class of finding keeps returning after it was answered. Otherwise it
-goes back. When an
-answer carries no reason of its own, the
-reason is the text of the matching criterion. The judge
-answers these in the same call as the questions about the whole round. The
+`finding-1`, `finding-2` and so on in the order of the round's findings.
+`findingQuestions()` from [`@obversa/runtime`](/packages/runtime) builds
+them. Each is a `score` over `FINDING_LEVELS`, cosmetic to blocking, with
+a one-line reason and a confidence. The judge
+answers the finding questions in a first call; the runtime reads its
+scores, computes how many findings it acted on this round against the
+round before, and asks the questions about the whole round in a second
+call that carries those numbers. The
 default set of those is `stopQuestions()` from
-[`@obversa/runtime`](/packages/runtime). It asks four questions:
+[`@obversa/runtime`](/packages/runtime). It asks two questions, one
+judgement each:
 
-- **`holds`.** For this use case, does the draft hold as it stands?
-- **`worth_doing`.** For this use case, are the latest findings worth
-  acting on?
-- **`worth_another_round`.** Given the whole history, is another round
-  worth it?
-- **`stop_reason`.** Are we at the point of diminishing returns? The judge
-  chooses `holds`, `over_polishing`, `not_converging`, `continue` or
-  `product_decision`.
+- **`product_decision`, a `noul`.** Must a person settle a product
+  decision before this review can continue? Its true and false criteria
+  say what each side means.
+- **`stop_reason`, a `choice`.** If no finding is sent back, how should
+  the run end? Each option has criteria no other option shares: `holds`,
+  `over_polishing`, `not_converging`, `continue`, and `none_applies` for
+  the case that fits none of them.
 
-The answers about each finding decide the route. A finding the judge
-calls impactful is recorded `act`, and another round runs. One it holds
-back is recorded `skip` in the first round and `minor` after it: neither
-sends the work back, and each joins the collected list. When
-every finding is held back, the work stands as a pass, with the collected
-findings on the outcome as `minorFindings`. This holds whatever the round
-answers say, so a chosen `not_converging` neither drops a finding the judge
-called impactful nor fails a round whose findings are all held back. The
-one exception is `product_decision`:
-the judge asks a person as described below. When the judge itself cannot
-answer, the loop stops rather than spending a build. A failed judge call
+The answers about each finding decide the route, each gated on its
+confidence by the bars in `JUDGE_CONFIDENCE`. A finding the judge scores
+impactful at or over the send-back bar, or blocking at or over its lower
+one, is recorded `act`, and another round runs. Every other finding is
+recorded `hold` with its level and confidence and joins the collected
+list, or `pending` when its answer sits under the hand-off floor: no
+settled call, and it never joins the collected list. When
+every finding is held back, the work stands: a confident `holds`,
+`over_polishing` or `not_converging` ships it as a pass with the
+collected findings on the outcome as `minorFindings`, a `continue` that
+clears the stop bar with nothing to send back lets the work stand too,
+and a weaker answer pauses the run for a person like any weak ending.
+A run does not fail while no finding the judge acts on is open.
+An acted finding still beats a chosen ending, so a `not_converging`
+cannot drop a finding the judge sent back. Two answers
+still reach a person first: a `product_decision` the judge is sure of or
+cannot rule out, and any answer too weak to route on (under the hand-off
+bar, `none_applies`, or a stop under the stop bar), which pauses the run
+with the question attached instead of spending a build. When the judge
+itself cannot answer, the loop stops the same way. A failed judge call
 pauses the run with the engine's own error. A reply that does not parse,
 or that leaves an asked question without a usable answer, pauses it with
 a validation error. A resumed run asks the judge again for the same round,
 over the review that was already done. Nothing builds and nothing reviews
 again first.
+
+Each judge entry in the record carries the model that answered: the model
+the engine reports, or, when it reports none, the model the request
+asked for, marked `modelSource: 'requested'` rather than `'reported'`.
 
 A `dag()` node takes the same `judge()` value in `review({ judge })` on its
 `refine`, which covers the node's own reviews and the send-backs other
@@ -316,17 +369,19 @@ printed:
 ```json Output
 {
   "status": "pass",
-  "stop": "the judge found only minor findings",
+  "stop": "the judge chose holds",
   "approved": true
 }
 ```
 
-Three rounds. The first reader pass found two blocks. The judge acted
-on both, so the page went back. The second found a `should-fix` (the page never
-says where to run the command) and a `nice-to-have`. The judge called the
+Three rounds. The first reader pass found two blocks. The judge scored
+both impactful with the confidence to send them back, so the page went
+back. The second found a `should-fix` (the page never
+says where to run the command) and a `nice-to-have`. The judge scored the
 first impactful and the second minor, so the writer got only the first. The third
-pass found one `nice-to-have`, and the judge called it minor too, so the page stood.
-The minor findings stayed on the record as `minorFindings`, for a person
+pass found one `nice-to-have`, the judge scored it minor and chose `holds`,
+so the page stood.
+The held-back findings stayed on the record as `minorFindings`, for a person
 to read before the page lands.
 
 The record holds each round's findings and the judge's answers. Each answer
@@ -336,8 +391,8 @@ id with the judge's decision and reason, for example:
 
 ```json
 [
-  { "id": "finding-1", "decision": "act", "reason": "Impactful: behaviour wrong under normal use, a requirement of the brief unmet, a test that cannot fail, or a risk of data loss, a security hole or a broken rule of the work, so the builder should fix it." },
-  { "id": "finding-2", "decision": "minor", "reason": "Minor: wording of docs or comments, style, naming, an edge case outside real use, or a nice-to-have, so fixing it would not change what a reader gets." }
+  { "id": "finding-1", "decision": "act", "level": "impactful", "confidence": 0.91, "reason": "Impactful: behaviour wrong under normal use, a requirement of the brief unmet, a test that cannot fail, or a risk of data loss, a security hole or a broken rule of the work." },
+  { "id": "finding-2", "decision": "hold", "level": "cosmetic", "confidence": 0.95, "reason": "Cosmetic: wording, style, naming or polish past the bar, so it changes nothing a reader gets." }
 ]
 ```
 With `JUDGE=jev`, and `TYPESAFE_ENDPOINT` and `TYPESAFE_API_KEY` in the

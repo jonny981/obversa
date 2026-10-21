@@ -466,7 +466,22 @@ export function judgedReview(work: RefinedWork, cfgJudge: Judge, review: Job, ru
       // The judge decided each finding before asking: the answer goes with the findings those decisions send back.
       const answered = judgedFindings(findings, { findings: result.state.decided }, result.state.skipped ?? [], state.round);
       shared.skipped = answered.skipped;
-      return productDecisionFeedback(result.answer, answered.acted, { granted: round.lastRound });
+      // The person's call can let the work stand — an approval, "hold all",
+      // or an answer that leaves only pending findings unnamed: with
+      // nothing acted on and no changes requested, the run ends as a pass,
+      // and what they held lands on `minorFindings`.
+      if (answered.acted.length === 0 && result.answer.decision !== 'changes-requested') {
+        const minors = minorFindings(answered.skipped);
+        return {
+          status: 'pass',
+          confidence: reviewOutcome.confidence,
+          summary: `a person's answer let the work stand: "${result.answer.prompt}"`,
+          data: reviewOutcome.data,
+          ...(round.lastRound ? { openFindings: findings } : {}),
+          ...(minors.length ? { minorFindings: minors } : {}),
+        };
+      }
+      return productDecisionFeedback(result.answer, answered.acted, { granted: round.lastRound, ...(result.state.handoff === true ? { handoff: true } : {}) });
     }
     const { decision } = result;
     const judged = judgedFindings(findings, decision, result.state.skipped ?? [], state.round);

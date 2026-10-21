@@ -70,8 +70,8 @@ translate-reflect › translate › translate-review › review-panel • transl
 translate-reflect › translate › translate-review › review-panel • translate: fail  Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "s'expédie" and "l'expédie" where the glossary says "envoyer" - translate-1 [should-fix]: "rappels de paiement" where the glossary says "relance de paiement"
 
 translate-reflect › translate › translate-review › refine-judge • refine:judge
-translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.72},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"choice","choice":"act","confidence":0.9},"finding-2":{"type":"c
-translate-reflect › translate › translate-review ◆ translate round 1: again on findings: 2 act, 0 skip: the judge acts on 2 of 2 findings
+translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"product_decision":{"type":"noul","noul":0.05},"stop_reason":{"type":"choice","choice":"continue","confidence":0.9},"finding-1":{"type":"score","score":2,"confidence":0.9},"finding-2":{"type":"score","score":2,"confidence":0.9}}
+translate-reflect › translate › translate-review ◆ translate round 1: again on findings: 2 act, 0 held: the judge acts on 2 of 2 findings
 
 
 translate-reflect › translate › translate-review · review: fail
@@ -94,8 +94,8 @@ translate-reflect › translate › translate-review › review-panel • transl
 translate-reflect › translate › translate-review › review-panel • translate: fail  Review panel: 0/1 reviewer(s) cleared. - translate-1 [should-fix]: "le jour venu" is fine; "le jour dit" sat closer to the source, taste only
 
 translate-reflect › translate › translate-review › refine-judge • refine:judge
-translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8},"finding-1":{"type":"noul","noul":0.1,"confidence":0.9}}
-translate-reflect › translate › translate-review ◆ translate round 2: stop as pass on findings: 0 act, 0 skip, 1 minor: the judge found only minor findings
+translate-reflect › translate › translate-review › refine-judge • refine:judge: pass  {"product_decision":{"type":"noul","noul":0.05},"stop_reason":{"type":"choice","choice":"holds","confidence":0.85},"finding-1":{"type":"score","score":1,"confidence":0.9}}
+translate-reflect › translate › translate-review ◆ translate round 2: stop as pass on stop_reason: holds: the judge chose holds
 
 translate-reflect › translate › translate-review · review: pass
 
@@ -124,14 +124,16 @@ translate-reflect ◂ dag pass
   "data": {
     "translate": {
       "status": "pass",
-      "summary": "the judge found only minor findings",
+      "summary": "the judge chose holds",
       "minorFindings": [
         {
           "evidence": "\"le jour venu\" is fine; \"le jour dit\" sat closer to the source, taste only",
           "severity": "should-fix",
           "reviewer": "translate-1",
-          "judgeReason": "Minor: wording of docs or comments, style, naming, an edge case outside real use, or a nice-to-have, so fixing it would not change what a reader gets.",
-          "round": 2
+          "judgeReason": "Minor: a real fault a reader of this work rarely meets, an edge case outside normal use, or a nice-to-have.",
+          "round": 2,
+          "judgeLevel": "minor",
+          "judgeConfidence": 0.9
         }
       ]
     },
@@ -153,8 +155,8 @@ translate-reflect ◂ dag pass
 Two translations, two reads, two answers from the judge. The first
 translation rendered two glossary terms with the words the glossary rules
 out; the reviewer named them, and the judge acted on both. The second
-followed the glossary and drew one taste note, which the judge called minor, so
-the translation stood. The run waited at `nuance` with the
+followed the glossary and drew one taste note, which the judge scored
+minor, so the translation stood. The run waited at `nuance` with the
 translation in `fr/article.md` and the terms note in `fr/terms.md`, and the
 editor's yes on the page finished it. A no goes to `translate` with the editor's note as the
 finding.

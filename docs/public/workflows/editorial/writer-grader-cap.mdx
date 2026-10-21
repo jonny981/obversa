@@ -65,8 +65,8 @@ writer-grader-cap › draft › draft-review › review-panel • draft-1: fail 
 writer-grader-cap › draft › draft-review › review-panel • draft: fail  Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 1: "the best in the business" breaks rule 3, no superlatives
 
 writer-grader-cap › draft › draft-review › refine-judge • refine:judge
-writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.72},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"choice","choice":"act","confidence":0.9}}
-writer-grader-cap › draft › draft-review ◆ draft round 1: again on findings: 1 act, 0 skip: the judge acts on 1 of 1 findings
+writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"product_decision":{"type":"noul","noul":0.05},"stop_reason":{"type":"choice","choice":"continue","confidence":0.9},"finding-1":{"type":"score","score":2,"confidence":0.9},"finding-2":{"type":"score","score":2,"confidence":0.9}}
+writer-grader-cap › draft › draft-review ◆ draft round 1: again on findings: 1 act, 0 held: the judge acts on 1 of 1 findings
 
 
 writer-grader-cap › draft › draft-review · review: fail
@@ -90,8 +90,8 @@ writer-grader-cap › draft › draft-review › review-panel • draft-1: fail 
 writer-grader-cap › draft › draft-review › review-panel • draft: fail  Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 3: "40 percent" breaks rule 4; the brief gives no number
 
 writer-grader-cap › draft › draft-review › refine-judge • refine:judge
-writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.2},"worth_doing":{"type":"noul","noul":0.8},"worth_another_round":{"type":"noul","noul":0.61},"stop_reason":{"type":"choice","choice":"continue","confidence":0.6},"finding-1":{"type":"noul","noul":0.9}}
-writer-grader-cap › draft › draft-review ◆ draft round 2: again on findings: 1 act, 0 skip: the judge acts on 1 of 1 findings
+writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"product_decision":{"type":"noul","noul":0.05},"stop_reason":{"type":"choice","choice":"continue","confidence":0.9},"finding-1":{"type":"score","score":2,"confidence":0.9},"finding-2":{"type":"score","score":1,"confidence":0.9}}
+writer-grader-cap › draft › draft-review ◆ draft round 2: again on findings: 1 act, 0 held: the judge acts on 1 of 1 findings
 
 
 writer-grader-cap › draft › draft-review · review: fail
@@ -115,8 +115,8 @@ writer-grader-cap › draft › draft-review › review-panel • draft-1: fail 
 writer-grader-cap › draft › draft-review › review-panel • draft: fail  Review panel: 0/1 reviewer(s) cleared. - draft-1 [should-fix]: line 5: the closing line could name Codex; taste, not a rule
 
 writer-grader-cap › draft › draft-review › refine-judge • refine:judge
-writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"holds":{"type":"noul","noul":0.9},"worth_doing":{"type":"noul","noul":0.2},"worth_another_round":{"type":"noul","noul":0.1},"stop_reason":{"type":"choice","choice":"holds","confidence":0.8},"finding-1":{"type":"noul","noul":0.1,"confidence":0.9}}
-writer-grader-cap › draft › draft-review ◆ draft round 3: stop as pass on findings: 0 act, 0 skip, 1 minor: the judge found only minor findings
+writer-grader-cap › draft › draft-review › refine-judge • refine:judge: pass  {"product_decision":{"type":"noul","noul":0.05},"stop_reason":{"type":"choice","choice":"holds","confidence":0.85},"finding-1":{"type":"score","score":1,"confidence":0.9}}
+writer-grader-cap › draft › draft-review ◆ draft round 3: stop as pass on stop_reason: holds: the judge chose holds
 
 writer-grader-cap › draft › draft-review · review: pass
 
@@ -137,14 +137,16 @@ writer-grader-cap ◂ dag paused
   "data": {
     "draft": {
       "status": "pass",
-      "summary": "the judge found only minor findings",
+      "summary": "the judge chose holds",
       "minorFindings": [
         {
           "evidence": "line 5: the closing line could name Codex; taste, not a rule",
           "severity": "should-fix",
           "reviewer": "draft-1",
-          "judgeReason": "Minor: wording of docs or comments, style, naming, an edge case outside real use, or a nice-to-have, so fixing it would not change what a reader gets.",
-          "round": 3
+          "judgeReason": "Minor: a real fault a reader of this work rarely meets, an edge case outside normal use, or a nice-to-have.",
+          "round": 3,
+          "judgeLevel": "minor",
+          "judgeConfidence": 0.9
         }
       ]
     },
@@ -172,7 +174,7 @@ writer-grader-cap ◂ dag paused
           ]
         },
         "input": {
-          "draft": "the judge found only minor findings"
+          "draft": "the judge chose holds"
         },
         "presentation": {}
       }
@@ -186,7 +188,7 @@ first draft called the review "the best in the business", and the grader
 named the line and the rule against superlatives; the judge acted on the
 finding. The second draft explained the loop and added a number
 the brief never gave, and the grader named that; the judge acted on that
-too. The third draft drew one taste note, which the judge called minor,
+too. The third draft drew one taste note, which the judge scored minor,
 so the
 draft stood and the run stopped for the editor. Nothing was published.
 
@@ -237,25 +239,21 @@ asks Jev the same questions instead:
 ```json judge.json
 [
   {
-    "holds": { "type": "noul", "noul": 0.2 },
-    "worth_doing": { "type": "noul", "noul": 0.8 },
-    "worth_another_round": { "type": "noul", "noul": 0.72 },
-    "stop_reason": { "type": "choice", "choice": "continue", "confidence": 0.6 },
-    "finding-1": { "type": "choice", "choice": "act", "confidence": 0.9 }
+    "product_decision": { "type": "noul", "noul": 0.05 },
+    "stop_reason": { "type": "choice", "choice": "continue", "confidence": 0.9 },
+    "finding-1": { "type": "score", "score": 2, "confidence": 0.9 },
+    "finding-2": { "type": "score", "score": 2, "confidence": 0.9 }
   },
   {
-    "holds": { "type": "noul", "noul": 0.2 },
-    "worth_doing": { "type": "noul", "noul": 0.8 },
-    "worth_another_round": { "type": "noul", "noul": 0.61 },
-    "stop_reason": { "type": "choice", "choice": "continue", "confidence": 0.6 },
-    "finding-1": { "type": "noul", "noul": 0.9 }
+    "product_decision": { "type": "noul", "noul": 0.05 },
+    "stop_reason": { "type": "choice", "choice": "continue", "confidence": 0.9 },
+    "finding-1": { "type": "score", "score": 2, "confidence": 0.9 },
+    "finding-2": { "type": "score", "score": 1, "confidence": 0.9 }
   },
   {
-    "holds": { "type": "noul", "noul": 0.9 },
-    "worth_doing": { "type": "noul", "noul": 0.2 },
-    "worth_another_round": { "type": "noul", "noul": 0.1 },
-    "stop_reason": { "type": "choice", "choice": "holds", "confidence": 0.8 },
-    "finding-1": { "type": "noul", "noul": 0.1, "confidence": 0.9 }
+    "product_decision": { "type": "noul", "noul": 0.05 },
+    "stop_reason": { "type": "choice", "choice": "holds", "confidence": 0.85 },
+    "finding-1": { "type": "score", "score": 1, "confidence": 0.9 }
   }
 ]
 ```
@@ -421,7 +419,7 @@ flowchart LR
 
 The proof runs the file against scripted seats and a recorded judge, and
 checks the loop the page describes: three writer turns, three grader reads,
-the judge acting on the two rule findings and skipping the taste note, the
+the judge acting on the two rule findings and holding the taste note back, the
 superlative and the invented number gone from the draft on disk, and the
 run stopped at the editor. Obversa recorded the run as one event log, so it shows each draft,
 each set of findings and each answer from the judge in order, with the
@@ -444,13 +442,15 @@ To bound the rounds as well, pass a cap as a backstop:
 all. When the fourth draft does not pass, the judge is told it is the last
 round. If it lets the
 draft stand, the draft goes to the editor, with the open findings on the
-record. A `product_decision` buys exactly one more round for the person's
-answer. Findings the judge still calls impactful change the ending: a
+record. A `product_decision` buys exactly one more round for a change the
+person asks for; an answer that sends nothing back lets the work stand.
+Findings the judge still calls impactful change the ending: a
 count falling from the round before grants one more round, and a count
 that is not falling pauses the run to ask a person with the open findings
 attached. And when the judge decides each finding, as here, a round it
-acts on nothing in stands as a pass with the held-back findings on the
-record.
+acts on nothing in stands as a pass on any confident stop answer, a
+`not_converging` included, with the held-back findings on the record; a
+weak or `none_applies` answer pauses it for a person.
 [A judge stops the loop](/patterns/judge-stops-the-loop) has the questions
 and the rule.
 

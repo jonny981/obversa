@@ -47,12 +47,10 @@ const CANDIDATE = 'Reply with the number only.';
 const TUNING = ['2 + 3', '4 + 4'];
 const HELD_OUT = ['10 + 7'];
 
-/** A complete reply to the round questions: every probability a clear yes. */
+/** A complete reply to the round questions, confident in its choice. */
 const round = (choice: string): Record<string, unknown> => ({
-  holds: { noul: 0.9 },
-  worth_doing: { noul: 0.9 },
-  worth_another_round: { noul: 0.9 },
-  stop_reason: { choice },
+  product_decision: { noul: 0.05 },
+  stop_reason: { choice, confidence: 0.9 },
 });
 
 const repos: string[] = [];

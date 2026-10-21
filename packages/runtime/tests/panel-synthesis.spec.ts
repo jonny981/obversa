@@ -12,12 +12,10 @@ function seat(engine: MockEngine, model: string, tools: readonly string[] = []):
   return { engine, identity: { adapter: 'mock', provider: 'mock', modelFamily: model, model, tools } };
 }
 
-/** A complete reply to the round questions: every probability a clear yes. */
+/** A complete reply to the round questions: no product decision, a confident route. */
 const round = (choice: string): Record<string, unknown> => ({
-  holds: { noul: 0.9 },
-  worth_doing: { noul: 0.9 },
-  worth_another_round: { noul: 0.9 },
-  stop_reason: { choice },
+  product_decision: { noul: 0.05 },
+  stop_reason: { choice, confidence: 0.95 },
 });
 
 interface PromptFinding { readonly id: string; readonly evidence: string }

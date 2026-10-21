@@ -88,11 +88,15 @@ answer, the work goes back to the writer with your feedback, your composed
 prompt and the findings you answered. The reviewers then check the new
 draft, and the judge looks at the result. You are not asked the same
 question again before the writer has used your answer. When the judge has
-a cap and asks after the last round it allows, your answer buys one more
-round for the builder to apply it. Each product decision you answer buys
-its own round that way. That holds for one the judge chose to ask and for
-one the spent cap raises because the findings it would act on are not
-falling. A question you leave unanswered keeps the run paused on you.
+a cap and asks after the last round it allows, a change you ask for buys
+one more round for the builder to apply it. You can name `"act"` or
+`"hold"` for each finding under its id in `feedback.findings`. A finding
+you hold joins `minorFindings`. A finding the judge acted on that you do
+not name goes back with your answer, unless you approve the work. When
+nothing goes back, the work stands as a pass. That holds for a product
+decision the judge chose to ask and for one the spent cap raises because
+the findings it would act on are not falling. A question you leave unanswered keeps
+the run paused on you.
 
 Run the example from a source checkout with a signed-in Codex CLI and
 `OBVERSA_MODEL` set to the model you want:

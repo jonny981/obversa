@@ -46,12 +46,10 @@ async function result(job: Job, options: RunOptions): Promise<RunResult> {
   return run(job, { cwd, signal: new AbortController().signal, ...options });
 }
 
-/** A complete reply to the round questions: every probability a clear yes. */
+/** A complete reply to the round questions: no product decision, a confident route. */
 const roundAnswers = (choice: string): Record<string, unknown> => ({
-  holds: { noul: 0.9 },
-  worth_doing: { noul: 0.9 },
-  worth_another_round: { noul: 0.9 },
-  stop_reason: { choice },
+  product_decision: { noul: 0.05 },
+  stop_reason: { choice, confidence: 0.95 },
 });
 
 function counters() {
@@ -965,8 +963,8 @@ describe('dag resume', () => {
       for (const [key, question] of Object.entries(questions)) {
         if (!key.startsWith('finding-')) continue;
         answers[key] = question.instructions.includes('REAL')
-          ? (question.type === 'choice' ? { choice: 'act', reason: 'a reader cannot tell who the page is for' } : { noul: 0.9, reason: 'a reader cannot tell who the page is for' })
-          : (question.type === 'choice' ? { choice: 'skip', reason: 'a matter of taste' } : { noul: 0.1, reason: 'a matter of taste' });
+          ? { score: 2, confidence: 0.95, reason: 'a reader cannot tell who the page is for' }
+          : { score: 0, confidence: 0.95, reason: 'a matter of taste' };
       }
       return JSON.stringify(answers);
     });
@@ -983,7 +981,8 @@ describe('dag resume', () => {
     const path = recordTo();
     const first = await run(build(), { cwd, signal: controller.signal, recordTo: path });
     expect(first.outcome.status).toBe('aborted');
-    expect(judgeCalls).toHaveLength(1);
+    // Round 1's judge asks twice: the finding scores, then the round questions.
+    expect(judgeCalls).toHaveLength(2);
 
     // The resume builds the second round again with the judge's send-back.
     // Its reviewer hears what the judge held back, and the judge reads round
@@ -1074,7 +1073,10 @@ describe('dag resume', () => {
             return { status: 'pass' as const };
           },
           refine: judge({
-            engine: new MockEngine(() => JSON.stringify(roundAnswers('product_decision'))),
+            engine: new MockEngine(() => JSON.stringify({
+              product_decision: { noul: 0.9 },
+              stop_reason: { choice: 'continue', confidence: 0.95 },
+            })),
             identity: { adapter: 'mock', provider: 'mock', modelFamily: 'judge-mock', model: 'judge-mock', tools: [] },
           }, { cap: 2, perFinding: false }),
         }),

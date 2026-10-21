@@ -37,9 +37,11 @@ Not in `@obversa/obversa`; install it on its own.
 
 The plugin reports `provider: 'typesafe'`, with the model family read from
 the model name. It sends the model the request names, or `model` from its
-options, or `jev-latest`. If the API doesn't echo a model, or echoes one that
-can't be read, the recorded effective model and family are both `null`, and
-the answers are still returned.
+options, or `jev-latest`. When the API echoes a usable model, the recorded
+effective model is that echo, marked `modelSource: 'reported'`. When it
+doesn't echo one, or echoes one that can't be read, the effective model is
+the one the request asked for, marked `modelSource: 'requested'`, and the
+answers are still returned.
 
 ## Quickstart
 

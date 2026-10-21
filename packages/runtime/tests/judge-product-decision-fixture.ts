@@ -89,24 +89,26 @@ export function productDecisionJob(kind: ProductCaller, cwd: string, scenario: P
     };
   };
   const judgeEngine = new MockEngine((request: AgentRequest) => {
+    const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { type: string; instructions: string }> };
+    const answers: Record<string, unknown> = {};
+    for (const [id, question] of Object.entries(questions)) {
+      if (!id.startsWith('finding-')) continue;
+      answers[id] = { score: question.instructions.includes('REAL') ? 2 : 0, confidence: 0.95, reason: 'judged' };
+    }
+    // With per-finding judging the scores go in their own call first; a
+    // scenario's choices are still one per round — the call that asks the
+    // round questions reads the next one, and is the one the log records.
+    if (!Object.keys(questions).some((id) => !id.startsWith('finding-'))) {
+      return JSON.stringify(answers);
+    }
     const count = productCalls(cwd).filter((call) => call.kind === 'judge').length;
     record({ kind: 'judge', prompt: request.prompt });
-    const answers: Record<string, unknown> = {
-      holds: { noul: 0.9 },
-      worth_doing: { noul: 0.9 },
-      worth_another_round: { noul: 0.9 },
-      stop_reason: { choice: scenario.choices[Math.min(count, scenario.choices.length - 1)] },
-    };
-    if (scenario.perFinding) {
-      const { questions } = JSON.parse(request.prompt) as { questions: Record<string, { type: string; instructions: string }> };
-      for (const [id, question] of Object.entries(questions)) {
-        if (!id.startsWith('finding-')) continue;
-        answers[id] = question.type === 'choice'
-          ? { choice: question.instructions.includes('REAL') ? 'act' : 'skip', reason: 'judged' }
-          : { noul: question.instructions.includes('REAL') ? 0.9 : 0.1, reason: 'judged' };
-      }
-    }
-    return JSON.stringify(answers);
+    const choice = scenario.choices[Math.min(count, scenario.choices.length - 1)];
+    // A scenario's 'product_decision' is the noul, not a stop choice: the
+    // judge answers it true and lets the round continue past its ask.
+    return JSON.stringify(choice === 'product_decision'
+      ? { ...answers, product_decision: { noul: 0.9 }, stop_reason: { choice: 'continue', confidence: 0.95 } }
+      : { ...answers, product_decision: { noul: 0.05 }, stop_reason: { choice, confidence: 0.95 } });
   });
   const refine = judge(seat(judgeEngine, 'judge-mock'), { cap: scenario.cap, perFinding: scenario.perFinding === true });
   const interaction = { id: 'rich-review', responseSchema: {} };

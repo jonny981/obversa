@@ -24,8 +24,8 @@ import { recordedJudge } from '@obversa/runtime/testing';
  * A loop whose stopping rule is a judge, not a count. Claude rewrites the
  * page the brief names; Codex, from another model family, reads every
  * sentence as a person would and reports what fails, each finding tagged
- * block, should-fix or nice-to-have. Jev calls each finding: act or skip
- * in round 1, impactful or minor after, a block included. The writer gets
+ * block, should-fix or nice-to-have. Jev scores each finding cosmetic
+ * to blocking, a block included. The writer gets
  * only the findings Jev sends back, and the reader is told what was held
  * back; each held-back one is collected for a person to read before the
  * page lands. When nothing is sent back, the page stands. With no

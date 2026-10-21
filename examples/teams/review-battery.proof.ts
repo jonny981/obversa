@@ -82,19 +82,16 @@ try {
   await mkdir(bin, { recursive: true });
   await copyFile(join(here, 'briefs/retries.md'), join(workspace, 'briefs/retries.md'));
   await writeFile(join(workspace, 'docs/retries.md'), original);
-  // The judge is asked once, after round 1, which has no block. Round 1
-  // keeps the act/skip call: it acts on the merged backoff finding and the
-  // last retry, in the order the synthesis lists them, and skips the
-  // disputed nit.
+  // The judge is asked once, after round 1, which has no block. It scores
+  // the merged backoff finding and the last retry impactful, in the order
+  // the synthesis lists them, and holds back the disputed nit as cosmetic.
   await writeFile(join(workspace, 'judge.json'), `${JSON.stringify([
     {
-      holds: { type: 'noul', noul: 0.2 },
-      worth_doing: { type: 'noul', noul: 0.8 },
-      worth_another_round: { type: 'noul', noul: 0.8 },
-      stop_reason: { type: 'choice', choice: 'continue', confidence: 0.8 },
-      'finding-1': { type: 'choice', choice: 'act', reason: actBackoff },
-      'finding-2': { type: 'choice', choice: 'act', reason: actLastRetry },
-      'finding-3': { type: 'choice', choice: 'skip', reason: skipNit },
+      product_decision: { type: 'noul', noul: 0.05 },
+      stop_reason: { type: 'choice', choice: 'continue', confidence: 0.9 },
+      'finding-1': { type: 'score', score: 2, confidence: 0.9, reason: actBackoff },
+      'finding-2': { type: 'score', score: 2, confidence: 0.9, reason: actLastRetry },
+      'finding-3': { type: 'score', score: 0, confidence: 0.9, reason: skipNit },
     },
   ], null, 2)}\n`);
   await writeFile(join(workspace, '.obversa-stand-in.json'), `${JSON.stringify(script, null, 2)}\n`);
@@ -160,8 +157,8 @@ try {
   assert.deepEqual(printed.judge, [{
     route: 'again',
     reason: 'the judge acts on 2 of 3 findings',
-    findings: [`act: ${backoff} (${actBackoff})`, `act: ${lastRetry} (${actLastRetry})`, `skip: ${nit} (${skipNit})`],
-  }], 'the judge acts on two findings and skips the disputed nit');
+    findings: [`act: ${backoff} (${actBackoff})`, `act: ${lastRetry} (${actLastRetry})`, `hold: ${nit} (${skipNit})`],
+  }], 'the judge acts on two findings and holds the disputed nit back');
 
   const calls = (await readFile(callsLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { role: string });
   const count = (role: string) => calls.filter((call) => call.role === role).length;

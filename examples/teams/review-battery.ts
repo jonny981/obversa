@@ -21,8 +21,7 @@ import { recordedJudge } from '@obversa/runtime/testing';
  * then each reviewer votes once on the findings it did not raise, and a
  * finding is dropped when the reviewers who reject it outnumber those who
  * raised or backed it, unless it is a block. A judge then
- * calls each finding that is left: act or skip in round 1, impactful or
- * minor after. The writer gets only the findings the judge sends back; a
+ * scores each finding that is left, cosmetic to blocking, every round. The writer gets only the findings the judge sends back; a
  * held-back one stays with the judge, collected for a person to read before
  * the page lands. When nothing is sent back, the page stands. With no cap,
  * the judge or the reviewers end the rounds.

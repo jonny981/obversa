@@ -283,16 +283,18 @@ describe('the wire call', () => {
     expect(result.billing).toBe('api');
     expect(result.effective.model).toBe('jev-fixture-effective');
     expect(result.effective.modelFamily).toBe('jev');
+    expect(result.effective.modelSource).toBe('reported');
     expect(result.requested.adapter).toBe('jev-api');
     expect(result.raw).toMatchObject({ answers });
   });
 
-  it('reports a null effective identity when the response echoes no model', async () => {
+  it('records the requested model as effective, marked requested, when the response echoes no model', async () => {
     const stubServer = await stub();
     stubServer.respond(200, { usage: { input_tokens: 1, output_tokens: 1 }, answers: { ok: { type: 'score', score: 3 } } });
     const result = await engine(stubServer.url).run(request(), () => {}, new AbortController().signal);
-    expect(result.effective.model).toBeNull();
-    expect(result.effective.modelFamily).toBeNull();
+    expect(result.effective.model).toBe('jev-fixture');
+    expect(result.effective.modelFamily).toBe('jev');
+    expect(result.effective.modelSource).toBe('requested');
     expect(result.effective.provider).toBe('typesafe');
   });
 
@@ -301,13 +303,14 @@ describe('the wire call', () => {
     ['whitespace', 'not a model'],
     ['empty', ''],
     ['non-string', 42],
-  ])('reports a null effective identity when the echo is %s', async (_label, echo) => {
+  ])('records the requested model, marked requested, when the echo is %s', async (_label, echo) => {
     const stubServer = await stub();
     const answers = { ok: { type: 'score', score: 3 } };
     stubServer.respond(200, { model: echo, usage: { input_tokens: 1, output_tokens: 1 }, answers });
     const result = await engine(stubServer.url).run(request(), () => {}, new AbortController().signal);
-    expect(result.effective.model).toBeNull();
-    expect(result.effective.modelFamily).toBeNull();
+    expect(result.effective.model).toBe('jev-fixture');
+    expect(result.effective.modelFamily).toBe('jev');
+    expect(result.effective.modelSource).toBe('requested');
     expect(result.effective.provider).toBe('typesafe');
     expect(result.parts[0]).toEqual({ kind: 'structured', value: answers, final: true });
   });
@@ -657,6 +660,7 @@ describe('engine conformance kit', () => {
       model: 'jev-fixture-effective',
       executable: null,
       capabilities: [],
+      modelSource: 'reported',
     });
     const ok = (answers: JsonObject = { answer: 42 }) => ({
       model: 'jev-fixture-effective',

@@ -60,7 +60,7 @@ await withExample({
   const judged = record.filter((event) => event.kind === 'refine:judge');
   assert.deepEqual(judged.map((event) => event.reason), [
     'the judge acts on 1 of 1 findings',
-    'the judge found only minor findings',
+    'the judge chose holds',
   ]);
   const rank = record.filter((event) => event.kind === 'dag:node' && event.node === 'rank' && event.phase === 'done');
   assert.deepEqual(rank.map((event) => (event.outcome as { status: string }).status), ['paused', 'pass'], 'the run pauses at the owner, then the answer passes the step');

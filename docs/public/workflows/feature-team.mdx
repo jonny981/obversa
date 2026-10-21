@@ -108,10 +108,9 @@ first:
           writes: files,
           // The node's own refinement, each round: the ticket's tests first,
           // a red one goes straight back with its output; then the goal
-          // check; then the three reviewers as one panel; then Jev calls
-          // each kept finding: act or skip in round 1, impactful or minor
-          // after, a block included, with no cap; a held-back one is
-          // collected for a person to read.
+          // check; then the three reviewers as one panel; then Jev scores
+          // each kept finding cosmetic to blocking, a block included, with
+          // no cap; a held-back one is collected for a person to read.
           refine: review({
             checks: [['node', '--test', ...tests]],
 ```
@@ -169,13 +168,13 @@ vote in full.
 ## 6. Judge
 
 When a reviewer asks for changes, Jev calls each finding on the list,
-a block included: act or skip in round 1, impactful or minor after. The
+a block included: cosmetic to blocking, every round. The
 builder gets
 only the findings Jev sends
 back, and a finding Jev holds back
 does not cost a round, whatever the reviewers tagged it: Jev collects it on
-`minorFindings`, a skip in round 1 or a minor call after, with its reviewer
-and the evidence it wrote, for a person
+`minorFindings` with its reviewer,
+the level and confidence its answer carried, and the evidence it wrote, for a person
 to read before the change lands. With no cap, the rounds end when Jev stops them or
 every reviewer passes. Offline, `judge.json` replays Jev's answers:
 
@@ -185,7 +184,8 @@ every reviewer passes. Offline, `judge.json` replays Jev's answers:
 
 To bound the rounds as well, pass a cap: `judge(judgeSeat, { cap: 3 })`.
 A `product_decision` Jev asks after the last review the cap allows buys
-exactly one more round, so the person's answer reaches the builder.
+exactly one more round for a change the person asks for, so it reaches
+the builder; an answer that sends nothing back lets the work stand.
 [Know when to stop](/patterns/judge-stops-the-loop) shows the questions
 Jev answers.
 
@@ -343,8 +343,7 @@ import { recordedJudge } from '@obversa/runtime/testing';
  * builder with its output. A seat from another model family checks that
  * every requirement in the ticket was met. Three reviewers from three model
  * families review the change at the same time, and their reviews become one
- * list. A judge calls each finding: act or skip in round 1, impactful or
- * minor after. The builder gets only the ones it acts on; a held-back one
+ * list. A judge scores each finding cosmetic to blocking. The builder gets only the ones it acts on; a held-back one
  * stays with the judge, collected for a person to read before the change
  * lands. Attended, a person approves the exact bytes before the change
  * lands; with `--unattended`, it lands without asking. Each
@@ -367,7 +366,7 @@ const reviewers = {
 } satisfies Record<string, TeamSeat>;
 
 // Offline, recorded answers stand in for Jev so the example runs with no
-// key: judge.json holds one answer object per call, and the last one
+// key: judge.json holds one answer object per round, and the last one
 // repeats. `JEV=live` asks Jev instead.
 const judgeSeat = process.env.JEV === 'live' ? jev() : recordedJudge('judge.json');
 
@@ -439,10 +438,9 @@ export function featureTeam(ticket: BriefSource): Job {
           writes: files,
           // The node's own refinement, each round: the ticket's tests first,
           // a red one goes straight back with its output; then the goal
-          // check; then the three reviewers as one panel; then Jev calls
-          // each kept finding: act or skip in round 1, impactful or minor
-          // after, a block included, with no cap; a held-back one is
-          // collected for a person to read.
+          // check; then the three reviewers as one panel; then Jev scores
+          // each kept finding cosmetic to blocking, a block included, with
+          // no cap; a held-back one is collected for a person to read.
           refine: review({
             checks: [['node', '--test', ...tests]],
             goal: goalCheck(goalSeat, { target: 'build', text: ticket.brief }),

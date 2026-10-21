@@ -70,9 +70,9 @@ function judgeStates(cwd: string) {
 }
 
 describe('the judge can request a product decision', () => {
-  it('offers the choice and recognises it before ordinary stop rules', () => {
-    expect(stopQuestions().stop_reason!.criteria).toHaveProperty('product_decision');
-    expect(judgeDecision({ stop_reason: { choice: 'product_decision' }, holds: { noul: 0.99 } }))
+  it('asks it as its own noul and recognises it before ordinary stop rules', () => {
+    expect(stopQuestions().product_decision).toMatchObject({ type: 'noul' });
+    expect(judgeDecision({ product_decision: { noul: 0.99 }, stop_reason: { choice: 'holds', confidence: 0.9 } }))
       .toMatchObject({ again: false, stop: 'product_decision' });
   });
 
@@ -259,7 +259,7 @@ describe('the judge can request a product decision', () => {
       expect(judgeStates(fixture.cwd)[2]).toMatchObject({ round: 3, cap: scenario.cap, lastRound: true });
       // Convergence bought round 3, not a product answer, so the packet
       // round 3 reads still says a product decision buys its round.
-      expect(judgeStates(fixture.cwd)[2].limit).toContain('a product decision still buys one more round');
+      expect(judgeStates(fixture.cwd)[2].limit).toContain('a change the person asks for still buys one more round');
       const [request] = await fixture.callbacks.listPending();
       await answer(fixture.callbacks, request!, 'Write for new users.');
       // The answer buys round 4, marked as granted for a product answer.
@@ -276,7 +276,7 @@ describe('the judge can request a product decision', () => {
       expect(productCalls(fixture.cwd)[12]!.prompt).toContain('"Keep it for new users."');
       expect(productCalls(fixture.cwd)[12]!.prompt).toContain('granted for a product answer');
       // Round 4's packet knew a product decision still buys its round.
-      expect(judgeStates(fixture.cwd)[3].limit).toContain('a product decision still buys one more round');
+      expect(judgeStates(fixture.cwd)[3].limit).toContain('a change the person asks for still buys one more round');
       expect(choices(fixture.cwd)).toHaveLength(15);
       expect((await fixture.callbacks.listPending())).toHaveLength(1);
     }, 30_000);

@@ -22,7 +22,7 @@ flowchart LR
   goal -->|every requirement met| review["review: the panel"]
   review -->|findings| judge{"judge, when set"}
   judge -->|the findings it calls impactful| write
-  judge -->|no finding is impactful| done((pass))
+  judge -->|nothing goes back and the judge lets it stand| done((pass))
   review -->|nothing fails| done
 ```
 

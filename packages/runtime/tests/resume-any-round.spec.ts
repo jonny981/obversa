@@ -1793,10 +1793,8 @@ describe('a resume after a change the record does not match steps by', () => {
   async function judgeAnswers(): Promise<string> {
     const file = join(cwd, 'judge.json');
     await writeFile(file, JSON.stringify([{
-      holds: { noul: 0.9 },
-      worth_doing: { noul: 0.9 },
-      worth_another_round: { noul: 0.9 },
-      stop_reason: { choice: 'continue' },
+      product_decision: { noul: 0.05 },
+      stop_reason: { choice: 'continue', confidence: 0.95 },
     }]));
     return file;
   }
