@@ -180,6 +180,7 @@ export const stageBranches = {
   F239: 'revert/engine-leftovers',
   F240: 'feat/judge-impactful',
   F248: 'fix/claude-stream-final',
+  F244: 'feat/judge-by-the-guide',
   F235: 'fix/grok-login-expiry',
   F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
