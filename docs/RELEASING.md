@@ -21,8 +21,10 @@ The four core packages share one version through the fixed group in
 - `@obversa/runtime`
 - `@obversa/runner`
 
-References between those four packages are exact. `@obversa/runtime` keeps
-`@obversa/api` as a peer dependency.
+References between those four packages are exact, and each is a regular
+dependency. None of the four takes another as a peer dependency: Changesets
+gives a package a major bump when a peer it names takes a minor bump, and the
+fixed group would then carry all four to the next major.
 
 Every other public package versions independently. Before 1.0, a breaking
 public-contract change takes a minor bump. A compatible addition or fix takes a

@@ -464,11 +464,8 @@ const packageRules = new Map([
   ['@obversa/runtime', {
     directory: 'packages/runtime',
     kind: 'runtime',
-    dependencies: ['@obversa/core'],
-    peerDependencies: ['@obversa/api'],
-    peerDependencyVersions: {
-      '@obversa/api': 'workspace:*',
-    },
+    dependencies: ['@obversa/api', '@obversa/core'],
+    peerDependencies: [],
   }],
   ['@obversa/api', {
     directory: 'packages/api',
@@ -1315,16 +1312,6 @@ for (const [name, rule] of packageRules) {
   for (const target of manifestImportTargets(manifest, { file: join(directory, 'package.json'), root })) {
     if (isRefusal(target)) failures.push(`${name}: ${refusalReason(target)}`);
     else if (!allowedImportTargets.has(target)) failures.push(`${name}: package imports must not map to ${target}`);
-  }
-  for (const [dependency, expectedVersion] of Object.entries(
-    rule.peerDependencyVersions ?? {},
-  )) {
-    const actualVersion = manifest.peerDependencies?.[dependency];
-    if (actualVersion !== expectedVersion) {
-      failures.push(
-        `${name}: peer ${dependency} must use ${expectedVersion}; found ${actualVersion ?? 'none'}`,
-      );
-    }
   }
 
   // The manifest's own entry fields are followed by a loader, the compiler,

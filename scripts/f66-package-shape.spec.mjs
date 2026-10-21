@@ -124,12 +124,12 @@ test('@obversa/obversa installs every other published package', () => {
   assert.deepEqual(Object.keys(dependencies).sort(), [...expected.keys()].filter((name) => name !== '@obversa/obversa' && !notYetPublished.has(name)).sort());
 });
 
-test('the four core packages use exact workspace references while API remains a runtime peer', () => {
+test('the four core packages use exact workspace references and peer on none of each other', () => {
   assert.equal(manifestAt('packages/core').dependencies['@obversa/api'], 'workspace:*');
   const runtime = manifestAt('packages/runtime');
+  assert.equal(runtime.dependencies['@obversa/api'], 'workspace:*');
   assert.equal(runtime.dependencies['@obversa/core'], 'workspace:*');
-  assert.equal(runtime.peerDependencies['@obversa/api'], 'workspace:*');
-  assert.equal(runtime.devDependencies['@obversa/api'], 'workspace:*');
+  assert.equal(runtime.peerDependencies, undefined);
   assert.deepEqual(manifestAt('packages/runner').dependencies, {
     '@obversa/api': 'workspace:*',
     '@obversa/core': 'workspace:*',

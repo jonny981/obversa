@@ -58,15 +58,12 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
+    "@obversa/api": "workspace:*",
     "@obversa/core": "workspace:*",
     "p-limit": "^7.3.0",
     "toposort": "^2.0.2"
   },
-  "peerDependencies": {
-    "@obversa/api": "workspace:*"
-  },
   "devDependencies": {
-    "@obversa/api": "workspace:*",
     "@types/node": "22.12.0",
     "@types/toposort": "^2.0.7",
     "execa": "^9.6.1"
