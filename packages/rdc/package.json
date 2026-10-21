@@ -1,6 +1,6 @@
 {
   "name": "@obversa/rdc",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Rank, decide, curate: typed memory sources and the selection that picks what a step reads.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "type": "module",

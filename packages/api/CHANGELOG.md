@@ -1,5 +1,39 @@
 # @obversa/api
 
+## 0.3.0
+
+### Minor Changes
+
+- 56a7020: The judge scores each finding and acts only when it is sure enough. Every round, each finding gets a `score` question with four levels: cosmetic, minor, impactful or blocking. The judge reports a confidence with each answer. A finding goes back to the builder only when it is scored impactful or blocking and its confidence clears the send-back bar for its level. A blocking finding has a lower bar. Every other finding goes on `minorFindings` with its level and confidence.
+
+  The default round questions are two: `product_decision`, a yes/no on whether a person must settle a product question first, and `stop_reason`, a choice of how the run ends, with a new `none_applies` option. `holds`, `worth_doing` and `worth_another_round` are no longer asked by default. A stop answer that would end the run needs the stop bar. A person decides instead when the stop answer is under that bar, when the judge answers `none_applies`, and when any answer is under the hand-off bar. An answer with no confidence counts as unsure, so it never clears a bar.
+
+  When the judge cannot score a finding surely enough to route it, the run pauses and asks a person to name "act" or "hold" for that finding. A finding they do not name is held. If no finding goes back, the work stands as a pass with no extra build.
+
+  The bars are named constants in `JUDGE_CONFIDENCE`, exported with `FINDING_LEVELS` and `findingQuestions`. Their values are starting bars, not measured ones.
+
+  The judge no longer counts or compares rounds itself. The runtime sends it, as numbers, the findings sent back this round and the round before, whether that count is falling, and which findings repeat an earlier one: the same reviewer, the same file and the same claim, with line numbers and punctuation ignored. Each finding's entry carries the brief lines it touches, or the whole brief when none match, and the diff hunks it cites. When the packet must be cut, the brief and the diffs are cut before the counts.
+
+  In `@obversa/api`, an engine's `effective` record can carry `modelSource`: `reported` when the engine named the model that answered, `requested` when it named none and the record keeps the model id the request sent. `@obversa/engine-jev-api` uses it: when Jev reports no model, the record names the requested model instead of none.
+
+- a6f95ac: Memory curation moves into its own package, `@obversa/rdc`. `pick` now lives there, with the candidate, question, answer, limits, thresholds and result types that drive it. It ranks candidates inside each source, shares the decision budget across reference sources so one large source cannot crowd out another, asks an injected decision function one bounded batch at a time, validates every answer, and returns the selected candidates with a record of what was asked and why. The API and the runtime no longer export it. It was never released, so nothing published changes.
+
+  The package also adds the contract a memory source implements (`CandidateSource`, with `CandidateReadRequest`, `CandidateReadResult` and `SourceReadError`) and two Markdown sources. `knowledgeBase(dir)` emits one reference candidate per `## ` section of each note. `rules(dir)` emits one rule candidate per file and honours `applies: always` frontmatter. `pickFromSources` reads the sources, then picks over the combined candidates, and a rule source that could not list every rule makes the record's `rulesCoverage` `'incomplete'`. `MemoryCandidate` gains an optional `changedPaths`: the repository paths a candidate changed.
+
+- 1d951ce: One seat can name its candidate models in order. Where a `dag()` node's `agent`, a `pipeline()` stage's `agent` or a seat in `review({ reviewers })` took a `TeamSeat`, it also takes `{ seat, candidates }`: the seat that runs first and the ordered alternatives behind it, each a full seat with its own engine, identity and tools. A call that fails on billing or quota runs the next candidate in the same step, and each attempt uses the candidate's own tool policy. A rate limit follows the step's `fallbackOn` policy, so it also moves to the next candidate when that policy allows it, as the default does. Any other failure ends the step exactly as before, and `agentJob`'s own `fallback` and `fallbackOn` are unchanged. When no candidate can run, the step ends on a `QUOTA` error that carries the earliest known reset, so the run's `onLimit` policy waits for that reset or pauses, as it does for a single model. An empty `candidates` list is refused, and a seat with none behaves exactly as before.
+
+  The run records each move as a `seat:route` event: the requested identity, the selected candidate, the failure kind and the reset when one is known. What actually answered stays on `engine:usage` as before, and the recorded-model checks keep reading it.
+
+  A run may carry an `AvailabilityStore` (`run({ availability })`; `fileAvailabilityStore(path)` is the plain-file default). When a billing or quota failure reports a proven reset, one a header or structured field stated rather than text parsed out of the error, the store remembers `(adapter, provider, model) -> until`, and a later run skips that candidate without a call and records the skip. A candidate with no proven reset is never written, a corrupt store file reads as empty with a warning, and a run with no candidate seats never touches the store.
+
+  The distinct-family rule now reads every candidate a seat can resolve to: inside a review, no reviewer may reach the model family of another reviewer, the node's `agent` or its `fixer` over any combination of candidates, or the graph is refused before any model runs.
+
+  In `@obversa/builtin-workflows`, a reviewer in `thresholdPanel` and `featureDelivery` is a `ReviewerSeat`, so it takes `{ seat, candidates }` the same way, and each workflow's distinct-family check reads every candidate a seat can resolve to.
+
+### Patch Changes
+
+- 7c0a425: Accept OpenRouter model names through the OpenCode engine, such as `openrouter/anthropic/claude-sonnet-4.5`. Record `openrouter` as the provider and derive the family from the final model name, so a Claude model remains in the Claude family across providers. Refuse OpenRouter routers such as `openrouter/openrouter/auto`, which cannot declare a fixed family.
+
 ## 0.2.15
 
 ## 0.2.14

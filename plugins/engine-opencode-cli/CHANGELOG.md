@@ -1,5 +1,24 @@
 # @obversa/engine-opencode-cli
 
+## 0.1.8
+
+### Patch Changes
+
+- 7c0a425: Accept OpenRouter model names through the OpenCode engine, such as `openrouter/anthropic/claude-sonnet-4.5`. Record `openrouter` as the provider and derive the family from the final model name, so a Claude model remains in the Claude family across providers. Refuse OpenRouter routers such as `openrouter/openrouter/auto`, which cannot declare a fixed family.
+- 1d951ce: A limit the provider reports through its own response fields — a `retry-after` or rate-limit-reset header — now marks the reset it carries as proven. A run's availability store only remembers a billing or quota failure whose reset is proven: one a header or structured field stated, never one parsed out of error text.
+- cd3afb5: The OpenCode engine's workspace check no longer fails a run when a folder or symlink disappears while it is being checked, such as a lock folder or a build's temporary output. A symlink that still exists but resolves nowhere is still refused.
+- fd3a11d: A CLI that the system refuses to start under load is no longer reported as a missing CLI. When starting the process fails with `EAGAIN`, `EMFILE` or `ENOMEM`, the Claude, Codex, Devin, Grok and OpenCode engines fail with a `transient` error, which can be tried again, and the message names the code, for example `the system refused to start the Claude process (EAGAIN)`. A missing executable still fails as `missing-cli`. `OwnedCommandError` and `RunChildError` carry the system error code of a process that could not start as `spawnCode`.
+- Updated dependencies [eee9606]
+- Updated dependencies [56a7020]
+- Updated dependencies [a6f95ac]
+- Updated dependencies [7c0a425]
+- Updated dependencies [f1b183a]
+- Updated dependencies [1d951ce]
+- Updated dependencies [fd3a11d]
+- Updated dependencies [9027c75]
+  - @obversa/core@0.3.0
+  - @obversa/api@0.3.0
+
 ## 0.1.7
 
 ### Patch Changes

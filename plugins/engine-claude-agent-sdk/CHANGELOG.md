@@ -1,5 +1,21 @@
 # @obversa/engine-claude-agent-sdk
 
+## 0.1.7
+
+### Patch Changes
+
+- 1d951ce: A usage, billing or rate limit the SDK reports through its structured `rate_limit_info` field now marks the reset it carries as proven. A run's availability store only remembers a billing or quota failure whose reset is proven: one a structured field stated, never one parsed out of error text.
+- Updated dependencies [eee9606]
+- Updated dependencies [56a7020]
+- Updated dependencies [a6f95ac]
+- Updated dependencies [7c0a425]
+- Updated dependencies [f1b183a]
+- Updated dependencies [1d951ce]
+- Updated dependencies [fd3a11d]
+- Updated dependencies [9027c75]
+  - @obversa/core@0.3.0
+  - @obversa/api@0.3.0
+
 ## 0.1.6
 
 ### Patch Changes

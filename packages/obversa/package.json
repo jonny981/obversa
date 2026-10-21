@@ -1,6 +1,6 @@
 {
   "name": "@obversa/obversa",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Install every public Obversa package together.",
   "author": "Jonny Neill <jonnyneill@hotmail.com>",
   "license": "MIT",

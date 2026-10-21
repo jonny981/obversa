@@ -1,5 +1,34 @@
 # @obversa/core
 
+## 0.3.0
+
+### Patch Changes
+
+- eee9606: A Claude session that spans two turns now returns one answer. This happens when a command started in the background ends the first turn and the CLI starts a second turn when it finishes. Each turn ends with its own result message. The answer from the last result is the one final part, and earlier turns' answers stay as parts that are not final. The recorded tokens add up every turn. The cost keeps the last result's figure, because Claude reports cost as a running total for the session.
+
+  A Claude CLI stream that ends without exactly one final answer now fails with the `invalid-config` kind, which is not retried on the same lane, instead of an unclassified error that a retry would repeat.
+
+- f1b183a: The cleanup after an engine command no longer stops processes that are not part of that command.
+
+  A stopped process could be another run, its agents, a test worker, or a command still within its time limit, which then reported a plain failed exit instead of a timeout. A busy machine made each of these more likely. Three paths reached such a process, and each is closed:
+
+  - **A reused socket address.** On macOS, the cleanup looks for processes that still hold the command's output sockets. When the command's end of a socket closed during that search, macOS could give the socket's address to a new socket in any other process. The cleanup now checks the command's sockets again after the search, and stops only the processes that hold a socket that is still connected.
+  - **A reused process id.** When a command and every process left in its group have exited, the system can give the command's process id to a new process, which can lead a process group with that same id. The cleanup took every process in that group for part of the command. The runner now reads the command's start time as it starts it. The command's process id counts only while that same process is alive. When the command leads its own group, that group counts until a different process holds the command's process id.
+  - **A group signal.** `runChild` with `detached: true` signalled the child's whole process group, also after the child had already exited, for example on an abort while a helper still held the output open. It now reads the members of the child's group while the child runs and signals each one that started no earlier than the child by its own process id. After the child exits, a member read earlier that `ps` still shows once the child's output has closed gets SIGKILL when the grace ends, matched by its process id and start time, so a helper that ignores SIGTERM is still stopped.
+
+  `stopOwnedProcessTree`, `inspectOwnedProcessTree` and `measureOwnedProcessMemory` accept `rootStartedAt`, the root's start time. On Linux and macOS, the root's process id counts only while a process with that id and start time is alive. When the root leads its own group, that group counts until a different process holds the root's id. Neither counts when `rootStartedAt` is not given. `readProcessIdentity(pid)` reads that start time; call it while the root is alive.
+
+- fd3a11d: A CLI that the system refuses to start under load is no longer reported as a missing CLI. When starting the process fails with `EAGAIN`, `EMFILE` or `ENOMEM`, the Claude, Codex, Devin, Grok and OpenCode engines fail with a `transient` error, which can be tried again, and the message names the code, for example `the system refused to start the Claude process (EAGAIN)`. A missing executable still fails as `missing-cli`. `OwnedCommandError` and `RunChildError` carry the system error code of a process that could not start as `spawnCode`.
+- 9027c75: On Linux, the cleanup after an engine command stops a helper the command started, also when the helper's parent has already exited.
+
+  A helper that runs in its own process group is reachable through the command's process tree only while its parent is alive. The cleanup looked for the command's attempt marker once, before it stopped anything. A helper started after that look, whose parent then exited, could keep running while the cleanup reported that nothing was left. `stopOwnedProcessTree` now looks for the processes that carry the request's `attemptId` on every pass, looks once more before it reports that nothing is left, and signals each process it finds during the forced stop. The look by marker finds only processes that carry this request's `attemptId`, so a process that carries another attempt's marker and is not part of the command's tree is not stopped.
+
+- Updated dependencies [56a7020]
+- Updated dependencies [a6f95ac]
+- Updated dependencies [7c0a425]
+- Updated dependencies [1d951ce]
+  - @obversa/api@0.3.0
+
 ## 0.2.15
 
 ### Patch Changes

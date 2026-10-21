@@ -145,30 +145,30 @@ is.
 
 | Package | Purpose | Version |
 | --- | --- | --- |
-| `@obversa/obversa` | Installs every package below except Jev, Devin, Mastra and OpenAI Agents | `0.1.2` |
-| `@obversa/runtime` | Builds and runs workflows as graphs, team conversations or a review loop | `0.2.15` |
-| `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.2.15` |
-| `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.2.15` |
-| `@obversa/rdc` | Ranks, decides and curates memory candidates; reads Markdown notes and rules, and a repository's commit history | `0.1.0` |
-| `@obversa/core` | Runs one child process with a deadline and a readable result | `0.2.15` |
-| `@obversa/memory-simple` | Stores memory in one process | `0.1.2` |
-| `@obversa/memory-git` | Stores memory in private Git references, and writes a stage's reasoning into its commit | `0.1.2` |
-| `@obversa/memory-markdown` | Selects ranked passages from local Markdown files | `0.1.2` |
-| `@obversa/notify-webhook` | Posts one message per interesting run event to a URL you supply | `0.1.0` |
-| `@obversa/builtin-workflows` | Three ready-made teams, and a workflow that improves a workflow from its record | `0.1.5` |
+| `@obversa/obversa` | Installs every package below except Jev, Devin, Mastra and OpenAI Agents | `0.1.3` |
+| `@obversa/runtime` | Builds and runs workflows as graphs, team conversations or a review loop | `0.3.0` |
+| `@obversa/runner` | Supervises stored graph runs in bounded workers | `0.3.0` |
+| `@obversa/api` | Defines every contract: engine, memory, graph, events, artifacts, workspace, callbacks, proofs and run definitions, with their validators | `0.3.0` |
+| `@obversa/rdc` | Ranks, decides and curates memory candidates; reads Markdown notes and rules, and a repository's commit history | `0.2.0` |
+| `@obversa/core` | Runs one child process with a deadline and a readable result | `0.3.0` |
+| `@obversa/memory-simple` | Stores memory in one process | `0.1.3` |
+| `@obversa/memory-git` | Stores memory in private Git references, and writes a stage's reasoning into its commit | `0.1.3` |
+| `@obversa/memory-markdown` | Selects ranked passages from local Markdown files | `0.1.3` |
+| `@obversa/notify-webhook` | Posts one message per interesting run event to a URL you supply | `0.1.1` |
+| `@obversa/builtin-workflows` | Three ready-made teams, and a workflow that improves a workflow from its record | `0.2.0` |
 | `@obversa/surface` | Runs one local surface session | `0.1.1` |
 | `@obversa/surface-diff` | Opens a git diff for inline review | `0.1.1` |
-| `@obversa/engine-claude-agent-sdk` | Runs one engine attempt through the Agent SDK | `0.1.6` |
-| `@obversa/engine-anthropic-api` | Runs one engine attempt through the Anthropic API | `0.1.4` |
-| `@obversa/engine-claude-cli` | Runs one engine attempt through the Claude CLI | `0.1.6` |
-| `@obversa/engine-codex-cli` | Runs one engine attempt through the Codex CLI | `0.1.5` |
-| `@obversa/engine-devin-cli` | Runs one engine attempt through the Devin CLI | `0.1.5` |
-| `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.8` |
-| `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.7` |
-| `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.5` |
-| `@obversa/engine-openai-decisions` | Answers decision questions over recorded run state through OpenAI's Decisions API | `0.1.0` |
-| `@obversa/engine-mastra` | Runs one engine attempt through a Mastra agent you built | `0.1.2` |
-| `@obversa/engine-openai-agents` | Runs one engine attempt through an OpenAI Agents SDK agent you built | `0.1.2` |
+| `@obversa/engine-claude-agent-sdk` | Runs one engine attempt through the Agent SDK | `0.1.7` |
+| `@obversa/engine-anthropic-api` | Runs one engine attempt through the Anthropic API | `0.1.5` |
+| `@obversa/engine-claude-cli` | Runs one engine attempt through the Claude CLI | `0.1.7` |
+| `@obversa/engine-codex-cli` | Runs one engine attempt through the Codex CLI | `0.1.6` |
+| `@obversa/engine-devin-cli` | Runs one engine attempt through the Devin CLI | `0.1.6` |
+| `@obversa/engine-grok-cli` | Runs one engine attempt through the Grok CLI | `0.1.9` |
+| `@obversa/engine-opencode-cli` | Runs one engine attempt through the OpenCode CLI | `0.1.8` |
+| `@obversa/engine-jev-api` | Answers decision questions over recorded run state through the Jev API | `0.1.6` |
+| `@obversa/engine-openai-decisions` | Answers decision questions over recorded run state through OpenAI's Decisions API | `0.1.1` |
+| `@obversa/engine-mastra` | Runs one engine attempt through a Mastra agent you built | `0.1.3` |
+| `@obversa/engine-openai-agents` | Runs one engine attempt through an OpenAI Agents SDK agent you built | `0.1.3` |
 
 The api, core, runtime and runner packages share one version. The runtime
 never imports an engine or a memory adapter: you pass the ones you want when

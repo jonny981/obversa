@@ -1,5 +1,74 @@
 # @obversa/runtime
 
+## 0.3.0
+
+### Minor Changes
+
+- 92facaa: A judge that cannot answer now stops the round instead of buying another build. A judge call that ends in any status but pass pauses the run with the engine's own error; a reply that does not parse, or that leaves an asked question unanswered or answered in a shape the question does not allow, pauses it with a validation error. Before, those replies were read as "no clear answer" and the work went back for another build it never earned. A paused run resumes by asking the judge again for the same round over the state it saved: no build runs and no reviewer is re-asked first.
+
+  A judge must answer every question it is asked, including the per-finding questions generated when it decides each finding. A `score` question accepts the rating a judge engine reports (a finite `score`), or a probability per named criterion (keyed by criterion, or a list of `{label, probability}` per level).
+
+  The record gains a `refine:judge-request` event written before the judge's engine call: the bounded packet it was sent, the complete question set, a digest of the question set and the decision options, and the seat's declared model identity, so a failed call still leaves what was asked. Secret shapes and injected environment values in the packet and the questions are kept as `[redacted]` in that event; the judge still reads them in full. `refine:judge` events can now carry `status: 'paused'` with the failure, and `agentJob` accepts a public `onResult` option for the effective model identity the result reports.
+
+- 56a7020: The judge scores each finding and acts only when it is sure enough. Every round, each finding gets a `score` question with four levels: cosmetic, minor, impactful or blocking. The judge reports a confidence with each answer. A finding goes back to the builder only when it is scored impactful or blocking and its confidence clears the send-back bar for its level. A blocking finding has a lower bar. Every other finding goes on `minorFindings` with its level and confidence.
+
+  The default round questions are two: `product_decision`, a yes/no on whether a person must settle a product question first, and `stop_reason`, a choice of how the run ends, with a new `none_applies` option. `holds`, `worth_doing` and `worth_another_round` are no longer asked by default. A stop answer that would end the run needs the stop bar. A person decides instead when the stop answer is under that bar, when the judge answers `none_applies`, and when any answer is under the hand-off bar. An answer with no confidence counts as unsure, so it never clears a bar.
+
+  When the judge cannot score a finding surely enough to route it, the run pauses and asks a person to name "act" or "hold" for that finding. A finding they do not name is held. If no finding goes back, the work stands as a pass with no extra build.
+
+  The bars are named constants in `JUDGE_CONFIDENCE`, exported with `FINDING_LEVELS` and `findingQuestions`. Their values are starting bars, not measured ones.
+
+  The judge no longer counts or compares rounds itself. The runtime sends it, as numbers, the findings sent back this round and the round before, whether that count is falling, and which findings repeat an earlier one: the same reviewer, the same file and the same claim, with line numbers and punctuation ignored. Each finding's entry carries the brief lines it touches, or the whole brief when none match, and the diff hunks it cites. When the packet must be cut, the brief and the diffs are cut before the counts.
+
+  In `@obversa/api`, an engine's `effective` record can carry `modelSource`: `reported` when the engine named the model that answered, `requested` when it named none and the record keeps the model id the request sent. `@obversa/engine-jev-api` uses it: when Jev reports no model, the record names the requested model instead of none.
+
+- d9e9fc8: The judge sends back only findings that matter. A finding it holds back (wording, style, naming, an edge case outside real use, a nice-to-have) no longer sends the work back. It is collected, with its reviewer and the evidence it wrote, on the decision's `minorFindings` list, so a lead reads it before landing. Every finding the judge holds back lands on that list with its round, so no finding disappears.
+
+  A stop answer can end a run as a pass. When the judge answers `not_converging` or `over_polishing` with enough confidence to end the run and no finding goes back, the run stops as a pass with the held findings attached. A finding the judge acts on still sends the work back, whatever the stop answer.
+
+  A product answer is never thrown away. When the judge asks a person for a `product_decision`, even at the cap, a change the person asks for goes to the builder as one more round, and the record says why.
+
+  At the cap, a run neither stops short nor runs away. If the judge sends back fewer findings than in the round before, the run gets one more round and records why. Otherwise it pauses for a person, with the open findings attached, as a resumable product decision. A run never ends as a failure at the cap while the judge is still sending findings back.
+
+- a6f95ac: Memory curation moves into its own package, `@obversa/rdc`. `pick` now lives there, with the candidate, question, answer, limits, thresholds and result types that drive it. It ranks candidates inside each source, shares the decision budget across reference sources so one large source cannot crowd out another, asks an injected decision function one bounded batch at a time, validates every answer, and returns the selected candidates with a record of what was asked and why. The API and the runtime no longer export it. It was never released, so nothing published changes.
+
+  The package also adds the contract a memory source implements (`CandidateSource`, with `CandidateReadRequest`, `CandidateReadResult` and `SourceReadError`) and two Markdown sources. `knowledgeBase(dir)` emits one reference candidate per `## ` section of each note. `rules(dir)` emits one rule candidate per file and honours `applies: always` frontmatter. `pickFromSources` reads the sources, then picks over the combined candidates, and a rule source that could not list every rule makes the record's `rulesCoverage` `'incomplete'`. `MemoryCandidate` gains an optional `changedPaths`: the repository paths a candidate changed.
+
+- 8a40811: A `dag()` node now owns its refinement: `agent` names the seat that does the work, `writes` scopes what it may write, and `refine: review({ ... })` holds its checks, goal check, reviewers, judge or round limit, and optional fixer in one field. `pipeline()` stages take the same fields. `review()` exports the value, `isReview()` recognises it.
+
+  Removed, with no alias: the graph-level `maxKickbacks` map and the `KickbackBudget` type. A node that may receive work again declares `refine`, whose `rounds` or `judge` governs its own reviews and the send-backs it receives. `acceptsKickbackTo` is replaced by `sendsBackTo` on the sending node. A graph that still uses either name fails at compile with a message naming the new field.
+
+  In `@obversa/builtin-workflows` the `maxKickbacks` config field is renamed `refine` (`RefineBudget`), and a number now counts per send-back target: `refine: 2` lets each target take two send-backs, where `maxKickbacks: 2` allowed two for the whole graph. A map gives each target its own rounds or judge, and a target absent from a map refuses send-backs.
+
+  Three smaller behaviour changes ride with it. A `workflow()` writer stage that answers in prose is asked once more instead of failing, the same second ask a reviewer gets: one more model call instead of a spurious failure. A `workflow()` stage a panel reviews whose declared write stays missing now sends the work back on a check budget of 3 instead of spending a refinement: `refine: N` can run up to N+1+3 builds on that stage, where before it stopped at N+1. And a reviewer whose engine throws, or refuses to start on an `invalid-config` failure, now pauses every review panel as an operational error, where before it counted as a rejection.
+
+  `loop()` is unchanged: it keeps its own `max` and `review` options and does not take `review()`.
+
+- 1d951ce: One seat can name its candidate models in order. Where a `dag()` node's `agent`, a `pipeline()` stage's `agent` or a seat in `review({ reviewers })` took a `TeamSeat`, it also takes `{ seat, candidates }`: the seat that runs first and the ordered alternatives behind it, each a full seat with its own engine, identity and tools. A call that fails on billing or quota runs the next candidate in the same step, and each attempt uses the candidate's own tool policy. A rate limit follows the step's `fallbackOn` policy, so it also moves to the next candidate when that policy allows it, as the default does. Any other failure ends the step exactly as before, and `agentJob`'s own `fallback` and `fallbackOn` are unchanged. When no candidate can run, the step ends on a `QUOTA` error that carries the earliest known reset, so the run's `onLimit` policy waits for that reset or pauses, as it does for a single model. An empty `candidates` list is refused, and a seat with none behaves exactly as before.
+
+  The run records each move as a `seat:route` event: the requested identity, the selected candidate, the failure kind and the reset when one is known. What actually answered stays on `engine:usage` as before, and the recorded-model checks keep reading it.
+
+  A run may carry an `AvailabilityStore` (`run({ availability })`; `fileAvailabilityStore(path)` is the plain-file default). When a billing or quota failure reports a proven reset, one a header or structured field stated rather than text parsed out of the error, the store remembers `(adapter, provider, model) -> until`, and a later run skips that candidate without a call and records the skip. A candidate with no proven reset is never written, a corrupt store file reads as empty with a warning, and a run with no candidate seats never touches the store.
+
+  The distinct-family rule now reads every candidate a seat can resolve to: inside a review, no reviewer may reach the model family of another reviewer, the node's `agent` or its `fixer` over any combination of candidates, or the graph is refused before any model runs.
+
+  In `@obversa/builtin-workflows`, a reviewer in `thresholdPanel` and `featureDelivery` is a `ReviewerSeat`, so it takes `{ seat, candidates }` the same way, and each workflow's distinct-family check reads every candidate a seat can resolve to.
+
+### Patch Changes
+
+- fd3a11d: `agentJob` takes `maxMemoryBytes` and `maxOutputBytes` and passes them to the engine request unchanged, the way it takes `timeoutMs`. A step that runs a large CLI can raise the 4 GiB memory cap for the process tree it owns. A dag node takes the same two settings, and an agent job in that node that sets neither uses the node's values. A value that is not a positive whole number fails the step with a message that names the setting, before the engine runs. With neither setting, the engine keeps its own default.
+- 8fe9940: `@obversa/runtime` now installs `@obversa/api` as a regular dependency instead of asking for it as a peer dependency. The version is the same exact version as before, so a project that installs the core packages together still gets one copy of `@obversa/api`.
+- Updated dependencies [eee9606]
+- Updated dependencies [56a7020]
+- Updated dependencies [a6f95ac]
+- Updated dependencies [7c0a425]
+- Updated dependencies [f1b183a]
+- Updated dependencies [1d951ce]
+- Updated dependencies [fd3a11d]
+- Updated dependencies [9027c75]
+  - @obversa/core@0.3.0
+  - @obversa/api@0.3.0
+
 ## 0.2.15
 
 ### Patch Changes

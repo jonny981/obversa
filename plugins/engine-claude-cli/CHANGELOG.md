@@ -1,5 +1,25 @@
 # @obversa/engine-claude-cli
 
+## 0.1.7
+
+### Patch Changes
+
+- eee9606: A Claude session that spans two turns now returns one answer. This happens when a command started in the background ends the first turn and the CLI starts a second turn when it finishes. Each turn ends with its own result message. The answer from the last result is the one final part, and earlier turns' answers stay as parts that are not final. The recorded tokens add up every turn. The cost keeps the last result's figure, because Claude reports cost as a running total for the session.
+
+  A Claude CLI stream that ends without exactly one final answer now fails with the `invalid-config` kind, which is not retried on the same lane, instead of an unclassified error that a retry would repeat.
+
+- fd3a11d: A CLI that the system refuses to start under load is no longer reported as a missing CLI. When starting the process fails with `EAGAIN`, `EMFILE` or `ENOMEM`, the Claude, Codex, Devin, Grok and OpenCode engines fail with a `transient` error, which can be tried again, and the message names the code, for example `the system refused to start the Claude process (EAGAIN)`. A missing executable still fails as `missing-cli`. `OwnedCommandError` and `RunChildError` carry the system error code of a process that could not start as `spawnCode`.
+- Updated dependencies [eee9606]
+- Updated dependencies [56a7020]
+- Updated dependencies [a6f95ac]
+- Updated dependencies [7c0a425]
+- Updated dependencies [f1b183a]
+- Updated dependencies [1d951ce]
+- Updated dependencies [fd3a11d]
+- Updated dependencies [9027c75]
+  - @obversa/core@0.3.0
+  - @obversa/api@0.3.0
+
 ## 0.1.6
 
 ### Patch Changes

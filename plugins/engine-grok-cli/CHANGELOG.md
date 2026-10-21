@@ -1,5 +1,22 @@
 # @obversa/engine-grok-cli
 
+## 0.1.9
+
+### Patch Changes
+
+- f8a11e0: `authFile` is read again at each call instead of once at construction, so a Grok login refreshed outside a run reaches the next call. A call now fails before any Grok process starts, as a non-retryable `invalid-config` error naming the expiry, when the file has at least one `expires_at` and none of them is later than now plus the call's time limit, instead of spending the call on 401 rejections. A file with no `expires_at` is not checked.
+- fd3a11d: A CLI that the system refuses to start under load is no longer reported as a missing CLI. When starting the process fails with `EAGAIN`, `EMFILE` or `ENOMEM`, the Claude, Codex, Devin, Grok and OpenCode engines fail with a `transient` error, which can be tried again, and the message names the code, for example `the system refused to start the Claude process (EAGAIN)`. A missing executable still fails as `missing-cli`. `OwnedCommandError` and `RunChildError` carry the system error code of a process that could not start as `spawnCode`.
+- Updated dependencies [eee9606]
+- Updated dependencies [56a7020]
+- Updated dependencies [a6f95ac]
+- Updated dependencies [7c0a425]
+- Updated dependencies [f1b183a]
+- Updated dependencies [1d951ce]
+- Updated dependencies [fd3a11d]
+- Updated dependencies [9027c75]
+  - @obversa/core@0.3.0
+  - @obversa/api@0.3.0
+
 ## 0.1.8
 
 ### Patch Changes
