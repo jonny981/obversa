@@ -621,6 +621,16 @@ export class ClaudeCliEngine implements Engine {
       ...reportedCost(acc),
       billing,
     });
+    if (acc.parts.filter((part) => part.final).length !== 1) {
+      // The stream did not end in one answer this adapter can read. A retry
+      // on this lane would read the next stream the same way, so this is
+      // the kind used for CLI output the adapter does not recognize, which
+      // is not retried on the same lane.
+      throw new EngineError({
+        kind: 'invalid-config',
+        message: 'claude-cli stream did not end with exactly one final answer',
+      });
+    }
     const effective = engineSelection({
       ...requested, model: acc.model, capabilities: claudeToolOptions(req).tools ?? [],
     });

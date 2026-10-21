@@ -28,6 +28,8 @@ export interface Accumulator {
   terminal: boolean;
   /** The dollar figure the result message reports, when it reports one. */
   costUsd?: number;
+  /** The usage of every result message so far, added up. */
+  resultUsage?: { kind: 'reported' } & Usage;
 }
 
 export function newAccumulator(model?: string): Accumulator {
@@ -150,24 +152,44 @@ export function mapMessage(
       // `subtype` is the result *classification* (success / error_max_turns …),
       // not the model stop reason; that is the sibling `stop_reason` field.
       if (typeof msg.stop_reason === 'string') acc.stopReason = msg.stop_reason;
+      // A session can span more than one turn: a command started in the
+      // background ends the first turn, and the CLI starts a second when it
+      // finishes. Each turn ends with its own result message. Its
+      // `total_cost_usd` is the running total for the session, so the last
+      // figure is kept and never added up. Its `usage` covers that turn only,
+      // so the turns are added up. The Agent SDK's type notes for the result
+      // message say both, and Claude Code's own session records agree: their
+      // running cost matches the last result's figure, and their output
+      // tokens are the sum over the turns.
       const costUsd = optionalNum(msg.total_cost_usd);
       if (costUsd !== undefined && costUsd >= 0) acc.costUsd = costUsd;
       const usage = msg.usage as AnyRecord | undefined;
       const reported = usage ? usageFrom(usage) : undefined;
       if (usage && reported) {
         // result usage is authoritative for the turn
+        const prior = acc.resultUsage;
         const cacheCreation = optionalNum(usage.cache_creation_input_tokens);
         const cacheRead = optionalNum(usage.cache_read_input_tokens);
-        acc.usage = {
-          ...reported,
-          ...(cacheCreation === undefined
+        const creationTotal = sumOf(prior?.cacheCreationInputTokens, cacheCreation);
+        const readTotal = sumOf(prior?.cacheReadInputTokens, cacheRead);
+        acc.resultUsage = {
+          kind: 'reported',
+          inputTokens: (prior?.inputTokens ?? 0) + reported.inputTokens,
+          outputTokens: (prior?.outputTokens ?? 0) + reported.outputTokens,
+          ...(creationTotal === undefined
             ? {}
-            : { cacheCreationInputTokens: cacheCreation }),
-          ...(cacheRead === undefined
+            : { cacheCreationInputTokens: creationTotal }),
+          ...(readTotal === undefined
             ? {}
-            : { cacheReadInputTokens: cacheRead }),
+            : { cacheReadInputTokens: readTotal }),
         };
+        acc.usage = acc.resultUsage;
       }
+      // The last result's answer is the one answer: an earlier turn's final
+      // mark is cleared, so exactly one part is final.
+      acc.parts = acc.parts.map((part) =>
+        part.kind === 'assistant' && part.final ? { ...part, final: false } : part,
+      );
       if (!acc.parts.length) {
         acc.parts.push({
           kind: 'assistant',
@@ -229,6 +251,11 @@ function inputTokens(usage: AnyRecord): number {
     num(usage.cache_creation_input_tokens) +
     num(usage.cache_read_input_tokens)
   );
+}
+
+/** The sum of two optional counts, or undefined when neither is set. */
+function sumOf(a: number | undefined, b: number | undefined): number | undefined {
+  return a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
 }
 
 function num(value: unknown): number {

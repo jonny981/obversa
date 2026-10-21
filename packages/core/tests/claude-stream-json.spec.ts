@@ -205,3 +205,106 @@ describe('message-map', () => {
     ).not.toThrow();
   });
 });
+
+describe('a session that spans two turns', () => {
+  // A command started in the background ends the first turn; when it
+  // finishes, the CLI starts a second turn by itself. Each turn ends with
+  // its own result message.
+  const firstTurn = [
+    { type: 'system', subtype: 'init', session_id: 's1', model: 'm1' },
+    {
+      type: 'assistant',
+      message: {
+        model: 'm1',
+        content: [
+          { type: 'tool_use', name: 'Bash', input: { command: 'pnpm test', run_in_background: true } },
+        ],
+        usage: { input_tokens: 10, cache_read_input_tokens: 100, output_tokens: 20 },
+      },
+    },
+    { type: 'user', message: { content: [{ type: 'tool_result', name: 'Bash' }] } },
+    {
+      type: 'assistant',
+      message: {
+        model: 'm1',
+        content: [{ type: 'text', text: 'The tests are running in the background.' }],
+        usage: { input_tokens: 5, cache_read_input_tokens: 120, output_tokens: 30 },
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      result: 'The tests are running in the background.',
+      total_cost_usd: 0.5,
+      usage: {
+        input_tokens: 15,
+        cache_creation_input_tokens: 40,
+        cache_read_input_tokens: 220,
+        output_tokens: 50,
+      },
+    },
+  ];
+  const secondTurn = [
+    { type: 'system', subtype: 'task_notification', status: 'completed' },
+    {
+      type: 'assistant',
+      message: {
+        model: 'm1',
+        content: [{ type: 'text', text: 'The tests passed.' }],
+        usage: { input_tokens: 3, cache_read_input_tokens: 300, output_tokens: 70 },
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      result: 'The tests passed.',
+      total_cost_usd: 0.8,
+      usage: {
+        input_tokens: 3,
+        cache_read_input_tokens: 300,
+        output_tokens: 70,
+      },
+    },
+  ];
+
+  it('keeps exactly one final part, holding the second turn\'s text', () => {
+    const { acc } = collect([...firstTurn, ...secondTurn]);
+
+    expect(acc.parts.filter((part) => part.final)).toEqual([
+      { kind: 'assistant', text: 'The tests passed.', final: true },
+    ]);
+    expect(acc.parts).toEqual([
+      { kind: 'assistant', text: 'The tests are running in the background.', final: false },
+      { kind: 'assistant', text: 'The tests passed.', final: true },
+    ]);
+  });
+
+  it('sums the tokens of both turns and keeps the last result\'s cost', () => {
+    const { acc } = collect([...firstTurn, ...secondTurn]);
+
+    expect(acc.usage).toEqual({
+      kind: 'reported',
+      inputTokens: 15 + 40 + 220 + 3 + 300,
+      outputTokens: 50 + 70,
+      cacheCreationInputTokens: 40,
+      cacheReadInputTokens: 220 + 300,
+    });
+    expect(acc.costUsd).toBe(0.8);
+  });
+
+  it('reads a one-turn stream as before', () => {
+    const { acc } = collect(firstTurn);
+
+    expect(acc.parts).toEqual([
+      { kind: 'assistant', text: 'The tests are running in the background.', final: true },
+    ]);
+    expect(acc.usage).toEqual({
+      kind: 'reported',
+      inputTokens: 15 + 40 + 220,
+      outputTokens: 50,
+      cacheCreationInputTokens: 40,
+      cacheReadInputTokens: 220,
+    });
+    expect(acc.costUsd).toBe(0.5);
+  });
+});

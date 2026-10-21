@@ -75,10 +75,21 @@ if (process.env.OBVERSA_TEST_CLAUDE_STALL === '1') {
   })}\n`);
   await new Promise(() => { setInterval(() => {}, 1_000); });
 }
+if (process.env.OBVERSA_TEST_CLAUDE_TWO_TURNS === '1') {
+  // A command started in the background ends the first turn; the CLI starts
+  // a second turn by itself when it finishes. Each turn sends a result.
+  const emit = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
+  emit({ type: 'assistant', message: { model, content: [{ type: 'text', text: 'started' }] } });
+  emit({ type: 'result', result: 'started', usage: { input_tokens: 3, output_tokens: 1 }, total_cost_usd: 0.25 });
+  emit({ type: 'assistant', message: { model, content: [{ type: 'text', text: 'finished' }] } });
+  emit({ type: 'result', result: 'finished', usage: { input_tokens: 5, output_tokens: 2 }, total_cost_usd: 0.75 });
+  process.exit(0);
+}
 process.stdout.write(`${JSON.stringify({
   type: 'assistant',
   message: { model, content: [{ type: 'text', text: 'PONG' }] },
 })}\n`);
+if (process.env.OBVERSA_TEST_CLAUDE_NO_RESULT === '1') process.exit(0);
 const costUsd = process.env.OBVERSA_TEST_CLAUDE_COST_USD;
 process.stdout.write(`${JSON.stringify({
   type: 'result', result: 'PONG',
