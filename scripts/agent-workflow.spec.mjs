@@ -23,6 +23,7 @@ const checkBranch = join(projectRoot, 'scripts', 'check-workstream-branch.mjs');
 const stageMerge = join(projectRoot, 'scripts', 'stage-merge.mjs');
 const stageLeaseRef = 'refs/obversa/stage-merge';
 const temporaryDirectories = [];
+const signingKey = createSigningKey();
 
 test.after(() => {
   for (const directory of temporaryDirectories.reverse()) {
@@ -180,10 +181,10 @@ for (const [stage, branch] of [
     const claimed = runStage('claim', stage, repository.feature);
     assert.equal(claimed.status, 0, claimed.stderr);
     assert.equal(readStageLease(repository).owner.branch, branch);
-    const finished = runStage('finish', stage, repository.feature);
+    const finished = runStage('finish', stage, repository.feature, { args: squashMessage(repository) });
 
     assert.equal(finished.status, 0, finished.stderr);
-    assert.equal(git(repository.main, 'rev-parse', 'HEAD').stdout.trim(), featureHead);
+    assert.equal(treeOf(repository.main, 'HEAD'), treeOf(repository.main, featureHead));
     assert.equal(readFileSync(join(repository.main, 'stage.txt'), 'utf8'), `${stage}\n`);
     assert.equal(stageClaimExists(repository), false);
   });
@@ -294,18 +295,56 @@ for (const [stage, branch] of [
   });
 }
 
-test('finishing a stage fast-forwards main to the clean feature branch', () => {
+test('finishing a stage squashes the feature onto main', () => {
   const repository = createRepository({ feature: true });
-  commitFile(repository.feature, 'lines.txt', 'D1\n', 'finish D1');
+  const mainBefore = git(repository.main, 'rev-parse', 'HEAD').stdout.trim();
+  commitFile(repository.feature, 'lines.txt', 'D1\n', 'feat: add the lines', '2026-08-26T03:00:00Z');
+  commitFile(repository.feature, 'more.txt', 'more\n', 'fix: add more lines', '2026-08-26T03:00:00Z');
   const featureHead = git(repository.feature, 'rev-parse', 'HEAD').stdout.trim();
   assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
+  const message = 'feat: land the lines\n\nExplain why.\n';
 
-  const result = runStage('finish', 'D1', repository.feature);
+  const result = runStageCli(
+    'finish',
+    'D1',
+    repository.feature,
+    { ...wednesdayWindowPolicy(), ...commitDate('2026-08-26T05:00:00Z') },
+    squashMessage(repository, message),
+  );
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(git(repository.main, 'rev-parse', 'HEAD').stdout.trim(), featureHead);
+  const mainHead = git(repository.main, 'rev-parse', 'HEAD').stdout.trim();
+  assert.equal(git(repository.main, 'rev-list', '--count', `${mainBefore}..${mainHead}`).stdout.trim(), '1');
+  assert.equal(git(repository.main, 'rev-parse', `${mainHead}^@`).stdout.trim(), mainBefore);
+  assert.equal(treeOf(repository.main, mainHead), treeOf(repository.main, featureHead));
+  assert.equal(git(repository.main, 'show', '--no-patch', '--format=%B', mainHead).stdout.trim(), message.trim());
+  assert.match(git(repository.main, 'cat-file', 'commit', mainHead).stdout, /gpgsig -----BEGIN SSH SIGNATURE-----/);
   assert.equal(readFileSync(join(repository.main, 'lines.txt'), 'utf8'), 'D1\n');
-  assert.match(result.stdout, /D1 merged to main/);
+  assert.equal(existsSync(repository.feature), false);
+  assert.equal(branchExists(repository, 'feat/graph-forms-v1'), false);
+  assert.equal(stageClaimExists(repository), false);
+  assert.match(result.stdout, new RegExp(`D1 landed on main as ${mainHead}`));
+});
+
+test('finishing refuses a squash commit inside the time window and moves nothing', () => {
+  const repository = createRepository({ feature: true });
+  commitFile(repository.feature, 'lines.txt', 'D1\n', 'feat: add the lines', '2026-08-26T03:00:00Z');
+  const before = branchHeads(repository);
+  assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
+
+  const result = runStageCli(
+    'finish',
+    'D1',
+    repository.feature,
+    { ...wednesdayWindowPolicy(), ...commitDate('2026-08-26T03:00:00Z') },
+    squashMessage(repository),
+  );
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /author and committer times are blocked by the local commit policy/);
+  assert.deepEqual(branchHeads(repository), before);
+  assert.equal(branchExists(repository, 'feat/graph-forms-v1'), true);
+  assert.equal(stageClaimExists(repository), true);
 });
 
 test('finishing activates the integration worktree commit guard', () => {
@@ -313,7 +352,7 @@ test('finishing activates the integration worktree commit guard', () => {
   commitFile(repository.feature, 'lines.txt', 'D1\n', 'finish D1');
   assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
 
-  const result = runStage('finish', 'D1', repository.feature);
+  const result = runStage('finish', 'D1', repository.feature, { args: squashMessage(repository) });
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(git(repository.main, 'config', '--get', 'core.hooksPath').stdout.trim(), '.githooks');
@@ -325,26 +364,128 @@ test('finishing refuses a commit that fails the public commit policy', () => {
   const before = branchHeads(repository);
   assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
 
-  const result = runStageCli('finish', 'D1', repository.feature, publicRulesOnlyPolicy());
+  const result = runStageCli(
+    'finish',
+    'D1',
+    repository.feature,
+    publicRulesOnlyPolicy(),
+    squashMessage(repository),
+  );
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Commit header must use Conventional Commits/);
   assert.deepEqual(branchHeads(repository), before);
 });
 
-test('finishing an integrated stage reports converged state without claiming again', () => {
+test('finishing refuses a squash message that fails the public commit policy', () => {
+  const repository = createRepository({ feature: true });
+  commitFile(repository.feature, 'lines.txt', 'D1\n', 'feat: add the lines');
+  const before = branchHeads(repository);
+  assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
+
+  const result = runStageCli(
+    'finish',
+    'D1',
+    repository.feature,
+    publicRulesOnlyPolicy(),
+    squashMessage(repository, 'land the lines\n'),
+  );
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Commit header must use Conventional Commits/);
+  assert.deepEqual(branchHeads(repository), before);
+});
+
+test('finishing again after an interrupted cleanup completes it without moving main', () => {
   const repository = createRepository({ feature: true });
   commitFile(repository.feature, 'lines.txt', 'D1\n', 'finish D1');
+  const mainBefore = git(repository.main, 'rev-parse', 'HEAD').stdout.trim();
   assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
-  assert.equal(runStage('finish', 'D1', repository.feature).status, 0);
-  const before = branchHeads(repository);
+  // A locked worktree cannot be removed, so the first finish stops after main moves.
+  git(repository.main, 'worktree', 'lock', repository.feature);
+
+  const interrupted = runStage('finish', 'D1', repository.feature, { args: squashMessage(repository) });
+
+  assert.notEqual(interrupted.status, 0);
+  assert.match(interrupted.stderr, /locked working tree/);
+  const landed = git(repository.main, 'rev-parse', 'HEAD').stdout.trim();
+  assert.notEqual(landed, mainBefore);
+  assert.equal(existsSync(repository.feature), true);
+  assert.equal(stageClaimExists(repository), true);
+  git(repository.main, 'worktree', 'unlock', repository.feature);
 
   const repeated = runStage('finish', 'D1', repository.feature);
 
   assert.equal(repeated.status, 0, repeated.stderr);
-  assert.match(repeated.stdout, /D1 is already on main/);
-  assert.deepEqual(branchHeads(repository), before);
+  assert.match(repeated.stdout, new RegExp(`D1 landed on main as ${landed}`));
+  assert.equal(git(repository.main, 'rev-parse', 'HEAD').stdout.trim(), landed);
+  assert.equal(existsSync(repository.feature), false);
+  assert.equal(branchExists(repository, 'feat/graph-forms-v1'), false);
   assert.equal(stageClaimExists(repository), false);
+});
+
+test('finishing from main completes a cleanup that stopped after the feature worktree was removed', () => {
+  const repository = createRepository({ feature: true });
+  commitFile(repository.feature, 'lines.txt', 'D1\n', 'finish D1');
+  assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
+
+  const interrupted = runStage('finish', 'D1', repository.feature, {
+    args: squashMessage(repository),
+    beforeLeaseDelete() {
+      throw new Error('interrupted before the lease was released');
+    },
+  });
+
+  assert.notEqual(interrupted.status, 0);
+  const landed = git(repository.main, 'rev-parse', 'HEAD').stdout.trim();
+  assert.equal(existsSync(repository.feature), false);
+  assert.equal(branchExists(repository, 'feat/graph-forms-v1'), false);
+  assert.equal(stageClaimExists(repository), true);
+
+  const repeated = runStage('finish', 'D1', repository.main);
+
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.match(repeated.stdout, new RegExp(`D1 landed on main as ${landed}`));
+  assert.equal(git(repository.main, 'rev-parse', 'HEAD').stdout.trim(), landed);
+  assert.equal(stageClaimExists(repository), false);
+});
+
+test('finishing from main deletes a branch the stopped cleanup left behind', () => {
+  const repository = createRepository({ feature: true });
+  commitFile(repository.feature, 'lines.txt', 'D1\n', 'finish D1');
+  const featureHead = git(repository.feature, 'rev-parse', 'HEAD').stdout.trim();
+  assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
+  runStage('finish', 'D1', repository.feature, {
+    args: squashMessage(repository),
+    beforeLeaseDelete() {
+      throw new Error('interrupted before the lease was released');
+    },
+  });
+  // The state a stop between removing the worktree and deleting the branch leaves.
+  git(repository.main, 'branch', 'feat/graph-forms-v1', featureHead);
+  const landed = git(repository.main, 'rev-parse', 'HEAD').stdout.trim();
+
+  const repeated = runStage('finish', 'D1', repository.main);
+
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.equal(git(repository.main, 'rev-parse', 'HEAD').stdout.trim(), landed);
+  assert.equal(branchExists(repository, 'feat/graph-forms-v1'), false);
+  assert.equal(stageClaimExists(repository), false);
+});
+
+test('finishing from main refuses a stage that has not landed and keeps its claim', () => {
+  const repository = createRepository({ feature: true });
+  commitFile(repository.feature, 'lines.txt', 'D1\n', 'finish D1');
+  const before = branchHeads(repository);
+  assert.equal(runStage('claim', 'D1', repository.feature).status, 0);
+
+  const result = runStage('finish', 'D1', repository.main);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /main does not hold the D1 squash commit/);
+  assert.deepEqual(branchHeads(repository), before);
+  assert.equal(branchExists(repository, 'feat/graph-forms-v1'), true);
+  assert.equal(stageClaimExists(repository), true);
 });
 
 test('finishing recovers after main moved but the lease was not released', () => {
@@ -570,14 +711,12 @@ test('finishing supports a complete legacy directory claim', () => {
     stage: 'D1',
     worktree: git(repository.feature, 'rev-parse', '--show-toplevel').stdout.trim(),
   })}\n`);
+  const featureHead = git(repository.feature, 'rev-parse', 'HEAD').stdout.trim();
 
-  const result = runStage('finish', 'D1', repository.feature);
+  const result = runStage('finish', 'D1', repository.feature, { args: squashMessage(repository) });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(
-    git(repository.main, 'rev-parse', 'HEAD').stdout.trim(),
-    git(repository.feature, 'rev-parse', 'HEAD').stdout.trim(),
-  );
+  assert.equal(treeOf(repository.main, 'HEAD'), treeOf(repository.main, featureHead));
   assert.equal(existsSync(lock), false);
 });
 
@@ -660,6 +799,8 @@ function createRepository({ feature = false, instructions, branch = 'feat/graph-
   git(main, 'config', 'user.name', 'Test User');
   git(main, 'config', 'user.email', 'test@example.com');
   git(main, 'config', 'commit.gpgsign', 'false');
+  git(main, 'config', 'gpg.format', 'ssh');
+  git(main, 'config', 'user.signingkey', signingKey);
   git(main, 'config', 'core.hooksPath', '.test-hooks');
   writeFileSync(join(main, '.gitignore'), '.obversa/\n');
   writeFileSync(join(main, 'README.md'), 'fixture\n');
@@ -680,10 +821,15 @@ function createRepository({ feature = false, instructions, branch = 'feat/graph-
   return { directory, feature: featurePath, main };
 }
 
-function commitFile(worktree, path, contents, message) {
+function commitFile(worktree, path, contents, message, date) {
   writeFileSync(join(worktree, path), contents);
   git(worktree, 'add', path);
-  git(worktree, 'commit', '--no-gpg-sign', '-m', message);
+  const committed = spawnSync('git', ['commit', '--no-gpg-sign', '-m', message], {
+    cwd: worktree,
+    encoding: 'utf8',
+    env: { ...process.env, ...(date ? commitDate(date) : {}) },
+  });
+  assert.equal(committed.status, 0, committed.stderr);
   mkdirSync(join(worktree, '.obversa'), { recursive: true });
   writeFileSync(join(worktree, CI_PROOF_PATH), `${JSON.stringify(buildCiProof(worktree))}\n`);
 }
@@ -695,9 +841,9 @@ function branchHeads({ feature, main }) {
   };
 }
 
-function stageLock({ feature }) {
+function stageLock({ main }) {
   const commonDirectory = git(
-    feature,
+    main,
     'rev-parse',
     '--path-format=absolute',
     '--git-common-dir',
@@ -707,7 +853,7 @@ function stageLock({ feature }) {
 
 function readStageOwner(repository) {
   const objectId = stageLeaseObjectId(repository, { required: false });
-  if (objectId) return git(repository.feature, 'cat-file', 'blob', objectId).stdout;
+  if (objectId) return git(repository.main, 'cat-file', 'blob', objectId).stdout;
   const lock = stageLock(repository);
   return lstatSync(lock).isDirectory()
     ? readFileSync(join(lock, 'owner.json'), 'utf8')
@@ -718,7 +864,7 @@ function readStageLease(repository) {
   const objectId = stageLeaseObjectId(repository);
   return {
     objectId,
-    owner: JSON.parse(git(repository.feature, 'cat-file', 'blob', objectId).stdout),
+    owner: JSON.parse(git(repository.main, 'cat-file', 'blob', objectId).stdout),
   };
 }
 
@@ -726,7 +872,7 @@ function stageLeaseObjectId(repository, { required = true } = {}) {
   const result = spawnSync(
     'git',
     ['rev-parse', '--verify', '--quiet', stageLeaseRef],
-    { cwd: repository.feature, encoding: 'utf8' },
+    { cwd: repository.main, encoding: 'utf8' },
   );
   if (result.status === 0) return result.stdout.trim();
   if (!required && result.status === 1) return undefined;
@@ -736,6 +882,33 @@ function stageLeaseObjectId(repository, { required = true } = {}) {
 function stageClaimExists(repository) {
   return existsSync(stageLock(repository))
     || stageLeaseObjectId(repository, { required: false }) !== undefined;
+}
+
+function branchExists({ main }, branch) {
+  return spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], { cwd: main }).status === 0;
+}
+
+function treeOf(cwd, revision) {
+  return git(cwd, 'rev-parse', `${revision}^{tree}`).stdout.trim();
+}
+
+function squashMessage({ directory }, message = 'feat: land the stage\n') {
+  const file = join(directory, 'squash-message.txt');
+  writeFileSync(file, message);
+  return ['--message', file];
+}
+
+function commitDate(date) {
+  return { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date };
+}
+
+function createSigningKey() {
+  const directory = mkdtempSync(join(tmpdir(), 'obversa-signing-key-'));
+  temporaryDirectories.push(directory);
+  const key = join(directory, 'key');
+  const result = spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  return key;
 }
 
 function git(cwd, ...args) {
@@ -752,11 +925,12 @@ function runNode(script, args, cwd, env = {}) {
   });
 }
 
-function runStage(command, stage, cwd, options = {}) {
+function runStage(command, stage, cwd, { args = [], ...options } = {}) {
   try {
-    const output = manageStage([command, stage], {
+    const output = manageStage([command, stage, ...args], {
       cwd,
       assertCommitRange: () => 1,
+      assertCommit: () => {},
       ...options,
     });
     return { status: 0, stderr: '', stdout: `${output}\n` };
@@ -769,8 +943,8 @@ function runStage(command, stage, cwd, options = {}) {
   }
 }
 
-function runStageCli(command, stage, cwd, env = {}) {
-  return runNode(stageMerge, [command, stage], cwd, env);
+function runStageCli(command, stage, cwd, env = {}, args = []) {
+  return runNode(stageMerge, [command, stage, ...args], cwd, env);
 }
 
 // A local commit policy that blocks nothing and names nobody, so a test sees
@@ -778,6 +952,15 @@ function runStageCli(command, stage, cwd, env = {}) {
 function publicRulesOnlyPolicy() {
   const file = join(mkdtempSync(join(tmpdir(), 'obversa-commit-policy-')), 'commit-policy.json');
   writeFileSync(file, JSON.stringify({ timeZone: 'UTC', blockedWeekdays: [], blockedFromHour: 0, blockedToHour: 0 }));
+  return { OBVERSA_COMMIT_POLICY: file };
+}
+
+// The Wednesday 02:00 to 04:00 UTC window the commit policy tests use.
+function wednesdayWindowPolicy() {
+  const directory = mkdtempSync(join(tmpdir(), 'obversa-commit-policy-'));
+  temporaryDirectories.push(directory);
+  const file = join(directory, 'commit-policy.json');
+  writeFileSync(file, JSON.stringify({ timeZone: 'UTC', blockedWeekdays: ['Wed'], blockedFromHour: 2, blockedToHour: 4 }));
   return { OBVERSA_COMMIT_POLICY: file };
 }
 

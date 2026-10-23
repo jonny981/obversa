@@ -18,7 +18,9 @@ const SIGNATURE_BOUNDARY_PATHS = [
 // repository: ~/.obversa/commit-policy.json (or the file OBVERSA_COMMIT_POLICY
 // names) with { timeZone, blockedWeekdays, blockedFromHour, blockedToHour }.
 // Without a file no time window is enforced, so a checkout elsewhere is
-// never bound by a policy it cannot see.
+// never bound by a policy it cannot see. The window guards main only: a commit
+// on any other branch may be made at any hour, and a landing squashes the
+// branch into one new commit on main that is checked against the window.
 const POLICY_FILE = process.env.OBVERSA_COMMIT_POLICY ?? join(homedir(), '.obversa', 'commit-policy.json');
 export function loadCommitPolicy(file = POLICY_FILE) {
   if (!existsSync(file)) return null;
@@ -106,6 +108,7 @@ function configuredPublicKey() {
 
 function assertCurrentPolicy() {
   const failures = [];
+  const branch = git(['branch', '--show-current']).trim();
   const identity = policyIdentity();
   if (identity) {
     if (gitConfig('user.name') !== identity.name) failures.push('user.name does not match the local commit policy');
@@ -117,10 +120,11 @@ function assertCurrentPolicy() {
     const key = policyKey();
     if (key && configuredPublicKey() !== key) failures.push('user.signingkey is not the key the local commit policy names');
   }
-  if (!isAllowedCommitTime(new Date())) {
+  if (branch === 'main' && !isAllowedCommitTime(new Date())) {
     failures.push('commits are blocked by the local commit policy at this time');
   }
   if (failures.length) throw new Error(failures.join('\n'));
+  return branch;
 }
 
 function commitDetails(commit, options = {}) {
@@ -160,7 +164,7 @@ function assertGoodSshSignature(commit, options = {}) {
   }
 }
 
-function assertCommit(commit, options = {}) {
+export function assertCommit(commit, options = {}) {
   const details = commitDetails(commit, options);
   const failures = [];
   const requiredIdentity = policyIdentity();
@@ -172,7 +176,10 @@ function assertCommit(commit, options = {}) {
       failures.push('author and committer emails do not match the local commit policy');
     }
   }
-  if (!isAllowedCommitTime(details.authorTime) || !isAllowedCommitTime(details.committerTime)) {
+  if (
+    options.timeWindow !== false
+    && (!isAllowedCommitTime(details.authorTime) || !isAllowedCommitTime(details.committerTime))
+  ) {
     failures.push('author and committer times are blocked by the local commit policy');
   }
   if (failures.length) throw new Error(`${details.hash}: ${failures.join('; ')}`);
@@ -265,11 +272,13 @@ function main(args) {
   const { mode, value } = parsePolicyArgs(args);
 
   switch (mode) {
-    case '--now':
+    case '--now': {
       if (value !== undefined) throw new Error(usage());
-      assertCurrentPolicy();
-      console.log('Commit identity, signing, and time policy passed.');
+      const branch = assertCurrentPolicy();
+      const window = branch === 'main' ? 'on main' : `not applied on ${branch || 'a detached HEAD'}`;
+      console.log(`Commit identity and signing policy passed; time window: ${window}.`);
       return;
+    }
     case '--message':
       assertConventionalMessage(readFileSync(resolve(value), 'utf8'));
       console.log('Commit message policy passed.');

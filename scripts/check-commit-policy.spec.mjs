@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import * as commitPolicy from './check-commit-policy.mjs';
 
@@ -244,5 +244,109 @@ test('configures hooks only for the active linked worktree', () => {
     assert.equal(shared.stdout, '');
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// "Now" is always inside this window, whatever day and hour the test runs.
+const alwaysBlockedPolicy = {
+  timeZone: 'UTC',
+  blockedWeekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+  blockedFromHour: 0,
+  blockedToHour: 24,
+};
+
+function policyRepository(branch, policy, config = {}) {
+  const directory = mkdtempSync(join(tmpdir(), 'obversa-commit-window-'));
+  const repository = join(directory, 'repository');
+  const policyFile = join(directory, 'commit-policy.json');
+  writeFileSync(policyFile, JSON.stringify(policy));
+  run('git', ['init', '--quiet', `--initial-branch=${branch}`, repository], directory);
+  for (const [name, value] of Object.entries(config)) run('git', ['config', name, value], repository);
+  return { directory, repository, policyFile };
+}
+
+function checkNow({ repository, policyFile }) {
+  return spawnSync(process.execPath, [resolve(scripts, 'check-commit-policy.mjs'), '--now'], {
+    cwd: repository,
+    encoding: 'utf8',
+    env: { ...process.env, OBVERSA_COMMIT_POLICY: policyFile },
+  });
+}
+
+test('a branch commit inside the window passes --now', () => {
+  const fixture = policyRepository('feat/x', alwaysBlockedPolicy);
+  try {
+    const result = checkNow(fixture);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /time window: not applied on feat\/x/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('a main commit inside the window fails --now', () => {
+  const fixture = policyRepository('main', alwaysBlockedPolicy);
+  try {
+    const result = checkNow(fixture);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /commits are blocked by the local commit policy at this time/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('--now still checks identity on a branch', () => {
+  const fixture = policyRepository(
+    'feat/x',
+    { ...alwaysBlockedPolicy, identity: { name: 'Policy Person', email: 'policy@example.test' } },
+    { 'user.name': 'Policy Person', 'user.email': 'someone-else@example.test' },
+  );
+  try {
+    const result = checkNow(fixture);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /user\.email does not match the local commit policy/);
+    assert.doesNotMatch(result.stderr, /blocked by the local commit policy at this time/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('history checks apply the window unless the caller turns it off', () => {
+  const fixture = policyRepository('main', fixturePolicy);
+  const commit = (message, date) => run(
+    'git',
+    ['-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '--quiet', '-m', message],
+    fixture.repository,
+    0,
+    { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+  );
+  run('git', ['config', 'user.name', 'Test User'], fixture.repository);
+  run('git', ['config', 'user.email', 'test@example.test'], fixture.repository);
+  // A good message inside the Wednesday window, then a bad message outside it.
+  commit('feat: add work', '2026-08-26T03:00:00Z');
+  commit('add more work', '2026-08-27T03:00:00Z');
+  const checkRange = (range, options) => spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `import { assertCommitRange } from ${JSON.stringify(pathToFileURL(resolve(scripts, 'check-commit-policy.mjs')).href)};
+assertCommitRange(${JSON.stringify(range)}, ${JSON.stringify({ cwd: fixture.repository, ...options })});`,
+    ],
+    { encoding: 'utf8', env: { ...process.env, OBVERSA_COMMIT_POLICY: fixture.policyFile } },
+  );
+  try {
+    const inWindow = checkRange('HEAD~1', {});
+    assert.notEqual(inWindow.status, 0);
+    assert.match(inWindow.stderr, /author and committer times are blocked by the local commit policy/);
+    const windowOff = checkRange('HEAD~1', { timeWindow: false });
+    assert.equal(windowOff.status, 0, windowOff.stderr);
+    for (const options of [{}, { timeWindow: false }]) {
+      const badMessage = checkRange('HEAD~1..HEAD', options);
+      assert.notEqual(badMessage.status, 0);
+      assert.match(badMessage.stderr, /Commit header must use Conventional Commits/);
+    }
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
   }
 });

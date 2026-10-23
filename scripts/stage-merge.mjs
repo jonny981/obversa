@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertCommitRange } from './check-commit-policy.mjs';
+import { assertCommit, assertCommitRange } from './check-commit-policy.mjs';
 import { assertFreshCiProof } from './ci-proof.mjs';
 import { configureGitHooks } from './configure-git-hooks.mjs';
 
@@ -206,18 +206,22 @@ export const stageBranches = {
 };
 
 export function manageStage(args, options = {}) {
-  if (args.length !== 2 || !['claim', 'finish', 'release'].includes(args[0])) {
-    throw new Error('usage: pnpm stage:<claim|finish|release> <D1|F0>');
+  const withMessage = args.length === 4 && args[0] === 'finish' && args[2] === '--message';
+  if ((args.length !== 2 && !withMessage) || !['claim', 'finish', 'release'].includes(args[0])) {
+    throw new Error('usage: pnpm stage:<claim|release> <D1|F0>, or pnpm stage:finish <D1|F0> --message <file>');
   }
   if (!/^[DF]\d+[A-Za-z]?$/.test(args[1])) {
     throw new Error('stage must look like D1, D11A, F0, or F2b');
   }
 
   const [command, stage] = args;
-  const context = featureContext(stage, options.cwd ?? process.cwd());
+  const cwd = options.cwd ?? process.cwd();
+  const context = featureContext(stage, cwd, { allowMain: command === 'finish' });
   if (command === 'claim') return claim(context);
   if (command === 'finish') {
-    return finish(context, {
+    return (context.onMain ? finishFromMain : finish)(context, {
+      messageFile: withMessage ? resolve(cwd, args[3]) : undefined,
+      assertCommit: options.assertCommit ?? assertCommit,
       assertCommitRange: options.assertCommitRange ?? assertCommitRange,
       assertFreshCiProof: options.assertFreshCiProof ?? assertFreshCiProof,
       beforeLeaseDelete: options.beforeLeaseDelete,
@@ -315,6 +319,10 @@ function finish(context, dependencies) {
 
   const lease = readLease(context, 'claim the stage merge turn first');
   assertOwner(context, lease.owner);
+  // A finish that stopped after main took the squash commit only has cleanup left.
+  if (isSquashOf(mainWorktree, mainHead, lease.owner.mainHead, featureHead)) {
+    return cleanUp(context, mainWorktree, lease, mainHead, dependencies);
+  }
   if (lease.owner.mainHead !== mainHead) {
     throw new Error(`${context.stage} cannot finish because main changed after ${context.stage} claimed the merge turn`);
   }
@@ -332,17 +340,68 @@ function finish(context, dependencies) {
     );
   }
 
-  dependencies.assertCommitRange(`${mainHead}..${featureHead}`, { cwd: context.worktree });
+  // The branch commits never reach main, so their times do not matter.
+  dependencies.assertCommitRange(`${mainHead}..${featureHead}`, { cwd: context.worktree, timeWindow: false });
   git(context.worktree, 'diff', '--check', `${mainHead}..${featureHead}`);
   dependencies.assertFreshCiProof(context.worktree);
-  git(mainWorktree, 'merge', '--ff-only', featureHead);
+  if (!dependencies.messageFile) {
+    throw new Error(`landing ${context.stage} needs the squash commit message: pnpm stage:finish ${context.stage} --message <file>`);
+  }
 
-  const mergedHead = git(mainWorktree, 'rev-parse', 'HEAD').trim();
-  if (mergedHead !== featureHead) throw new Error('main did not reach the reviewed feature commit');
+  // commit-tree runs no hooks, so the guard that refuses commits on main stays
+  // as it is; the squash commit is checked against the full policy instead.
+  const squash = git(
+    mainWorktree,
+    'commit-tree',
+    `${featureHead}^{tree}`,
+    '-p',
+    mainHead,
+    '-S',
+    '-F',
+    dependencies.messageFile,
+  ).trim();
+  dependencies.assertCommit(squash, { cwd: mainWorktree });
+  git(mainWorktree, 'merge', '--ff-only', squash);
+  if (!sameTree(mainWorktree, 'HEAD', featureHead)) throw new Error('main did not reach the reviewed feature tree');
 
+  return cleanUp(context, mainWorktree, lease, squash, dependencies);
+}
+
+// A finish that stopped after its feature worktree was removed is finished from
+// main. Without the branch, the lease's main head is what identifies the squash.
+function finishFromMain(context, dependencies) {
+  const lease = readLease(context, `nothing to finish from main; finish ${context.stage} from its feature worktree`);
+  assertOwner(context, lease.owner);
+  const mainHead = git(context.worktree, 'rev-parse', 'HEAD').trim();
+  const branch = rawGit(context.worktree, 'rev-parse', '--verify', '--quiet', `refs/heads/${context.branch}`);
+  const featureHead = branch.status === 0 ? branch.stdout.trim() : undefined;
+  if (!isSquashOf(context.worktree, mainHead, lease.owner.mainHead, featureHead)) {
+    throw new Error(`main does not hold the ${context.stage} squash commit; finish ${context.stage} from its feature worktree`);
+  }
+  return cleanUp(context, context.worktree, lease, mainHead, dependencies);
+}
+
+function isSquashOf(cwd, commit, parent, featureHead) {
+  const [, ...parents] = git(cwd, 'rev-list', '--parents', '-n', '1', commit).trim().split(/\s+/);
+  return parents.length === 1 && parents[0] === parent && (!featureHead || sameTree(cwd, commit, featureHead));
+}
+
+function sameTree(cwd, left, right) {
+  return git(cwd, 'rev-parse', `${left}^{tree}`).trim() === git(cwd, 'rev-parse', `${right}^{tree}`).trim();
+}
+
+// The merge turn is held until the feature worktree and branch are gone. Each
+// step skips what is already gone, so a finish that stops part way can be run
+// again from the feature worktree, or from main once that worktree is removed.
+function cleanUp(context, mainWorktree, lease, squash, dependencies) {
   dependencies.configureGitHooks(mainWorktree);
-  deleteLease(context, lease, dependencies.beforeLeaseDelete);
-  return `${context.stage} merged to main at ${featureHead}.`;
+  const worktree = findWorktree(mainWorktree, context.branch);
+  if (worktree) git(mainWorktree, 'worktree', 'remove', worktree);
+  if (rawGit(mainWorktree, 'rev-parse', '--verify', '--quiet', `refs/heads/${context.branch}`).status === 0) {
+    git(mainWorktree, 'branch', '-D', context.branch);
+  }
+  deleteLease({ ...context, worktree: mainWorktree }, lease, dependencies.beforeLeaseDelete);
+  return `${context.stage} landed on main as ${squash}; removed its worktree and the branch ${context.branch}.`;
 }
 
 function release(context, dependencies) {
@@ -356,14 +415,16 @@ function release(context, dependencies) {
   return `${context.stage} released the stage merge turn.`;
 }
 
-function featureContext(stage, cwd) {
+function featureContext(stage, cwd, { allowMain = false } = {}) {
   const worktree = git(cwd, 'rev-parse', '--show-toplevel').trim();
-  const branch = git(worktree, 'branch', '--show-current').trim();
-  if (branch.length === 0 || branch === 'main' || branch === 'master') {
+  const currentBranch = git(worktree, 'branch', '--show-current').trim();
+  const onMain = allowMain && currentBranch === 'main';
+  if (!onMain && (currentBranch.length === 0 || currentBranch === 'main' || currentBranch === 'master')) {
     throw new Error('manage a stage from its named feature branch, not main');
   }
   const expectedBranch = stageBranches[stage]
     ?? (stage.startsWith('D') ? 'feat/graph-forms-v1' : 'feat/factory-v1');
+  const branch = onMain ? expectedBranch : currentBranch;
   if (branch !== expectedBranch) {
     throw new Error(
       `${stage} belongs to ${expectedBranch}; ${branch} cannot claim ${stage}`,
@@ -381,6 +442,7 @@ function featureContext(stage, cwd) {
     leaseRef,
     legacyLockPath,
     legacyOwnerPath: join(legacyLockPath, 'owner.json'),
+    onMain,
     stage,
     worktree,
   };
@@ -505,14 +567,20 @@ function assertClean(worktree, label) {
 }
 
 function findMainWorktree(cwd) {
+  const worktree = findWorktree(cwd, 'main');
+  if (worktree) return worktree;
+  throw new Error('main must have one dedicated worktree');
+}
+
+function findWorktree(cwd, branch) {
   const records = git(cwd, 'worktree', 'list', '--porcelain').trim().split(/\n\n+/);
   for (const record of records) {
     const lines = record.split('\n');
-    if (!lines.includes('branch refs/heads/main')) continue;
+    if (!lines.includes(`branch refs/heads/${branch}`)) continue;
     const path = lines.find((line) => line.startsWith('worktree '));
     if (path) return path.slice('worktree '.length);
   }
-  throw new Error('main must have one dedicated worktree');
+  return undefined;
 }
 
 function git(cwd, ...args) {

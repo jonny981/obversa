@@ -83,12 +83,25 @@ Run `pnpm ci:local` before landing: it runs the whole CI job, in the same
 order CI runs it. `stage:finish` refuses to land a branch without a
 matching proof from that run.
 
+To land a branch, run `pnpm stage:claim <stage>` from its worktree, then
+`pnpm stage:finish <stage> --message <file>`. The file holds the commit
+message. Keep it outside the worktree, because `stage:finish` refuses a
+worktree with uncommitted files. `stage:finish` adds one squash commit to `main`, with that message
+and the branch's final files. It checks that commit against the full commit
+policy before `main` moves. Then it deletes the branch's worktree and the
+branch. If it stops before it deletes the worktree, run it again from the
+worktree to finish. If it stops after that, run it again from `main`'s
+worktree.
+
 ## The rules every change follows
 
 **Commits.** Use [Conventional Commits](https://www.conventionalcommits.org):
 `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, and more, with the why in
 the body. Commits are signed. Configure Git with an SSH signing key
-before your first contribution. Do not add AI attribution, co-author
+before your first contribution. The commit hooks check the message on
+every branch, and the identity and signing key a local commit policy
+names. A local commit policy can also block commits at set hours. Those
+hours apply only to `main`, so you can commit on a branch at any hour. Do not add AI attribution, co-author
 trailers, or generated-by text. The author of a change is you.
 
 **Boundaries, in plain words.**
