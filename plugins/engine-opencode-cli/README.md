@@ -66,3 +66,9 @@ const engine = new OpenCodeCliEngine({
   identity: { provider: 'anthropic', modelFamily: 'claude' },
 });
 ```
+
+## Input limit and login errors
+
+This engine declares no input limit, so the runtime treats it as having none.
+
+An attempt ends when the `opencode` process exits. A failed call whose error names a login problem is an `auth` failure. An installed OpenCode whose version is not the one the plugin supports is marked as a moved version. In both cases the runtime runs the same seat once more, then the seat's next candidate.

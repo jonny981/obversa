@@ -129,6 +129,29 @@ Codex CLI  | clean, read                 | yes      | no            |
 Codex CLI  | your setup, write (control) | yes      | yes           | write step changed created.txt
 ```
 
+## Input limits and login errors
+
+An engine may declare how much input one request may hold, in characters
+or in tokens. The runtime measures a limit in tokens as one token per two
+characters. That ratio is lower than any measured on a real prompt, so a
+prompt measured as fitting does fit. A step whose input is larger than its
+engine's limit pauses before the call, and its reason names the size and
+the limit. A review step first lists data files instead of inlining them;
+see [What a reviewer reads](/patterns/review-panel#what-a-reviewer-reads).
+An engine that declares no limit is treated as having none.
+
+| Engine | Declared input limit |
+| --- | --- |
+| `@obversa/engine-codex-cli` | 1,048,576 characters |
+| `@obversa/engine-grok-cli` | 500,000 tokens |
+| Every other engine | none |
+
+A login error is an `auth` failure. The runtime runs the same seat once
+more, then the seat's next candidate. The Grok engine stops an attempt at
+once when Grok prints a login error and keeps running. Before a call under
+Grok's strict sandbox it refreshes a login that would expire during the
+call. Each engine's own page says what it does.
+
 ## Reasoning effort
 
 `effort` sets how hard the model thinks. Every engine takes it under the

@@ -67,6 +67,23 @@ if (args.length === 1 && args[0] === '--version') {
   process.exit(0);
 }
 
+if (args[0] === 'models') {
+  recordInvocation('refresh');
+  if (process.env.OBVERSA_TEST_GROK_REFRESH === 'fail') {
+    process.stderr.write('refresh refused: the network is down\n');
+    process.exit(1);
+  }
+  // Renews only a login in a home a test marked, or in the copy the plugin
+  // makes for a chosen login file; never anyone's own.
+  const home = process.env.GROK_HOME;
+  const ownCopy = home !== undefined && /lines-grok-refresh-[^/]+\/grok-home$/.test(home);
+  if (home && (ownCopy || existsSync(join(home, 'fixture-home'))) && process.env.OBVERSA_TEST_GROK_REFRESH !== 'no-renew') {
+    writeFileSync(join(home, 'auth.json'), JSON.stringify({ token: 'renewed-token', expires_at: '2099-01-01T00:00:00Z' }));
+  }
+  process.stdout.write('grok-4-fixture\n');
+  process.exit(0);
+}
+
 recordInvocation('model');
 
 function value(flag) {
@@ -142,6 +159,13 @@ if (scenario === 'not-signed-in') {
     uuid: 'fixture-not-signed-in',
   });
   process.exit(1);
+}
+if (scenario === 'login-lock') {
+  // The CLI's login renewal cannot write its lock inside the sandbox; it
+  // says so and keeps retrying.
+  process.stderr.write('auth lock: failed to open ~/.grok/auth.json.lock: Operation not permitted\n');
+  setInterval(() => {}, 1_000);
+  await new Promise(() => {});
 }
 if (scenario === 'auth') {
   process.stderr.write('401 unauthorized: run grok login\n');

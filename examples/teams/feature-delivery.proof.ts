@@ -232,7 +232,7 @@ async function assertSevenSteps(seeded: Seeded, attended: boolean) {
   assert.equal(checkBacks.length, 1, 'only the red test draws on checkRounds');
   const red = sendBacks.filter((e) => /exited 1/.test(e.outcome!.summary ?? ''));
   assert.equal(red.length, 1, 'one red test in the whole run');
-  assert.match(red[0]!.outcome!.summary ?? '', /exited 1[\s\S]*command output/, "the builder gets the test's output");
+  assert.match(red[0]!.outcome!.summary ?? '', /exited 1[\s\S]*the lines that report the failure:[\s\S]*not ok/, "the builder gets the test's output");
 
   // What the builder was sent each time. The first build has the ticket
   // alone; each later one has what sent the work back.

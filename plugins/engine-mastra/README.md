@@ -79,6 +79,12 @@ a rate limit, and a `retry-after` header is kept. Other errors go through the
 shared classification, so a quota, authentication or billing message is
 typed as one.
 
+## Input limit and login errors
+
+This engine declares no input limit, so the runtime treats it as having none.
+
+A failed call whose error names a login problem is an `auth` failure. The runtime then runs the same seat once more, then the seat's next candidate.
+
 ## License
 
 [MIT](LICENSE)

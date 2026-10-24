@@ -413,7 +413,7 @@ export class ClaudeCliEngine implements Engine {
     } catch (error) {
       const mapped = claudeCommandError(error, executable);
       if (mapped instanceof EngineError) throw mapped;
-      throw new EngineError({ kind: 'unknown', message: 'Claude version observation failed' });
+      throw new EngineError({ kind: 'unknown', message: 'Claude version observation failed', cause: error });
     }
   }
 

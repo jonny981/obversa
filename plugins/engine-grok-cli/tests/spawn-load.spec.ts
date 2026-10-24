@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EngineError } from '@obversa/api';
 import { OwnedCommandError } from '@obversa/core/command';
@@ -57,7 +61,17 @@ async function failure(): Promise<unknown> {
 }
 
 describe('Grok spawn failure under load', () => {
-  beforeEach(() => vi.clearAllMocks());
+  // No test reads the person's own Grok login: each starts with an empty Grok home.
+  let home: string;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    home = mkdtempSync(join(tmpdir(), 'grok-spawn-load-'));
+    vi.stubEnv('GROK_HOME', home);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(home, { recursive: true, force: true });
+  });
 
   it.each([
     ['EAGAIN', 'version'],

@@ -158,6 +158,18 @@ export interface Outcome {
   converging?: true;
   /** Present on a `commandJob` outcome: the command it ran and how it ended. */
   command?: CommandRun;
+  /**
+   * On a writer's answer to a failed check that changed no file: the
+   * command line of the check it answered. The writer says the change does
+   * not cause the failure, and its reply is the evidence. That check runs
+   * again on the same tree.
+   */
+  answeredWithoutChange?: string;
+  /**
+   * On a run's outcome when the run was asked to commit its work: the commit
+   * it made, or why the work was left uncommitted.
+   */
+  commit?: { readonly sha: string } | { readonly uncommitted: string };
 }
 
 /** One command a `commandJob` ran, pass or fail. */
@@ -171,6 +183,8 @@ export interface CommandRun {
   readonly durationMs: number;
   /** True when the command ran past its timeout and was stopped. */
   readonly timedOut?: true;
+  /** True when the command failed, then passed when run again on the same tree. */
+  readonly flaky?: true;
 }
 
 export type RecordedStage =
@@ -428,6 +442,56 @@ export interface RevisionRequest {
   decision?: FeedbackDecision;
   /** `true` when no judge decides this revision: it always goes back to its target, within the budget. */
   skipJudge?: true;
+  /**
+   * On a send-back a failed check made: the check's command line. The
+   * writer may answer it with no change and its evidence that the change
+   * does not cause the failure; that check then runs again on the same tree.
+   */
+  check?: string;
+}
+
+/**
+ * What a reviewer on a panel with a send-back `target` reads beyond its own
+ * prompt: the round, and from round 2 its own findings from the last round
+ * it answered and the diff of the worktree since that round. With a `base`,
+ * an agent job then appends the change itself, sized to its engine's input
+ * limit.
+ */
+export interface ReviewInput {
+  /** What the change is measured against; without one the reviewer reads no change from the runtime. */
+  readonly base?: string;
+  /** This review round, from 1. */
+  readonly round: number;
+  /** The last round this reviewer answered, when there is one. */
+  readonly previous?: {
+    readonly round: number;
+    /** Its findings from that round still open: the judge skipped none of them. */
+    readonly findings: readonly FeedbackFinding[];
+    /** The diff of the worktree since that round; `undefined` when git could not compute it. */
+    readonly diff: string | undefined;
+  };
+}
+
+/** A proof the proof check accepted, kept until the files it covers change. */
+export interface AcceptedProof {
+  /** The brief item it answers, quoted. */
+  readonly item: string;
+  /** The worktree tree it was accepted on. */
+  readonly tree: string;
+  /** The files the proof exercises. Empty means the whole change. */
+  readonly files: readonly string[];
+}
+
+/** What a run read from the record of an earlier run on the same work (`run`'s `carryFrom`). */
+export interface CarriedWork {
+  /** The record it was read from. */
+  readonly record: string;
+  /** The last finished review's findings that were never resolved. */
+  readonly openFindings: readonly FeedbackFinding[];
+  /** Every proof the earlier run's proof check accepted. */
+  readonly acceptedProofs: readonly AcceptedProof[];
+  /** How the earlier run ended: the step that stopped it, its status and why. */
+  readonly ended?: { readonly node?: string; readonly status: OutcomeStatus; readonly reason: string };
 }
 
 export interface GraphPosition {
@@ -460,8 +524,11 @@ export interface JobContext {
   readonly signal: AbortSignal;
   /** Stable id for this run when one was assigned by the runner. */
   readonly runId?: string;
-  /** Run-owned files omitted from workspace fingerprints. */
-  /** @internal */
+  /**
+   * The run's own files: its record, the records kept beside it and its
+   * check output. Leave them out of any snapshot of the workspace, so they
+   * never read as a change.
+   */
   readonly fingerprintExcludePaths?: string[];
   emit(event: LoopEvent): void;
   /** Immutable run brief shared by every job in this run. */
@@ -491,6 +558,15 @@ export interface JobContext {
   readonly onCallback?: 'wait' | 'exit';
   /** Where this job's code lives — the working dir and branch (the substrate). */
   readonly workspace: Workspace;
+  /** The record this run writes, when it writes one. */
+  readonly recordPath?: string;
+  /**
+   * What an earlier run on the same work left: its open findings and
+   * accepted proofs. Set when `run` was given `carryFrom`.
+   */
+  readonly carried?: CarriedWork;
+  /** Set for a reviewer on a panel with a send-back target: see `ReviewInput`. */
+  readonly reviewInput?: ReviewInput;
   /** The running environment for this workspace, when one is up (gate target). */
   readonly environment?: EnvHandle;
   /**
@@ -1002,6 +1078,12 @@ export interface DagConfig {
   useCase?: string;
   /** The brief or ticket text the work answers. A node's `refine` judge reads it. */
   brief?: string;
+  /**
+   * Ask a run of this graph to commit its work when it passes, with the
+   * message the node `from` wrote: the last fenced block marked `commit` in
+   * its output. `run`'s own `commit` option says the same and wins.
+   */
+  commit?: { readonly from: string };
 }
 
 /** Per-node disposition within a DAG run. */
@@ -1346,6 +1428,8 @@ export type LoopEvent =
       reset?: number;
       /** The skip came from remembered unavailability, not a fresh failure. */
       remembered?: true;
+      /** What went wrong, in words: a stall, a timeout, a moved CLI version, a login error. */
+      reason?: string;
     }
   | {
       kind: 'engine:usage';

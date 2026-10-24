@@ -72,9 +72,9 @@ reads it back; a rejection returns the findings to the writer. Run it with
 | --- | --- | --- |
 | `writerReviewerPair` | A writer, the test command, and a reviewer whose findings return to the writer. | `PairConfig`: `writer`, `reviewer`, optional `refine`. |
 | `thresholdPanel` | An implementation, the test command, and a panel that needs `threshold` acceptances. | `PanelConfig`: `implement`, `reviewers`, `threshold`, optional `refine`. |
-| `featureDelivery` | Research, requirements, planning, tests, implementation, review, approval, evidence and learning. | `FeatureDeliveryConfig`: `analyse`, `implement`, `reviewers`, `reviewThreshold`, `approve`, `testFiles`, optional `refine`. |
+| `featureDelivery` | A seat check, a brief check, the build, the builder's report, a size check, the checks, a proof check and the review panel, with an optional commit. Research, planning and tests run first when their seats are given. | `FeatureDeliveryConfig`: see [Feature delivery](#feature-delivery). |
 
-Every configuration extends `TeamInput`. A seat is a `TeamSeat` from
+`writerReviewerPair` and `thresholdPanel` take a `TeamInput`. A seat is a `TeamSeat` from
 `@obversa/api`, an engine with its declared identity:
 
 ```ts examples/builtin-workflows.ts (excerpt) {1-2,7-10}
@@ -90,6 +90,74 @@ Every configuration extends `TeamInput`. A seat is a `TeamSeat` from
     },
   };
 ```
+
+## Feature delivery
+
+`featureDelivery(config)` builds one change in a worktree and runs it to a
+passed, reviewed change. It runs these steps in order:
+
+1. **Seat check.** Each seat whose engine has an admission check starts its
+   CLI and reports its version, before any build spend. A seat that cannot
+   start is replaced by its next candidate, and every later step starts on
+   the seat that answered. With no candidate left, the run pauses and names
+   the seat.
+2. **Brief check.** The first reviewer reads the brief against the
+   repository and lists every finding it can establish, in one pass. It
+   blocks only on a wrong goal, a false claim about the repository or its
+   base, or a check that cannot fail. It never blocks because the tree does
+   not yet do what the brief asks the build to do. A block pauses the run.
+   With `briefPath`, a resume reads the brief file again, so a fixed brief
+   needs no relaunch. A warning goes to the builder.
+3. **Build.** The `implement` seat builds the change. Its report ends with a
+   commit message in a fenced block marked `commit`.
+4. **Report.** The builder's report goes to the team.
+5. **Size check.** The review input is measured for every reviewer seat. A
+   change too large for one, even with data files listed, goes back to the
+   build with its largest files named, before any check runs.
+6. **Checks.** Each command in `checks` runs on the tree. A failure runs
+   once more before it counts. A failure's output goes to the builder once,
+   cut to fit the builder's whole next prompt.
+7. **Proof check.** The `reader` (the first reviewer by default) asks only
+   for proof the run cannot produce itself. A check the run passed counts
+   as proven. The first missing-proof send-back in a run goes to the report
+   and costs no review round; a later one goes to the build, with the report
+   the proof check read. A resumed run keeps both.
+8. **Review.** The panel reviews the change, with the judge between its
+   verdict and each send-back. From round 2 each reviewer reads its own open
+   findings and the diff since its last round.
+
+Only the review panel's verdicts go through the judge. A failed check, a
+change too large to review and missing proof go straight back to their
+step, so a judge never passes a tree whose checks failed.
+
+The report's answer to a send-back runs on the builder's seat and its
+candidates, as the build does.
+
+With `commit: true`, a passed run commits its work with the report's
+commit message. See [`commit`](/packages/runtime#commit).
+
+### Accepted proofs
+
+Each proof the proof check accepts is kept with the brief item it answers,
+the tree it was accepted on and the files it covers. The proof check names
+those files: the code the proof tests or measures, its test file and the
+script it ran. A proof with no files named covers the whole change. A later
+report replaces the last report, but never the accepted list, and a resumed
+run reads the list back from the record. The run's own files (its record,
+the records kept beside it and its check output) are never part of a
+proof's tree, so a record inside the worktree does not stale a proof. A
+proof stands until the diff from
+its tree to the current tree touches a file it covers. The builder's prompt
+lists the proofs that stand, so it does not run them again.
+
+### Carrying on from an earlier run
+
+Run it with `run`'s [`carryFrom`](/packages/runtime#carryfrom) to carry on
+from an earlier run on the same brief. The first build answers the earlier
+run's open findings, and its accepted proofs still stand while their files
+are unchanged. The first build and the brief check are both told that the
+worktree may hold the earlier run's work, and how that run ended, so the
+brief needs no note about it.
 
 ## Improve a workflow
 
@@ -120,15 +188,39 @@ Both are re-exported from `@obversa/runtime/workflow-support`.
 | `files` | `readonly string[]` | required | The files the brief expects written. |
 | `test` | `TestCommand` | required | `{ command, args, timeoutMs? }`, run after the writer. |
 
+### `FeatureDeliveryConfig`
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `brief`, `briefPath` | `string` | one required | The brief as text, or as a file read again on a resume. |
+| `workspace` | `string` | required | The worktree the team builds in. |
+| `implement` | `SeatChoice` | required | The seat that builds, with its candidates. |
+| `reviewers` | `readonly ReviewerSeat[]` | required | The panel. The first also checks the brief. |
+| `reviewThreshold` | `number` | all reviewers | How many reviewers must pass a round. |
+| `reader` | `SeatChoice` | the first reviewer | The seat that checks the report's proof. |
+| `judge` | `TeamSeat` | none | The judge between each review and its send-back. |
+| `cap` | `number` | none | The judge's cap on rounds. |
+| `rounds` | `number` | `3` | The send-backs the build takes when there is no judge. |
+| `checks` | `readonly (string \| readonly string[])[]` | required | The commands the change must pass, with no shell syntax. |
+| `base` | `string` | `'origin/main'` | What the change is measured against. |
+| `buildMinutes` | `number` | `120` | Minutes one build attempt may run. |
+| `reviewMinutes` | `number` | `40` | Minutes the brief check, the proof check and each reviewer may run. |
+| `stallMinutes` | `number` | none | Minutes with no engine event before a step counts as stalled. |
+| `commit` | `boolean` | `false` | Commit the work when the run passes. |
+| `houseRules` | `string` | none | Rules every seat reads. |
+| `analyse` | `SeatChoice` | none | With it, the research and plan stages run before the build. |
+| `files` | `readonly string[]` | required with `analyse` or `testFiles` | The files the change writes. |
+| `testFiles` | `readonly string[]` | none | With them, the tests stage runs before the build; every entry must be in `files`. |
+| `refine` | `RefineBudget` | `1` | The send-backs the research, plan and tests stages take. |
+
 ### Seats and thresholds
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `writer`, `reviewer`, `implement`, `analyse`, `approve` | `TeamSeat` | required | One engine with its identity per role. |
+| `writer`, `reviewer`, `implement` | `TeamSeat` | required | One engine with its identity per role. |
 | `reviewers` | `readonly ReviewerSeat[]` | required | Each a `name`, a `seat` and an optional review `scope`. |
-| `threshold`, `reviewThreshold` | `number` | required | How many reviewers must accept. |
-| `testFiles` | `readonly string[]` | required for `featureDelivery` | The test files written before the code; every entry must be in `files`. |
-| `refine` | `RefineBudget` | `1` | The send-backs each target may take. A number gives every target the same count. A map gives each named target its own count or judge, and a target the map leaves out refuses send-backs (`featureDelivery` still gives `research-requirements` 1). |
+| `threshold` | `number` | required | How many reviewers must accept. |
+| `refine` | `RefineBudget` | `1` | The send-backs each target may take. A number gives every target the same count. A map gives each named target its own count or judge, and a target the map leaves out refuses send-backs. |
 
 ## Errors
 

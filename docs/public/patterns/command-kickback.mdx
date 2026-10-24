@@ -259,6 +259,36 @@ if (faults.length) {
 
 </Accordion>
 
+## A failed check runs again
+
+A `commandJob` with a `target` runs a failed command once more on the same
+tree before the failure counts. When the second run passes, the step
+passes, and the record marks the check as flaky. Both runs' output is kept.
+
+When it fails twice, it goes to the target as a finding. The writer there
+may answer it with no change: its reply says the change does not cause the
+failure, with its evidence. The check then runs once more on the same tree.
+When it passes, the run goes on. When it fails again, the run pauses, names
+the check and quotes the writer's evidence. The answer covers only the check
+it answers: every other check still runs once more before a failure counts,
+and one that fails twice is a new finding. A review finding answered with
+no change still fails, as before.
+
+## What a failed check keeps
+
+The finding and the record's `output` quote the failure: the failing tests
+a test runner names (vitest's `FAIL` and `×` lines, node's `not ok`), the
+lines that report the failure, then the end of stdout and the end of
+stderr, each on its own. The send-back's reason names the command and how
+it ended; the output rides the finding alone, so the writer reads it once.
+`outputLimit` caps the reason and the output together, in characters, the
+line that names the whole output's file included. Without it, both streams
+are kept whole.
+
+When the run writes a record, the whole output of each failed run goes in a
+file beside it: `<record>.checks/round-<n>-<check>-run-<m>.log`. The
+finding names the file.
+
 ## Next steps
 
 - [Feature delivery](/workflows/feature-team): a test command that sends a

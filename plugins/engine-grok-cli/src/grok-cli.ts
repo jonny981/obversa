@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
@@ -54,6 +54,10 @@ const VERSION_TIMEOUT_MS = 5_000;
 const VERSION_TEARDOWN_MS = 1_000;
 const VERSION_OUTPUT_BYTES = 4_096;
 const LOAD_SPAWN_CODES = new Set(['EAGAIN', 'EMFILE', 'ENOMEM']);
+// A line on stderr that says the login failed: the CLI then retries every
+// few minutes until the step's time limit, so the attempt ends at once.
+const LOGIN_ERROR = /auth(?:\.json)?\.lock|auth lock|not signed in|run grok login|\b401\b|unauthori[sz]ed|(?:login|token|credentials?) (?:has )?expired/i;
+const REFRESH_TIMEOUT_MS = 120_000;
 const GROK_VERSION = /^grok ([0-9]+\.[0-9]+\.[0-9]+)(?: \([0-9a-f]+\))?(?: \[[A-Za-z0-9._-]+\])?$/u;
 const BASE_SYSTEM_PROMPT =
   'Execute one Obversa node attempt. Use only the declared tools and permissions.';
@@ -769,6 +773,8 @@ export function grok(model: string, options: GrokSeatOptions): GrokSeat {
 
 export class GrokCliEngine implements Engine {
   readonly name = 'grok-cli';
+  /** The service refuses a request over 500,000 tokens. */
+  readonly inputLimit = { tokens: 500_000 } as const;
   readonly #executable: string;
   readonly #version: string;
   #versionObservation: Promise<string> | undefined;
@@ -867,8 +873,98 @@ export class GrokCliEngine implements Engine {
     signal: AbortSignal,
     expectedSelection?: EngineSelectionRecord,
   ): Promise<EngineSelectionRecord> {
+    return this.#admit(request, signal, expectedSelection);
+  }
+
+  /** Where the login a call uses lives: the chosen file, or the person's own Grok home. */
+  #loginFile(): string {
+    return this.#authFile ?? join(process.env.GROK_HOME ?? join(homedir(), '.grok'), 'auth.json');
+  }
+
+  /** When the login a call uses expires, or null when it names no time or cannot be read. */
+  #loginExpiry(): { readonly text: string; readonly time: number } | null {
+    try {
+      return latestAuthExpiry(inspectAuth(readFileSync(this.#loginFile(), 'utf8')).expiries);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Refresh the login with one call outside the sandbox: Grok's strict
+   * sandbox cannot write the login's lock file, so a login that expires
+   * inside a sandboxed call is never renewed. The call lists the models
+   * from an empty folder, so it reads no repository file and changes none.
+   * With an `authFile`, the call runs in a home holding a copy of it, and
+   * the renewed login is written back to the file.
+   */
+  async #refreshLogin(signal: AbortSignal): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }> {
+    const directory = mkdtempSync(join(tmpdir(), 'lines-grok-refresh-'));
+    try {
+      const home = join(directory, 'grok-home');
+      const copied = this.#authFile === null ? null : readFileSync(this.#authFile, 'utf8');
+      if (copied !== null) {
+        mkdirSync(home, { recursive: true, mode: 0o700 });
+        writeFileSync(join(home, 'auth.json'), copied, { encoding: 'utf8', mode: 0o600 });
+      }
+      const empty = join(directory, 'empty');
+      mkdirSync(empty, { mode: 0o700 });
+      const command = await runOwnedCommand({
+        executable: this.#executable,
+        args: ['models'],
+        cwd: empty,
+        env: { ...this.#environment, ...(copied === null ? {} : { GROK_HOME: home }) },
+        stdin: '',
+        ...ownedCommandIdentity({ adapter: 'grok-cli' }),
+        ...DEFAULT_OWNED_COMMAND_LIMITS,
+        timeoutMs: REFRESH_TIMEOUT_MS,
+      }, signal);
+      if (command.exitCode !== 0 || command.timedOut) {
+        const detail = scrubCapture(
+          scrubAuthValues(new TextDecoder().decode(command.stderr).trim() || new TextDecoder().decode(command.stdout).trim(), this.#authRedactions),
+          { ...this.#environment },
+          700,
+        );
+        return { ok: false, reason: `the refresh call ${command.timedOut ? 'timed out' : `exited ${command.exitCode ?? '?'}`}${detail ? `: ${detail}` : ''}` };
+      }
+      if (copied !== null) {
+        const renewed = readFileSync(join(home, 'auth.json'), 'utf8');
+        if (renewed !== copied) {
+          inspectAuth(renewed);
+          writeFileSync(this.#authFile!, renewed, { encoding: 'utf8', mode: 0o600 });
+        }
+      }
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: `the refresh call could not run: ${error instanceof Error ? error.message : String(error)}` };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  async #admit(
+    request: Omit<AgentRequest, 'prompt'>,
+    signal: AbortSignal,
+    expectedSelection?: EngineSelectionRecord,
+    onRefresh?: (expiry: string) => void,
+  ): Promise<EngineSelectionRecord> {
     if (signal.aborted) {
       throw loopError('aborted', 'Grok admission was aborted before start');
+    }
+    // A strict-sandbox call cannot renew a login that expires during it, so
+    // a login that expires before the call's limit is refreshed first.
+    let refreshFailed: string | undefined;
+    const limitMs = request.timeoutMs ?? DEFAULT_OWNED_COMMAND_LIMITS.timeoutMs;
+    if (sandboxProfile({ ...request, prompt: '' }) === 'strict') {
+      const expiry = this.#loginExpiry();
+      if (expiry !== null && expiry.time <= Date.now() + limitMs) {
+        const refreshed = await this.#refreshLogin(signal);
+        if (refreshed.ok) onRefresh?.(expiry.text);
+        const after = this.#loginExpiry();
+        if (!refreshed.ok || (after !== null && after.time <= Date.now() + limitMs)) {
+          refreshFailed = `the Grok login expires at ${(after ?? expiry).text}, before this call's limit, and a refresh outside the sandbox did not renew it${refreshed.ok ? '' : `: ${refreshed.reason}`}`;
+        }
+      }
     }
     let normalized: AgentRequest;
     let selected: EngineSelectionRecord;
@@ -898,6 +994,7 @@ export class GrokCliEngine implements Engine {
         || !Number.isSafeInteger(memory) || memory < 1) {
         throw new TypeError('Grok request command limits are invalid');
       }
+      if (refreshFailed !== undefined) throw new TypeError(refreshFailed);
       const auth = this.#readAuth();
       if (auth !== null) {
         authContents = auth.contents;
@@ -989,7 +1086,11 @@ export class GrokCliEngine implements Engine {
         throw loopError('invalid-config', 'Grok returned an unsupported version format');
       }
       if (version !== this.#version) {
-        throw loopError('invalid-config', 'Grok observed version does not match its configured version');
+        throw new EngineError({
+          kind: 'invalid-config',
+          message: `Grok observed version ${version} does not match its configured version ${this.#version}`,
+          versionMoved: true,
+        });
       }
       return version;
     } catch (error) {
@@ -1035,7 +1136,10 @@ export class GrokCliEngine implements Engine {
       throw loopError('aborted', 'Grok attempt was aborted before start');
     }
     const { prompt: _prompt, ...staticRequest } = request;
-    const requested = await this.admit(staticRequest, signal);
+    const requested = await this.#admit(staticRequest, signal, undefined, (expiry) => {
+      // The record says a refresh ran: the login was due to expire at `expiry`.
+      onEvent({ type: 'tool', name: 'login-refresh', phase: 'result', target: `grok models, outside the sandbox (the login expired at ${expiry})` });
+    });
     const model = requested.model!;
     const capabilities = requested.capabilities;
     const cwd = realpathSync(request.cwd!);
@@ -1054,6 +1158,9 @@ export class GrokCliEngine implements Engine {
     };
     const decoder = new TextDecoder();
     let buffer = '';
+    const errDecoder = new TextDecoder();
+    let errBuffer = '';
+    let loginError: string | undefined;
     const parserAbort = new AbortController();
     const commandSignal = AbortSignal.any([signal, parserAbort.signal]);
     const flush = (line: string): void =>
@@ -1092,6 +1199,17 @@ export class GrokCliEngine implements Engine {
         maxMemoryBytes:
           request.maxMemoryBytes ?? DEFAULT_OWNED_COMMAND_LIMITS.maxMemoryBytes,
       }, commandSignal, {
+        onStderr(chunk) {
+          if (loginError !== undefined) return;
+          errBuffer += errDecoder.decode(chunk, { stream: true });
+          const lines = errBuffer.split('\n');
+          errBuffer = lines.pop() ?? '';
+          const line = lines.find((candidate) => LOGIN_ERROR.test(candidate));
+          if (line !== undefined) {
+            loginError = line.trim();
+            parserAbort.abort();
+          }
+        },
         onStdout(chunk) {
           if (structured) return;
           buffer += decoder.decode(chunk, { stream: true });
@@ -1111,6 +1229,13 @@ export class GrokCliEngine implements Engine {
         if (buffer.length > 0) flush(buffer);
       }
 
+      if (loginError !== undefined) {
+        throw loopError('auth', `Grok reported a login error and was stopped: ${scrubCapture(
+          scrubAuthValues(loginError, auth?.redactions ?? this.#authRedactions),
+          { ...this.#environment },
+          700,
+        )}`);
+      }
       if (accumulator.parseError) {
         throw loopError(
           'invalid-config',

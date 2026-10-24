@@ -551,14 +551,14 @@ export async function workTree(opts: GitOpts): Promise<string | undefined> {
   const dir = mkdtempSync(join(tmpdir(), 'obversa-tree-'));
   try {
     if (!(await isRepo(opts))) return undefined;
-    // A copy of the real index, so git re-reads only the files that changed.
+    // An empty index, so git reads every file's content. A copy of the real
+    // index would let git trust its file times, and a file rewritten at the
+    // same size within the same second would keep its old content.
     const index = join(dir, 'index');
-    const real = await git(['rev-parse', '--git-path', 'index'], opts);
-    if (real.exitCode === 0) await copyFile(resolve(opts.cwd, real.stdout.trim()), index).catch(() => undefined);
     const env = { GIT_INDEX_FILE: index };
-    const excluded = (opts.excludePaths ?? [])
+    const excluded = await unignored(opts, (opts.excludePaths ?? [])
       .map((p) => relative(opts.cwd, resolve(opts.cwd, p)).replace(/\\/g, '/'))
-      .filter((p) => p && !p.startsWith('..') && p !== '.');
+      .filter((p) => p && !p.startsWith('..') && p !== '.'));
     const added = await git(['add', '-A', '--', '.', ...excluded.map((p) => `:(exclude)${p}`)], opts, undefined, env);
     if (added.exitCode !== 0) return undefined;
     const tree = await git(['write-tree'], opts, undefined, env);
@@ -568,6 +568,18 @@ export async function workTree(opts: GitOpts): Promise<string | undefined> {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * The paths git does not already ignore. `git add` refuses an exclude that
+ * names an ignored path, and an ignored path is left out anyway.
+ */
+export async function unignored(opts: GitOpts, paths: readonly string[]): Promise<string[]> {
+  const kept: string[] = [];
+  for (const path of paths) {
+    if ((await git(['check-ignore', '-q', '--', path], opts)).exitCode !== 0) kept.push(path);
+  }
+  return kept;
 }
 
 /** One file changed between two trees, with lines added and removed (none for a binary file). */

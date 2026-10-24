@@ -36,23 +36,10 @@ import {
 } from './engine-meta.js';
 import { requireFinalResultText } from '../runtime/result-parts.js';
 import { processText, runRuntimeProcess } from './process.js';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, relative } from 'node:path';
 
-const COMMAND_FAILURE_TAIL_MAX = 3000;
-const COMMAND_FAILURE_TAIL_MARKER = '… [output truncated]\n';
-
-function commandFailureTail(
-  text: string,
-  env: Record<string, string> | undefined,
-): string {
-  const scrubbed = scrubCapture(text, env);
-  if (scrubbed.length <= COMMAND_FAILURE_TAIL_MAX) return scrubbed;
-  return (
-    COMMAND_FAILURE_TAIL_MARKER +
-    scrubbed.slice(
-      -(COMMAND_FAILURE_TAIL_MAX - COMMAND_FAILURE_TAIL_MARKER.length),
-    )
-  );
-}
+import { checkOutputDir, checkOutputExcerpt } from './check-output.js';
 
 /**
  * Coerce any `ConditionInput` — a `Condition`, a bare predicate, or an array
@@ -177,6 +164,90 @@ export function minConfidence(threshold: number): Condition {
   };
 }
 
+interface CommandCheckOptions {
+  cwd?: string;
+  timeoutMs?: number;
+  env?: Record<string, string>;
+  captureOutput?: boolean;
+  outputLimit?: number;
+}
+
+/** One run of a command check: its result, and both streams whole and scrubbed. */
+interface CommandCheckRun {
+  readonly result: ConditionResult;
+  readonly stdout?: string;
+  readonly stderr?: string;
+  /** On a failed run: the reason without the output, and the exit the excerpt names. */
+  readonly failure?: { readonly reason: string; readonly exit: string };
+}
+
+async function runCommandCheck(
+  ctx: JobContext,
+  command: string,
+  args: readonly string[],
+  opts: CommandCheckOptions,
+): Promise<CommandCheckRun> {
+  const startedAt = Date.now();
+  const ran = (exitCode: number | null, timedOut = false): CommandRun => ({
+    command,
+    args: [...args],
+    exitCode,
+    durationMs: Date.now() - startedAt,
+    ...(timedOut ? { timedOut: true as const } : {}),
+  });
+  try {
+    const env = resolveEnv(ctx, opts.env);
+    const r = await runRuntimeProcess({
+      executable: command,
+      args: [...args],
+      cwd: opts.cwd ?? ctx.workspace.dir,
+      timeoutMs: opts.timeoutMs,
+      signal: ctx.signal,
+      env,
+    });
+    if (r.exitCode === 0 && !r.timedOut) {
+      return { result: { met: true, reason: `\`${command}\` exited 0`, command: ran(0) } };
+    }
+    // Scrubbed (`scrubCapture`) because it flows into JSONL event records —
+    // a failing command often echoes its config, and a pinned credential's
+    // shape is unknowable to pattern scrubbing.
+    const stdout = scrubCapture(processText(r.stdout), env);
+    const stderr = scrubCapture(processText(r.stderr), env);
+    const baseReason = r.timedOut
+      ? `\`${command}\` timed out after ${opts.timeoutMs} ms`
+      : `\`${command}\` exited ${r.exitCode ?? '?'}`;
+    // The evidence behind the failure: the failing tests and the lines
+    // that report the failure, then the end of stdout and of stderr, each
+    // on its own, as much as `outputLimit` allows.
+    const exit = String(r.exitCode ?? '(command did not run)');
+    const output = checkOutputExcerpt({
+      exit,
+      stdout,
+      stderr,
+      ...(opts.outputLimit === undefined ? {} : { limit: opts.outputLimit }),
+    });
+    return {
+      result: {
+        met: false,
+        reason: opts.captureOutput ? `${baseReason}\n\n${output}` : baseReason,
+        output,
+        command: ran(r.exitCode, r.timedOut),
+      },
+      stdout,
+      stderr,
+      failure: { reason: baseReason, exit },
+    };
+  } catch (e) {
+    return {
+      result: {
+        met: false,
+        reason: `\`${command}\` failed to run: ${e instanceof Error ? e.message : String(e)}`,
+        command: ran(null),
+      },
+    };
+  }
+}
+
 /**
  * Deterministic gate that runs a shell command and is met on exit code 0. This
  * is the deterministic convergence signal for coding loop jobs: pair it with an
@@ -189,73 +260,18 @@ export function minConfidence(threshold: number): Condition {
  * kills for deterministic gates.
  * `opts.env` pins vars for this one gate command; it is the most specific
  * layer, over any `withEnv` overlay and the running environment's vars.
- * `opts.captureOutput` appends a scrubbed, bounded combined-output tail to a
- * failed command's reason. The separate evidence output remains unchanged.
+ * A failed command's `output` names the failing tests a test runner's output
+ * names, quotes the lines that report the failure, then the end of stdout and
+ * of stderr, each on its own: both whole, or as much as `opts.outputLimit`
+ * characters allow. `opts.captureOutput` adds the same output to the reason.
  */
 export function commandSucceeds(
   command: string,
   args: string[] = [],
-  opts: {
-    cwd?: string;
-    timeoutMs?: number;
-    env?: Record<string, string>;
-    captureOutput?: boolean;
-  } = {},
+  opts: CommandCheckOptions = {},
 ): Condition {
-  return requiring(setLabel(async (ctx) => {
-    const startedAt = Date.now();
-    const ran = (exitCode: number | null, timedOut = false): CommandRun => ({
-      command,
-      args: [...args],
-      exitCode,
-      durationMs: Date.now() - startedAt,
-      ...(timedOut ? { timedOut: true as const } : {}),
-    });
-    try {
-      const env = resolveEnv(ctx, opts.env);
-      const r = await runRuntimeProcess({
-        executable: command,
-        args,
-        cwd: opts.cwd ?? ctx.workspace.dir,
-        timeoutMs: opts.timeoutMs,
-        signal: ctx.signal,
-        env,
-      });
-      const stdout = processText(r.stdout);
-      const stderr = processText(r.stderr);
-      const all = `${stdout}${stderr}`;
-      if (r.exitCode === 0 && !r.timedOut) {
-        return { met: true, reason: `\`${command}\` exited 0`, command: ran(0) };
-      }
-      const baseReason = r.timedOut
-        ? `\`${command}\` timed out after ${opts.timeoutMs} ms`
-        : `\`${command}\` exited ${r.exitCode ?? '?'}`;
-      const tail = opts.captureOutput
-        ? commandFailureTail(all, env)
-        : '';
-      return {
-        met: false,
-        reason: tail
-          ? `${baseReason}\n\ncommand output (tail):\n${tail}`
-          : baseReason,
-        // The evidence behind the failure, in the same shape `reviewContext`
-        // gives a judge. Scrubbed (`scrubCapture`) because it flows into JSONL
-        // event records — a failing command often echoes its config, and a
-        // pinned credential's shape is unknowable to pattern scrubbing.
-        output:
-          `exit: ${r.exitCode ?? '(command did not run)'}\n\n` +
-          `stdout:\n${scrubCapture(stdout, env, 4000)}\n\n` +
-          `stderr:\n${scrubCapture(stderr, env, 4000)}`,
-        command: ran(r.exitCode, r.timedOut),
-      };
-    } catch (e) {
-      return {
-        met: false,
-        reason: `\`${command}\` failed to run: ${e instanceof Error ? e.message : String(e)}`,
-        command: ran(null),
-      };
-    }
-  }, `${command}${args.length ? ` ${args.join(' ')}` : ''}`), { command, args: [...args] });
+  return requiring(setLabel(async (ctx) => (await runCommandCheck(ctx, command, args, opts)).result,
+    `${command}${args.length ? ` ${args.join(' ')}` : ''}`), { command, args: [...args] });
 }
 
 export const always: Condition = async () => ({ met: true, reason: 'always' });
@@ -966,21 +982,117 @@ export function commandJob(
     env?: Record<string, string>;
     target?: string;
     capture?: boolean;
+    /**
+     * The most characters a failed run's send-back may take: its reason and
+     * its output together, the line that names the file with the whole
+     * output included. None keeps both streams whole.
+     */
+    outputLimit?: number;
   } = {},
 ): Job {
   const [executable, ...args] = splitCommand(command);
-  const job = gateJob(
-    label,
-    commandSucceeds(executable, args, {
-      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
-      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
-      ...(opts.env !== undefined ? { env: opts.env } : {}),
-      captureOutput: opts.capture ?? true,
-    }),
-    opts.target !== undefined ? { target: opts.target } : {},
-  );
+  const commandLine = [executable, ...args].join(' ');
+  const checkOpts: CommandCheckOptions = {
+    ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+    ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    ...(opts.env !== undefined ? { env: opts.env } : {}),
+    captureOutput: opts.capture ?? true,
+  };
+  const job: Job = async (ctx) => {
+    const path = [...ctx.path];
+    ctx.emit({ kind: 'job:start', ts: Date.now(), path, label, timeoutMs: ctx.timeoutMs });
+    const runOnce = async (n: number): Promise<CommandCheckRun & { readonly file?: string }> => {
+      const run = await runCommandCheck(ctx, executable, args, checkOpts);
+      const file = run.stdout === undefined ? undefined : keepCheckOutput(ctx, label, n, commandLine, run);
+      const note = file === undefined ? '' : `\n\nthe whole output is in ${file}`;
+      // The reason and the output share the limit: the excerpt takes what the reason and the note leave.
+      const failure = run.failure;
+      const excerpt = failure === undefined ? undefined : checkOutputExcerpt({
+        exit: failure.exit,
+        stdout: run.stdout ?? '',
+        stderr: run.stderr ?? '',
+        ...(opts.outputLimit === undefined ? {} : { limit: Math.max(0, opts.outputLimit - failure.reason.length - note.length) }),
+      });
+      const result = failure === undefined || excerpt === undefined ? run.result : {
+        ...run.result,
+        reason: checkOpts.captureOutput ? `${failure.reason}\n\n${excerpt}${note}` : failure.reason,
+        output: `${excerpt}${note}`,
+      };
+      ctx.emit({ kind: 'condition:result', ts: Date.now(), path, label, iteration: ctx.iteration, result });
+      return { ...run, result, ...(file === undefined ? {} : { file }) };
+    };
+    // The writer answered the last failure of this check with no change and
+    // its evidence; the check now runs once on the same tree. Every other
+    // check still runs once more before a failure counts.
+    const answered = Object.values(ctx.needs ?? {}).find((outcome) => outcome.answeredWithoutChange === commandLine);
+    const runs = [await runOnce(1)];
+    // A failed check that would send work back runs once more first, so a
+    // flaky failure costs no round.
+    if (!runs[0]!.result.met && opts.target !== undefined && answered === undefined && !ctx.signal.aborted) {
+      runs.push(await runOnce(2));
+    }
+    const last = runs.at(-1)!;
+    const r = last.result;
+    let outcome: Outcome;
+    if (r.met) {
+      const flaky = runs.length === 2;
+      outcome = {
+        status: 'pass',
+        summary: flaky ? `\`${commandLine}\` failed, then passed when run again on the same tree: the check is flaky` : r.reason,
+        ...(flaky ? { data: `the first run failed:\n${runs[0]!.result.output ?? runs[0]!.result.reason}` } : {}),
+        ...(r.command === undefined ? {} : { command: flaky ? { ...r.command, flaky: true as const } : r.command }),
+      };
+    } else if (opts.target !== undefined && answered !== undefined) {
+      const evidence = typeof answered.data === 'string' ? answered.data : answered.summary ?? '(no reply)';
+      const summary = `\`${commandLine}\` failed again on the tree the writer left unchanged. The writer's evidence that the change does not cause it:\n${evidence}`;
+      outcome = {
+        status: 'paused',
+        summary,
+        ...(r.output === undefined ? {} : { data: r.output }),
+        error: new LoopError({ code: 'VALIDATION', phase: 'body', path, message: `\`${commandLine}\` failed again on the tree the writer left unchanged`, retryable: false }),
+        ...(r.command === undefined ? {} : { command: r.command }),
+      };
+    } else {
+      outcome = {
+        status: 'fail',
+        confidence: r.confidence,
+        summary: r.reason,
+        ...(r.output === undefined ? {} : { data: r.output }),
+        ...(opts.target === undefined ? {} : {
+          // The output rides the finding alone, so the writer reads it once.
+          revision: {
+            target: opts.target,
+            reason: last.failure?.reason ?? r.reason,
+            findings: [{ evidence: r.output ?? r.reason, severity: 'block' as const }],
+            rerun: 'target-and-dependents' as const,
+            check: commandLine,
+          },
+        }),
+        ...(r.command === undefined ? {} : { command: r.command }),
+      };
+    }
+    ctx.emit({ kind: 'job:end', ts: Date.now(), path, label, outcome });
+    return outcome;
+  };
   // The command line, so a judge reading the round can say what ran.
-  return setMeta(job, { kind: 'gate', name: label, command: [executable, ...args].join(' ') });
+  return setMeta(job, { kind: 'gate', name: label, command: commandLine });
+}
+
+/** Write a failed run's whole output beside the record; the file's path, or nothing when the run writes no record. */
+function keepCheckOutput(ctx: JobContext, label: string, n: number, commandLine: string, run: CommandCheckRun): string | undefined {
+  if (ctx.recordPath === undefined) return undefined;
+  try {
+    const dir = checkOutputDir(ctx.recordPath);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `round-${ctx.graph?.attempt ?? 1}-${label.replace(/[^A-Za-z0-9._-]+/g, '-')}-run-${n}.log`);
+    writeFileSync(file, `$ ${commandLine}\n${run.result.command?.exitCode === undefined ? '' : `exit: ${run.result.command.exitCode ?? '(none)'}\n`}\nstdout:\n${run.stdout ?? ''}\n\nstderr:\n${run.stderr ?? ''}\n`);
+    // Named from the workspace when it is inside it, so a writer there opens it as it reads.
+    const fromWorkspace = relative(ctx.workspace.dir, file);
+    return fromWorkspace.startsWith('..') || isAbsolute(fromWorkspace) ? file : fromWorkspace;
+  } catch (error) {
+    ctx.log(`the whole output of ${label} could not be kept: ${error instanceof Error ? error.message : String(error)}`, 'warn');
+    return undefined;
+  }
 }
 
 function splitCommand(command: string | readonly string[]): [string, ...string[]] {

@@ -298,6 +298,8 @@ function codexBilling(env: Readonly<Record<string, string | undefined>>): Billin
 }
 export class CodexEngine implements Engine {
   readonly name = 'codex';
+  /** The CLI refuses an input over 1,048,576 characters. */
+  readonly inputLimit = { characters: 1_048_576 } as const;
   private executable: string | undefined;
   private version: Promise<string> | undefined;
   constructor(private readonly opts: CodexEngineOptions = {}) {}
@@ -348,7 +350,7 @@ export class CodexEngine implements Engine {
     } catch (error) {
       const mapped = codexCommandError(error, executable);
       if (mapped instanceof EngineError) throw mapped;
-      throw new EngineError({ kind: 'unknown', message: 'Codex version observation failed' });
+      throw new EngineError({ kind: 'unknown', message: 'Codex version observation failed', cause: error });
     }
   }
 

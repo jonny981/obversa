@@ -996,7 +996,7 @@ describe('feedback protocol', () => {
     expect((outcome.data as { errors: unknown[] }).errors).toHaveLength(0);
   });
 
-  it('pauses k-of-n when an infrastructure error could change the threshold', async () => {
+  it('decides k-of-n on the reviewers that answered, when enough of them answered', async () => {
     const pass: Condition = async () => ({ met: true, reason: 'ok' });
     const fail: Condition = async () => ({
       met: false,
@@ -1024,18 +1024,35 @@ describe('feedback protocol', () => {
       { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
     );
 
+    // Two answered, which the rule needs; one cleared, so the round fails
+    // on b's finding, and the reviewer that never answered costs nothing.
+    expect(outcome.status).toBe('fail');
+    expect(outcome.revision?.findings?.map((finding) => finding.evidence)).toEqual([
+      'Full deterministic finding: preserve original error cause.',
+    ]);
+    expect((outcome.data as { errors: unknown[] }).errors).toHaveLength(1);
+  });
+
+  it('pauses k-of-n when too few reviewers answered for its rule, and names them', async () => {
+    const pass: Condition = async () => ({ met: true, reason: 'ok' });
+    const limit = new LoopError({ code: 'RATE_LIMIT', message: 'throttled' });
+    const silent = (name: string) => ({
+      name,
+      job: fnJob(name, async () => ({ status: 'fail' as const, summary: 'throttled', error: limit })),
+    });
+
+    const { outcome } = await run(
+      reviewPanel({
+        pass: 2,
+        reviewers: [{ name: 'a', review: pass }, silent('b'), silent('c')],
+      }),
+      { engine: 'mock', engines: { mock: new MockEngine(() => '') } },
+    );
+
     expect(outcome.status).toBe('paused');
     expect(outcome.error?.code).toBe('RATE_LIMIT');
     expect(outcome.revision).toBeUndefined();
-    const data = outcome.data as {
-      findings: Array<{ evidence?: string }>;
-      errors: unknown[];
-    };
-    expect(data.findings).toHaveLength(1);
-    expect(data.findings[0]?.evidence).toContain(
-      'Full deterministic finding',
-    );
-    expect(data.errors).toHaveLength(1);
+    expect(outcome.summary).toContain('1 of 3 reviewer(s) answered, and its pass rule needs 2. No answer from: b, c.');
   });
 
   it('preserves failing quorum output while pausing on infrastructure uncertainty', async () => {

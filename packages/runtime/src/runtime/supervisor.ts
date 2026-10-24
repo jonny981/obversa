@@ -579,6 +579,8 @@ function renderEvent(event: LoopEvent, totals?: UsageTotals): string {
       return `${at}⏸ paused (${event.code}): ${event.reason}`;
     case 'log':
       return `${at}${event.message}`;
+    case 'seat:route':
+      return `${at}↪ ${event.requested.model} could not answer (${event.reason ?? event.failure}); ${event.selected === undefined ? 'no candidate is left' : `${event.selected.model} answers instead`}`;
     case 'error':
       return `${at}✗ ${event.code}: ${event.message}`;
     default:

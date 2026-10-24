@@ -194,6 +194,8 @@ export function childContext(
     signal: parent.signal,
     runId: parent.runId,
     fingerprintExcludePaths: parent.fingerprintExcludePaths,
+    ...(parent.recordPath === undefined ? {} : { recordPath: parent.recordPath }),
+    ...(parent.carried === undefined ? {} : { carried: parent.carried }),
     emit: parent.emit,
     params: parent.params,
     state: parent.state,

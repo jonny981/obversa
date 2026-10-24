@@ -6,7 +6,7 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type {
@@ -19,6 +19,11 @@ import { costReport, SHIPPED_PRICES, type CostReport, type PriceTable } from '..
 import { LoopError } from '../core/errors.js';
 import { Budget, type BudgetConfig } from '../core/budget.js';
 import { makeRecorder, readResumeRecord } from './persist.js';
+import { keepEarlierRecord, keptRecords, readCarry } from './carry.js';
+import { commitRun } from './commit-run.js';
+import { REVIEW_ROUNDS } from '../core/review-rounds.js';
+import { ACCEPTED_PROOFS, PROOF_SEND_BACKS } from '../core/proofs.js';
+import { checkOutputDir } from '../core/check-output.js';
 import { pricedEngine, RecordTotals } from './record-totals.js';
 
 import { RESUME_RECORDED_USAGE, RESUME_STAGE_OUTCOMES } from '../core/resume.js';
@@ -179,6 +184,26 @@ export interface RunOptions {
    * 60000; 0 writes none.
    */
   heartbeatMs?: number;
+  /**
+   * The record of an earlier run on the same work. The run reads its open
+   * findings (the last finished review's findings that were never
+   * resolved), the proofs its proof check accepted, and how it ended, and
+   * hands them to its steps as `ctx.carried`. It may be the `recordTo`
+   * path: the earlier record is read before it is kept aside.
+   */
+  carryFrom?: string;
+  /**
+   * Commit the worktree's changes on its branch when the run passes, before
+   * it reports. The message's subject and body are the last fenced block
+   * marked `commit` in the output of the step `from` names (the step's
+   * outcome in the workflow's result); `true` uses the step the workflow
+   * names (`featureDelivery` names its report). The run's own trailers
+   * follow: `Run:`, and when a panel reviewed the work, `Review-rounds:`
+   * and `Reviewed-by:`. The repository's own git setup signs it. A commit a
+   * hook refuses leaves the work uncommitted, and the run still passes and
+   * says why on `outcome.commit`. Nothing is pushed.
+   */
+  commit?: true | { readonly from: string };
 }
 
 /** The absolute path and SHA-256 of the run's `source` file. */
@@ -292,7 +317,7 @@ export async function run(
   const runId = needsRunId ? (options.runId ?? newRunId(title)) : undefined;
   const callerState = options.state ?? {};
   const resumeState: Record<string, unknown> = {};
-  const privateKeys = new Set([RESUME_STAGE_OUTCOMES, RESUME_RECORDED_USAGE]);
+  const privateKeys = new Set([RESUME_STAGE_OUTCOMES, RESUME_RECORDED_USAGE, REVIEW_ROUNDS, ACCEPTED_PROOFS, PROOF_SEND_BACKS]);
   const initialState: Record<string, unknown> = new Proxy(callerState, {
     get(target, key) {
       return typeof key === 'string' && privateKeys.has(key)
@@ -319,7 +344,16 @@ export async function run(
       ? join(ensureRunSubdir(dir, 'records'), `${runId!}.jsonl`)
       : options.recordTo;
   let session: number | undefined;
+  // Read before a fresh record could move the earlier one aside.
+  const carried = options.carryFrom === undefined
+    ? undefined
+    : { record: resolve(options.carryFrom), ...readCarry(options.carryFrom) };
   if (recordPath) {
+    // A fresh run never writes over a record: the earlier one moves beside it.
+    if (options.resume !== true) {
+      const kept = keepEarlierRecord(recordPath);
+      if (carried !== undefined && kept !== undefined && resolve(recordPath) === carried.record) carried.record = kept;
+    }
     const resumed = options.resume === true ? readResumeRecord(recordPath) : undefined;
     session = (resumed?.sessions ?? 0) + 1;
     sinks.push(makeRecorder(recordPath, {
@@ -334,6 +368,12 @@ export async function run(
       for (const call of resumed.calls) totals.restore(call);
       initialState[RESUME_STAGE_OUTCOMES] = resumed.outcomes;
       initialState[RESUME_RECORDED_USAGE] = resumed.usage;
+      // A resume continues each panel's rounds, keeps the proofs accepted so
+      // far and the proof check's send-backs.
+      const own = readCarry(recordPath);
+      initialState[REVIEW_ROUNDS] = { ...own.reviewRounds };
+      if (own.acceptedProofs.length > 0) initialState[ACCEPTED_PROOFS] = [...own.acceptedProofs];
+      if (own.proofSendBacks !== undefined) initialState[PROOF_SEND_BACKS] = own.proofSendBacks;
     }
   }
   // A supervised run registers itself in the global registry (~/.obversa/runs) and
@@ -497,12 +537,17 @@ export async function run(
     }
   }
 
+  // The run's own files, left out of every fingerprint, change and commit:
+  // its record, the earlier records kept beside it, and its check output.
+  const runOwned = uniquePaths(recordPath === undefined ? [] : [recordPath, checkOutputDir(recordPath), ...keptRecords(recordPath)]);
   const rootCtx: JobContext = {
     engine: rootEngine,
     resolveEngine,
     signal: controller.signal,
     runId,
-    fingerprintExcludePaths: uniquePaths([recordPath]),
+    fingerprintExcludePaths: runOwned,
+    ...(recordPath === undefined ? {} : { recordPath }),
+    ...(carried === undefined ? {} : { carried: { record: carried.record, openFindings: carried.openFindings, acceptedProofs: carried.acceptedProofs, ...(carried.ended === undefined ? {} : { ended: carried.ended }) } }),
     emit,
     params,
     state: initialState,
@@ -540,6 +585,23 @@ export async function run(
     // Tear the environment down whatever happened (best-effort).
     if (environment) await environment.down(controller.signal).catch(() => {});
     stopWatching();
+  }
+  const commit = options.commit ?? (shape?.commit as RunOptions['commit'] | undefined);
+  if (commit !== undefined && outcome.status === 'pass') {
+    const made = await commitRun(outcome, {
+      cwd: dir,
+      from: commit === true ? undefined : commit.from,
+      workflowFrom: (shape?.commit as { from?: string } | undefined)?.from,
+      ...(resultRunId !== undefined ? { runId: resultRunId } : recordPath !== undefined ? { runId: basename(recordPath).replace(/\.jsonl$/, '') } : {}),
+      exclude: runOwned,
+      state: initialState,
+    });
+    rootCtx.log('sha' in made ? `committed the run's work as ${made.sha}` : `left the run's work uncommitted: ${made.uncommitted}`, 'sha' in made ? 'info' : 'warn');
+    outcome = {
+      ...outcome,
+      commit: made,
+      summary: `${outcome.summary ?? 'passed'}; ${'sha' in made ? `committed ${made.sha}` : `left uncommitted: ${made.uncommitted}`}`,
+    };
   }
 
   const finalStats = stats.snapshot();

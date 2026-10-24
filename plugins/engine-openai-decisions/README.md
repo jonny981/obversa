@@ -112,3 +112,9 @@ Then pass it as `run(team, { prices })`.
 - A preflight live check can't run on this engine. The check sends a
   plain-text turn with `maxTokens`, which the engine refuses. Set
   `live: 'skip'` for its lane in a run's preflight policy.
+
+## Input limit and login errors
+
+This engine declares no input limit, so the runtime treats it as having none.
+
+A 401 or 403 answer is an `auth` failure. The runtime then runs the same seat once more, then the seat's next candidate.

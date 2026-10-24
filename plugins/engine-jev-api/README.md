@@ -126,3 +126,9 @@ node plugins/engine-jev-api/scripts/probe.mjs
   response echoes no model — or one that is not readable — the recorded
   effective model and model family are `null`; the answers are still
   returned.
+
+## Input limit and login errors
+
+This engine declares no input limit, so the runtime treats it as having none.
+
+A 401 or 403 answer is an `auth` failure. The runtime then runs the same seat once more, then the seat's next candidate.

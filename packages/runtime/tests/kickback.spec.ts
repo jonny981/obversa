@@ -836,7 +836,8 @@ describe("a judge in a dag node's refine review", () => {
     expect(reviewerPrompts[0]).not.toContain('taste: rename a variable');
     expect(reviewerPrompts[1]).toContain('Do not raise them again');
     expect(reviewerPrompts[1]).toContain('- taste: rename a variable (skipped: a matter of taste)');
-    expect(reviewerPrompts[1]).not.toContain('REAL: the build fails');
+    // Its own open findings come back to it, without the one the judge held back.
+    expect(reviewerPrompts[1]).toContain('=== your findings from round 1 ===\n- [should-fix] REAL: the build fails\n\n');
   });
 });
 

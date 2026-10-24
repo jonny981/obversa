@@ -1326,7 +1326,7 @@ export class OpenCodeCliEngine implements Engine {
         throw loopError('invalid-config', 'OpenCode returned an unsupported version format');
       }
       if (observed !== SUPPORTED_VERSION) {
-        throw loopError('invalid-config', 'OpenCode observed version does not match its supported version');
+        throw new EngineError({ kind: 'invalid-config', message: 'OpenCode observed version does not match its supported version', versionMoved: true });
       }
       return observed;
     } catch (error) {

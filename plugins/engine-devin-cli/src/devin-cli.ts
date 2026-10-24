@@ -458,7 +458,7 @@ export class DevinCliEngine implements Engine {
     } catch (error) {
       const mapped = devinCommandError(error, executable);
       if (mapped instanceof EngineError) throw mapped;
-      throw new EngineError({ kind: 'unknown', message: 'Devin version observation failed' });
+      throw new EngineError({ kind: 'unknown', message: 'Devin version observation failed', cause: error });
     }
   }
 
@@ -563,6 +563,7 @@ export class DevinCliEngine implements Engine {
           throw new EngineError({
             kind: sub.timedOut ? 'timeout' : classifyEngineFailure(new Error(diagnostic)),
             message: `devin exited ${sub.exitCode ?? '?'}${diagnostic ? `: ${diagnostic}` : ''}`,
+            ...(sub.exitCode === null && !sub.timedOut && !aborted ? { noExitStatus: true } : {}),
           });
         }
         if (conversation === undefined) {

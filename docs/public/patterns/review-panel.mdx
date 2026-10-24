@@ -590,6 +590,55 @@ console.log(JSON.stringify(result.outcome, null, 2));
 
 </Accordion>
 
+## Rounds after the first
+
+A panel with a send-back `target` keeps its rounds. From round 2, each
+reviewer reads two things after its own prompt:
+
+- **Its own open findings.** These are what it found in the last round it
+  answered. A finding the judge skipped is left out.
+- **The diff since that round.** This is the diff of the worktree between
+  the tree it read then and the tree now.
+
+It is asked to report the findings still not fixed, defects in the changed
+lines and brief requirements still unmet. A problem in an untouched line
+is reported only when it is impactful.
+
+Each finished round's number and tree go in the record. A resumed run
+numbers on from there. A round that paused or was aborted does not count.
+
+## What a reviewer reads
+
+Give the panel a `base` and each agent reviewer also reads the change: the
+diff from where the branch left `base`, then every new file whole. The
+change is sized to the input limit the reviewer's engine declares. When
+the whole change does not fit, files are listed instead of inlined, in this
+order:
+
+1. **Data files, largest first, new or changed.** These are line-record
+   and table files, JSON, logs, git bundles and binary files.
+2. **Other new files, largest first.**
+
+A listed file is named by its path, size and sha256, so the reviewer can
+read it from the worktree. Code and docs that were there before keep their
+diff inlined. When the change still does not fit, the reviewer's step
+pauses before any engine call. Its reason names the input size, the engine
+and its limit. An engine that declares no limit reads the whole change.
+
+## A reviewer that never answers
+
+A reviewer that never answered (its engine failed, stalled or timed out)
+is not a review. It is not a failed review, it costs no round and it sends
+nothing back. The panel decides on the reviewers that answered, by its
+`pass` rule. When too few answered for the rule, the panel pauses and names
+the reviewers that gave no answer.
+
+A round can pause after some reviewers answered with blocks. When the run
+resumes on the same tree, those blocks go back to the target as that
+round's send-back, and no reviewer reads the unchanged tree again. The
+reviewer that gave no answer reviews in the next round. The record marks
+the round as delivered on resume.
+
 ## Next steps
 
 - [Feature delivery](/workflows/feature-team): a synthesised panel of

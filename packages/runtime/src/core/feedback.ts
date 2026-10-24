@@ -25,7 +25,9 @@ import {
   mapWithConcurrency,
 } from './concurrency.js';
 import { oneLine, truncate } from './text.js';
-import { workspaceFingerprint } from './git.js';
+import { workspaceFingerprint, workTree } from './git.js';
+import { diffTrees } from './review-input.js';
+import { reviewRoundsKey, reviewRoundsOf, saveReviewRounds, type ReviewRounds, type ReviewerRound } from './review-rounds.js';
 import { criterionFor } from './context.js';
 import { processText, runRuntimeProcess } from './process.js';
 
@@ -193,8 +195,23 @@ export interface ReviewPanelConfig {
    * actionable so a missing scope cannot bypass review.
    */
   actionableScopes?: string[];
-  /** When set, a failing panel emits a targeted revision request for dag routing. */
+  /**
+   * When set, a failing panel emits a targeted revision request for dag
+   * routing, and the panel keeps its rounds: from round 2 each reviewer
+   * reads its own open findings from the last round it answered and the
+   * diff of the worktree since then. A round that paused after some
+   * reviewers answered with blocks sends those blocks to the target when
+   * the run resumes on the same tree, without running the reviewers again.
+   */
   target?: string;
+  /**
+   * What the reviewers' change is measured against. With it, each agent
+   * reviewer reads the change (the diff from where the branch left `base`,
+   * then every new file whole) after its own prompt, sized to its engine's
+   * input limit: data files are listed by path, size and sha256 when the
+   * whole change does not fit.
+   */
+  base?: string;
   rerun?: RevisionRerun;
   /**
    * Synthesise the reviews into one before anything reads them. Off unless
@@ -339,6 +356,10 @@ interface PersistedReviewRun {
 }
 
 const REVIEW_PANEL_DEFAULT_CONCURRENCY = DEFAULT_FANOUT_CONCURRENCY;
+
+/** Each reviewer's own round input, by its name, on the context the panel hands its reviewers. */
+const ROUND_INPUTS = Symbol('obversa:review-round-inputs');
+type RoundCtx = JobContext & { [ROUND_INPUTS]?: ReadonlyMap<string, NonNullable<JobContext['reviewInput']>> };
 function isReviewInfrastructureError(
   error: LoopError | undefined,
 ): error is LoopError {
@@ -377,16 +398,22 @@ function passNotes(outcome: Outcome): FeedbackFinding[] | undefined {
     : undefined;
 }
 
+/** The name a panel's verdicts carry for the reviewer at `index`. */
+function reviewerName(reviewer: ReviewTarget, index: number): string {
+  return reviewer.name ?? `reviewer-${index + 1}`;
+}
+
 async function runReviewer(
   reviewer: ReviewTarget,
   index: number,
   ctx: JobContext,
   keepPassNotes = false,
 ): Promise<ReviewResult> {
-  const name = reviewer.name ?? `reviewer-${index + 1}`;
+  const name = reviewerName(reviewer, index);
   const reviewerCtx: JobContext = {
     ...ctx,
     reviewerGate: criterionFor(ctx),
+    ...(ctx.reviewInput === undefined ? {} : { reviewInput: (ctx as RoundCtx)[ROUND_INPUTS]?.get(name) ?? ctx.reviewInput }),
   };
   try {
     if ('job' in reviewer) {
@@ -736,6 +763,58 @@ export function reviewPanelWith(config: ReviewPanelConfig, synthesis?: PanelSynt
         if (!names.has(name)) delete cache[name];
     }
     if (cacheKey && cache) ctx.state[cacheKey] = cache;
+    // A panel with a target keeps its rounds; see `ReviewPanelConfig.target`.
+    const roundsKey = reviewRoundsKey(ctx.path, label);
+    const scoped = config.target !== undefined;
+    const kept: ReviewRounds = scoped ? reviewRoundsOf(ctx, roundsKey) : { round: 0, reviewers: {} };
+    const tree = scoped
+      ? await workTree({ cwd: ctx.workspace.dir, signal: ctx.signal, ...(ctx.fingerprintExcludePaths ? { excludePaths: ctx.fingerprintExcludePaths } : {}) })
+      : undefined;
+    const round = kept.round + 1;
+    const paused = kept.paused;
+    if (scoped && paused !== undefined && paused.findings.length > 0 && tree !== undefined && paused.tree === tree) {
+      // The round paused after these blocks came in, and the tree has not
+      // changed since: the blocks go back now, and no reviewer runs again.
+      const reviewers: Record<string, ReviewerRound> = { ...kept.reviewers };
+      for (const name of paused.answered) {
+        reviewers[name] = { round: paused.round, tree, findings: paused.findings.filter((finding) => finding.reviewer === name) };
+      }
+      const delivered: ReviewRounds = { round: paused.round, reviewers };
+      saveReviewRounds(ctx, roundsKey, delivered);
+      const head = `Review round ${paused.round}, delivered on resume: ${paused.answered.join(', ')} answered with blocks before the round paused`;
+      const outcome = revisionRequest(
+        { target: config.target, reason: `${head}.`, findings: [...paused.findings], rerun: config.rerun },
+        {
+          summary: `${head}.\n${paused.findings.map(findingLine).join('\n')}`,
+          data: { findings: paused.findings, deliveredOnResume: true, reviewRound: paused.round, reviewTree: tree, reviewRounds: delivered },
+        },
+      );
+      ctx.emit({ kind: 'job:end', ts: Date.now(), path: [...ctx.path], label, outcome });
+      return outcome;
+    }
+    let roundCtx: JobContext = ctx;
+    if (scoped || config.base !== undefined) {
+      const skipped = new Set((ctx.skippedFindings ?? []).map((entry) => entry.finding.evidence));
+      const inputs = new Map<string, NonNullable<JobContext['reviewInput']>>();
+      await mapWithConcurrency(config.reviewers, concurrency, async (reviewer, i) => {
+        const name = reviewerName(reviewer, i);
+        const last = kept.reviewers[name];
+        inputs.set(name, {
+          ...(config.base === undefined ? {} : { base: config.base }),
+          round,
+          ...(last === undefined ? {} : {
+            previous: {
+              round: last.round,
+              findings: last.findings.filter((finding) => !skipped.has(finding.evidence)),
+              diff: tree !== undefined && last.tree !== undefined
+                ? await diffTrees(ctx.workspace.dir, last.tree, tree, ctx.signal)
+                : undefined,
+            },
+          }),
+        });
+      });
+      roundCtx = { ...ctx, reviewInput: { round }, [ROUND_INPUTS]: inputs } as RoundCtx;
+    }
     let results: ReviewResult[];
     if (cache && config.persistPasses) {
       const initial = await mapWithConcurrency(
@@ -745,7 +824,7 @@ export function reviewPanelWith(config: ReviewPanelConfig, synthesis?: PanelSynt
           runPersistedReviewer(
             reviewer,
             i,
-            ctx,
+            roundCtx,
             cache,
             config.persistPasses!.minConfidence,
             synthesising,
@@ -764,7 +843,7 @@ export function reviewPanelWith(config: ReviewPanelConfig, synthesis?: PanelSynt
       results = await mapWithConcurrency(
         config.reviewers,
         concurrency,
-        (reviewer, i) => runReviewer(reviewer, i, ctx, synthesising),
+        (reviewer, i) => runReviewer(reviewer, i, roundCtx, synthesising),
       );
     }
     if (cacheKey && cache && !Object.keys(cache).length)
@@ -816,9 +895,17 @@ export function reviewPanelWith(config: ReviewPanelConfig, synthesis?: PanelSynt
     const escalatedFindings = rawFindings
       .filter((f) => !isActionableFinding(f, config.actionableScopes))
       .map(escalatedFinding);
-    const passed = blockingErrors.length === 0 && verdicts.length > 0 && passedCount >= required;
+    // A reviewer that never answered is not a review: the panel decides on
+    // the reviewers that answered, and pauses when too few answered for its
+    // pass rule.
+    const tooFewAnswered = verdicts.length < required;
+    const passed = blockingErrors.length === 0 && !tooFewAnswered && passedCount >= required;
     const summaryHead = `Review panel: ${passedCount}/${results.length} reviewer(s) cleared`;
-    const summaryParts = [`${summaryHead}.`];
+    const summaryParts = [
+      tooFewAnswered && errors.length > 0
+        ? `Review panel paused: ${verdicts.length} of ${results.length} reviewer(s) answered, and its pass rule needs ${required}. No answer from: ${errors.map((e) => e.name).join(', ')}.`
+        : `${summaryHead}.`,
+    ];
     if (findings.length) summaryParts.push(findings.map(findingLine).join('\n'));
     if (escalatedFindings.length)
       summaryParts.push(
@@ -851,13 +938,7 @@ export function reviewPanelWith(config: ReviewPanelConfig, synthesis?: PanelSynt
       severityCounts: findingSeverityCounts(findings),
       ...(synthesised ? { synthesis: synthesised } : {}),
     };
-    const blockedByInfrastructure =
-      blockingErrors.length > 0 || (
-        errors.length > 0 &&
-        (config.pass === undefined || config.pass === 'all'
-          ? true
-          : passedCount < required && passedCount + errors.length >= required)
-      );
+    const blockedByInfrastructure = blockingErrors.length > 0 || (errors.length > 0 && tooFewAnswered);
     let outcome: Outcome;
     if (passed) {
       outcome = { status: 'pass', summary, confidence, data };
@@ -894,6 +975,39 @@ export function reviewPanelWith(config: ReviewPanelConfig, synthesis?: PanelSynt
           },
           { summary, confidence, data },
         );
+    }
+    if (scoped) {
+      // A paused or aborted round does not count; a paused one keeps the
+      // blocks that came in, for a resume on the same tree.
+      const failedVerdicts = verdicts.filter((r) => !r.met);
+      const rounds: ReviewRounds = outcome.status === 'paused' || outcome.status === 'aborted'
+        ? {
+            ...kept,
+            ...(outcome.status === 'paused' && failedVerdicts.length > 0 && blockingErrors.length === 0
+              ? {
+                  paused: {
+                    round,
+                    ...(tree === undefined ? {} : { tree }),
+                    findings: failedVerdicts.flatMap(reviewFindings),
+                    answered: failedVerdicts.map((r) => r.name),
+                    missing: errors.map((e) => e.name),
+                  },
+                }
+              : {}),
+          }
+        : {
+            round,
+            reviewers: {
+              ...kept.reviewers,
+              ...Object.fromEntries(verdicts.map((r) => [r.name, {
+                round,
+                ...(tree === undefined ? {} : { tree }),
+                findings: r.met ? [] : reviewFindings(r),
+              }])),
+            },
+          };
+      saveReviewRounds(ctx, roundsKey, rounds);
+      outcome = { ...outcome, data: { ...data, reviewRound: round, ...(tree === undefined ? {} : { reviewTree: tree }), reviewRounds: rounds } };
     }
     ctx.emit({ kind: 'job:end', ts: Date.now(), path: [...ctx.path], label, outcome });
     return outcome;

@@ -1305,6 +1305,7 @@ export function dag(config: DagConfig): Job {
   return interactionDeclaration(setMeta(job, {
     kind: 'dag',
     name: config.name,
+    ...(config.commit === undefined ? {} : { commit: { from: config.commit.from } }),
     nodes: [...nodes].map(([name, node]) => ({
       name,
       needs: normalizeNeeds(node.needs),

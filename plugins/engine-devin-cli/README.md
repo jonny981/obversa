@@ -99,3 +99,9 @@ tool event whose target says what the refused tool call acted on, such as
 never continued.
 
 See [Devin CLI Engine](https://obversa.ai/docs/packages/engine-devin-cli).
+
+## Input limit and login errors
+
+This engine declares no input limit, so the runtime treats it as having none.
+
+An attempt ends when the `devin` process exits. A failed call whose error names a login problem is an `auth` failure. A process that ends with no exit status and no result is marked so. In both cases the runtime runs the same seat once more, then the seat's next candidate.

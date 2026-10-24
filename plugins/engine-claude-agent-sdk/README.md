@@ -33,6 +33,12 @@ const engine = new AgentSdkEngine({
 Pass the engine instance to an Obversa runtime. Pass an `@obversa/api` memory
 instance in the constructor when the agent needs the memory tool.
 
+## Input limit and login errors
+
+This engine declares no input limit, so the runtime treats it as having none.
+
+A failed call whose error names a login problem is an `auth` failure. The runtime then runs the same seat once more, then the seat's next candidate.
+
 ## License
 
 [MIT](LICENSE)

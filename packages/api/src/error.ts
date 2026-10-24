@@ -29,6 +29,17 @@ export interface EngineErrorInit {
    */
   readonly resetProven?: boolean;
   readonly effective?: EngineSelectionRecord;
+  /**
+   * True when the engine's CLI reports a version other than the one it is
+   * pinned to: the tool changed under the run, so the seat cannot answer
+   * as configured until a person updates the pin.
+   */
+  readonly versionMoved?: boolean;
+  /**
+   * True when the engine's process ended with no exit status, stopped by a
+   * signal, and gave no result.
+   */
+  readonly noExitStatus?: boolean;
 }
 
 /** A provider or adapter failure with no runtime policy attached. */
@@ -38,6 +49,8 @@ export class EngineError extends Error {
   readonly resetAt?: number;
   readonly resetProven?: boolean;
   readonly effective?: EngineSelectionRecord;
+  readonly versionMoved?: boolean;
+  readonly noExitStatus?: boolean;
 
   constructor(init: EngineErrorInit) {
     super(
@@ -49,6 +62,8 @@ export class EngineError extends Error {
     this.retryAfterMs = init.retryAfterMs;
     this.resetAt = init.resetAt;
     this.resetProven = init.resetProven;
+    if (init.versionMoved === true) this.versionMoved = true;
+    if (init.noExitStatus === true) this.noExitStatus = true;
     this.effective = init.effective === undefined
       ? undefined
       : engineSelection(init.effective);

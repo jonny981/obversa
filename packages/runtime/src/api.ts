@@ -325,6 +325,9 @@ export type {
   CostTotals,
   CommandRun,
   RoundFileChange,
+  ReviewInput,
+  AcceptedProof,
+  CarriedWork,
 } from './core/types.js';
 
 export { loop } from './core/loop.js';
@@ -355,6 +358,20 @@ export {
   type RecordedEngineUsage,
 } from './core/job.js';
 export { reviewPanel } from './core/synthesis.js';
+export {
+  changeUnderReview,
+  changeTooLarge,
+  diffTrees,
+  workspaceTree,
+  type ChangeUnderReview,
+  type ChangeUnderReviewOptions,
+  type ListedFile,
+} from './core/review-input.js';
+export { acceptedProofs, acceptProofs, noteProofSendBack, proofSendBacks, standingProofs, type ProofSendBacks } from './core/proofs.js';
+export { commitMessageIn } from './runtime/commit-run.js';
+export { readCarry, type RecordCarry } from './runtime/carry.js';
+export { failingTests, failureLines } from './core/check-output.js';
+export { inputLimitCharacters, CHARACTERS_PER_TOKEN, type EngineInputLimit } from '@obversa/api';
 export { goalCheck, type GoalRequirement } from './goal.js';
 export {
   reviewContext,

@@ -176,7 +176,6 @@ describe('a seat with ordered candidates', () => {
   it.each([
     ['an unrelated engine failure', new Error('socket exploded mid stream')],
     ['an unknown failure', new EngineError({ kind: 'unknown', message: 'mystery' })],
-    ['an auth failure', new EngineError({ kind: 'auth', message: 'invalid api key' })],
   ])('does not spill on %s', async (_label, thrown) => {
     const cwd = workDir();
     const callsB: string[] = [];

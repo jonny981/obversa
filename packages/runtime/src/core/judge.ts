@@ -599,12 +599,17 @@ function packetWithin(full: JudgePacket, cap: number, cutWhenLists: boolean): Ju
   });
   const goal = size.list(how.goal, 'the goal check\'s verdicts', 'verdicts');
   // The finding itself is never cut; the brief excerpt and the diff hunk
-  // attached to it are the prose a limit cuts first.
+  // attached to it are the prose a limit cuts first. A finding that only
+  // repeats a failed check's output points to that output, which is cut
+  // like any other.
+  const outputs = new Map((how.checks ?? []).flatMap((check) => check.output === undefined ? [] : [[check.output, check.name] as const]));
   const findings = how.findings.map(({ brief, diff, ...finding }) => {
     const keptBrief = size.text(brief, `the brief lines finding ${finding.id} touches`);
     const keptDiff = size.text(diff, `the diff hunk for finding ${finding.id}`);
+    const check = outputs.get(finding.evidence);
     return {
       ...finding,
+      ...(check === undefined ? {} : { evidence: `the output of the check "${check}", given with the check` }),
       ...(keptBrief !== undefined ? { brief: keptBrief } : {}),
       ...(keptDiff !== undefined ? { diff: keptDiff } : {}),
     };

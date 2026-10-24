@@ -35,6 +35,12 @@ const engine = new ClaudeCliEngine({
 
 Pass the engine instance to an Obversa runtime.
 
+## Input limit and login errors
+
+This engine declares no input limit, so the runtime treats it as having none.
+
+An attempt ends when the `claude` process exits. A failed call whose error names a login problem is an `auth` failure. The runtime then runs the same seat once more, then the seat's next candidate.
+
 ## License
 
 [MIT](LICENSE)

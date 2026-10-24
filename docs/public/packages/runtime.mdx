@@ -239,9 +239,30 @@ Each candidate is a full seat of its own: engine, identity and tools. A call
 that fails on billing or quota runs the next candidate in the same step,
 under that candidate's own tool policy. A rate limit follows the step's
 `fallbackOn` policy, so it also moves to the next candidate when that policy
-allows it, as the default does. Any other failure ends the step as it
-always did, and an abort stops the step at once. An empty `candidates`
-list is refused, and a seat with none behaves exactly as before.
+allows it, as the default does. An abort stops the step at once. An empty
+`candidates` list is refused.
+
+Some failures mean the seat could not answer at all. Each of these runs the
+same seat once more, then its next candidate:
+
+- **A timeout.** The call ran past its time limit.
+- **A stall.** The call sent no engine event (text, thinking, a tool call or
+  usage) for the step's `stallMs`, an `agentJob` option. The runtime stops
+  it.
+- **A login error.** The engine reported that its login failed.
+- **A moved CLI version.** The engine's CLI reports a version other than its
+  pin.
+- **No exit status.** The engine's process ended with no exit status and no
+  result.
+- **A process the runtime could not watch.** The runtime watches each engine
+  process it starts, so that it can stop every process the call left behind.
+  When that watch fails, the runtime stops the process, and the call gives
+  no result.
+
+Any other failure ends the step. A seat with no candidates gets the retry,
+then the step ends on the failure. The `seat:route` event and the run page
+name the seat that could not answer, why, and the candidate that answers
+instead.
 
 The record names the move in a `seat:route` event: the requested identity,
 the selected candidate, the failure kind and the reset when one is known.
@@ -402,6 +423,47 @@ shape the same (for a workflow, its brief, stage list and role seats too);
 change any and the run starts again.
 [The record](/concepts/record) says what a resumed run repeats.
 
+A fresh run never writes over a record. When the file already holds one,
+it moves beside the new one, with the time it was last written in its
+name. The run leaves those earlier records, its own record and the full
+output of its checks out of every snapshot, review and commit. A step that
+takes its own snapshot with `workspaceTree` passes
+`ctx.fingerprintExcludePaths` as `excludePaths` to leave the same files out.
+
+A resume also reads back what a proof check kept: the proofs it accepted,
+and its send-backs so far. `proofSendBacks(ctx)` gives the count and the
+report the last send-back read. `noteProofSendBack(ctx, report)` counts one
+more; put what it returns in the outcome's `data.proofSendBacks`, so the
+record keeps it.
+
+### `carryFrom`
+
+`carryFrom` names the record of an earlier run on the same work. The run
+reads three things from it and gives them to every step as `ctx.carried`:
+
+- **The open findings.** These are the last finished review's findings
+  that were never resolved. A finding the judge skipped is not open.
+- **The accepted proofs.** Each proof the earlier run's proof check
+  accepted, with the tree it was accepted on and the files it covers.
+- **How it ended.** The step that stopped it, its status and its reason.
+
+`carryFrom` may name the `recordTo` path. The run reads the earlier record
+before it moves aside.
+
+### `commit`
+
+`commit` commits the worktree's changes on its branch when the run passes,
+before the run reports. The message is the last fenced block marked
+`commit` in the output of the step that `commit: { from }` names. With
+`commit: true`, the run uses the step the workflow names: a `dag()` names
+one with its own `commit: { from }`. The run then adds its trailers: `Run:`,
+and `Review-rounds:` and `Reviewed-by:` when a panel reviewed the work.
+The repository's own git setup signs the commit.
+
+A hook can refuse the commit, for example outside the hours a repository
+allows commits. The run still passes. It leaves the work uncommitted and
+says why on `outcome.commit` and in the record. The run never pushes.
+
 ### `callbacks` and `onCallback`
 
 `callbacks` is the client the run's questions go through, in memory (the
@@ -435,6 +497,8 @@ variables for a job and every job beneath it.
 | `runId` | `string` | generated | The registry id, `[a-z0-9][a-z0-9-]*`. |
 | `onLimit` | `LimitPolicy` | `'auto'` | What a rate limit, quota or budget does: `auto`, `wait`, `exit` or `fail`. |
 | `maxWaitMs` | `number` | `300000` | Ceiling on one interruptible limit wait. |
+| `carryFrom` | `string` | none | The record of an earlier run on the same work; see [`carryFrom`](#carryfrom). |
+| `commit` | `true` or `{ from }` | none | Commit the work when the run passes; see [`commit`](#commit). |
 | `judgeContextLimit` | `number` | `50000` | How many characters, counted as JSON, a [judge](/patterns/judge-stops-the-loop#the-size-limit) reads. Long parts are cut to fit. |
 | `cost` | `{ prices, baselineModel? }` | none | Price the measured usage; `baselineModel` adds the counterfactual. |
 
@@ -540,7 +604,13 @@ export keeps the exact `Job` type), `defineAgent`, `defineAgentFromMarkdown`,
 `confidenceFromText`, `lastDecisionLine`, `lastGateBrief`, `reviewContext`.
 
 **Review.** `review`, `isReview`, `reviewPanel`, `goalCheck`, `tournament`, `kickback`, `revisionRequest`, `judge`, `isJudge`, `stopQuestions`, `findingQuestions`, `FINDING_LEVELS`, `JUDGE_CONFIDENCE`,
-`RECORDED_ENGINE_USAGE`, `RESUME_STAGE_OUTCOMES`.
+`RECORDED_ENGINE_USAGE`, `RESUME_STAGE_OUTCOMES`, `changeUnderReview`,
+`changeTooLarge`, `workspaceTree`, `diffTrees`, `inputLimitCharacters`,
+`CHARACTERS_PER_TOKEN`.
+
+**Proofs and carried work.** `acceptedProofs`, `acceptProofs`,
+`standingProofs`, `proofSendBacks`, `noteProofSendBack`, `readCarry`,
+`commitMessageIn`, `failingTests`, `failureLines`.
 
 **Ask a person.** `approval`, `createCallbackGate`, `createCallbackClient`,
 `createStoredCallbackClient`, `replayCallbackClient`, `directRouter`,
@@ -569,8 +639,8 @@ JSON file, one answer object per round, in place of `jev()`), `defineGraphDefini
 `createGraphEventTrace`, and the conformance kits. `@obversa/runtime/memory`: `ground`, `curate`,
 `consolidate`. `@obversa/runtime/workflow-support`: `outcomeFromAgentText`,
 `INVALID_TEAM_DECISION`, `seatIdentity`, `assertDistinctSeats`,
-`requireNonEmptyFiles`, `requireNoFiles`, `teamAgent`, `panelReviewers`.
-`@obversa/runtime/env/command`: `commandEnvironment`.
+`requireNonEmptyFiles`, `requireNoFiles`, `teamAgent`, `panelReviewers`,
+`objectAt`. `@obversa/runtime/env/command`: `commandEnvironment`.
 `@obversa/runtime/storage/local`: `createLocalRunStorage`.
 
 ## Next steps

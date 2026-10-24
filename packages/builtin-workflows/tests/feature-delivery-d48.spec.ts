@@ -46,34 +46,32 @@ function config(overrides: Partial<FeatureDeliveryConfig> = {}): FeatureDelivery
     return pass('accepted');
   }]);
   const reviewer = scriptedEngine('reviewer', [async () => pass('accepted')]);
-  const approve = scriptedEngine('approve', [async (request) => {
-    const marker = request.prompt.match(/marker value (.+?) anywhere/)?.[1] ?? '';
-    await mkdir(join(request.cwd!, 'team-output'), { recursive: true });
-    await writeFile(join(request.cwd!, 'team-output/approval.md'), `Run marker: ${marker}\n`);
-    return pass('accepted');
-  }]);
   return {
     brief: 'Deliver a module that exports result 11.',
     workspace: '/tmp/obversa-teams-feature',
     files: ['src/result.mjs', 'test/result.test.mjs'],
     testFiles: ['test/result.test.mjs'],
-    test: testCommand,
+    checks: [[testCommand.command, ...testCommand.args]],
     analyse: seat(analyse, 'analyse'),
     implement: seat(implement, 'implement'),
     reviewers: [{ name: 'correctness', seat: seat(reviewer, 'reviewer'), scope: 'implementation' }],
     reviewThreshold: 1,
-    approve: seat(approve, 'approve'),
     refine: { plan: 3, 'tests-first': 3 },
     ...overrides,
   };
 }
 
-describe('featureDelivery D48 contract', () => {
-  it('requires testFiles instead of retaining the five-node graph', () => {
-    const invalid = config() as unknown as Record<string, unknown>;
-    delete invalid.testFiles;
+/** The team input the stage helpers read, from a feature-delivery config. */
+function teamInput(input: FeatureDeliveryConfig) {
+  return { brief: input.brief!, workspace: input.workspace, files: input.files ?? [], test: testCommand };
+}
 
-    expect(() => featureDelivery(invalid as unknown as FeatureDeliveryConfig)).toThrow(/testFiles/i);
+describe('featureDelivery D48 contract', () => {
+  it('requires the files the change writes when the research and tests stages run', () => {
+    const invalid = config() as unknown as Record<string, unknown>;
+    delete invalid.files;
+
+    expect(() => featureDelivery(invalid as unknown as FeatureDeliveryConfig)).toThrow(/files must list the files the change writes/i);
   });
 
   it('exposes the fine-grained stage list', () => {
@@ -81,17 +79,20 @@ describe('featureDelivery D48 contract', () => {
     const nodes = (meta?.nodes as Array<Record<string, unknown>>) ?? [];
 
     expect(nodes.map((node) => node.name)).toEqual([
-      'prepare',
+      'seats',
+      'brief',
       'research-context',
       'research-requirements',
       'plan',
       'plan-review',
       'tests-first',
       'tests-review',
-      'implement',
-      'verify',
-      'approve',
-      'close',
+      'build',
+      'report',
+      'fit',
+      'checks',
+      'proof',
+      'review',
     ]);
   });
 
@@ -132,7 +133,7 @@ describe('featureDelivery D48 contract', () => {
           scope: 'implementation',
         }],
       });
-      const [scoped] = panelReviewers(input.reviewers, input, 'team-output/research-context.md');
+      const [scoped] = panelReviewers(input.reviewers, teamInput(input), 'team-output/research-context.md');
       const result = await run(scoped!.job, { cwd: workspace });
       expect(result.outcome.status).toBe('pass');
     } finally {
@@ -155,7 +156,7 @@ describe('featureDelivery D48 contract', () => {
           scope: 'research note',
         }],
       });
-      const [targeted] = panelReviewers(input.reviewers, input, 'team-output/research-context.md');
+      const [targeted] = panelReviewers(input.reviewers, teamInput(input), 'team-output/research-context.md');
       const result = await run(targeted!.job, { cwd: workspace });
       expect(result.outcome.status).toBe('pass');
     } finally {
@@ -178,7 +179,7 @@ describe('featureDelivery D48 contract', () => {
       });
       const result = await run(reviewPanel({
         label: 'scoped-panel',
-        reviewers: panelReviewers(input.reviewers, input),
+        reviewers: panelReviewers(input.reviewers, teamInput(input)),
         pass: 1,
         target: 'implement',
       }), { cwd: workspace });
@@ -206,7 +207,7 @@ describe('featureDelivery D48 contract', () => {
       });
       const result = await run(reviewPanel({
         label: 'review-retry',
-        reviewers: panelReviewers(input.reviewers, input, 'team-output/research-requirements.md'),
+        reviewers: panelReviewers(input.reviewers, teamInput(input), 'team-output/research-requirements.md'),
         pass: 1,
         target: 'research-requirements',
       }), { cwd: workspace });
@@ -233,7 +234,7 @@ describe('featureDelivery D48 contract', () => {
       });
       const result = await run(reviewPanel({
         label: 'review-no-decision',
-        reviewers: panelReviewers(input.reviewers, input, 'team-output/research-requirements.md'),
+        reviewers: panelReviewers(input.reviewers, teamInput(input), 'team-output/research-requirements.md'),
         pass: 1,
         target: 'research-requirements',
       }), { cwd: workspace });
@@ -267,7 +268,7 @@ describe('featureDelivery D48 contract', () => {
       });
       const result = await run(reviewPanel({
         label: 'review-file',
-        reviewers: panelReviewers(input.reviewers, input, 'team-output/research-requirements.md'),
+        reviewers: panelReviewers(input.reviewers, teamInput(input), 'team-output/research-requirements.md'),
         pass: 1,
         target: 'research-requirements',
       }), { cwd: workspace });
@@ -297,7 +298,7 @@ describe('featureDelivery D48 contract', () => {
       });
       const result = await run(reviewPanel({
         label: 'stale-review-file',
-        reviewers: panelReviewers(input.reviewers, input, 'team-output/research-requirements.md'),
+        reviewers: panelReviewers(input.reviewers, teamInput(input), 'team-output/research-requirements.md'),
         pass: 1,
         target: 'research-requirements',
       }), { cwd: workspace });
@@ -360,12 +361,11 @@ describe('featureDelivery D48 contract', () => {
         workspace,
         files: ['src/result.mjs', 'test/result.test.mjs'],
         testFiles: ['test/result.test.mjs'],
-        test: { command: process.execPath, args: ['--test', 'test/result.test.mjs'] },
+        checks: [[process.execPath, '--test', 'test/result.test.mjs']],
         analyse: seat(analyse, 'analyse'),
         implement: seat(implement, 'implement'),
         reviewers: [{ name: 'correctness', seat: seat(reviewer, 'reviewer'), scope: 'implementation' }],
         reviewThreshold: 1,
-        approve: seat(approve, 'approve'),
         refine: { plan: 3, 'tests-first': 3 },
       }), { cwd: workspace });
 
@@ -517,6 +517,39 @@ describe('featureDelivery D48 contract', () => {
       expect(data?.plan?.summary).toBe('plan returned the reviewed work unchanged after feedback');
       expect(planWrites).toBe(2);
       expect(planReviews).toBe(1);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('runs every stage panel on the reviewer candidate the seat check admitted', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'obversa-teams-candidate-'));
+    try {
+      let missingCalls = 0;
+      const missing = () => Object.assign(new Error('spawn reviewer-cli ENOENT'), { code: 'ENOENT' });
+      const primary = {
+        name: 'missing-reviewer',
+        async admit(): Promise<never> { throw missing(); },
+        async run(): Promise<never> {
+          missingCalls += 1;
+          throw missing();
+        },
+      };
+      const candidate = scriptedEngine('candidate-reviewer', [async () => pass('accepted')]);
+      const result = await run(featureDelivery(config({
+        workspace,
+        reviewers: [{ name: 'correctness', seat: { seat: seat(primary, 'missing'), candidates: [seat(candidate, 'candidate')] } }],
+      })), { cwd: workspace });
+
+      expect(result.outcome.status, JSON.stringify(result.outcome)).toBe('pass');
+      expect(missingCalls).toBe(0);
+      const targets = candidate.calls.map((call) => call.prompt.match(/^Review target: (.*)\.$/m)?.[1]).filter(Boolean);
+      expect(targets).toEqual([
+        'team-output/research-context.md',
+        'team-output/research-requirements.md',
+        'team-output/research-requirements.md and team-output/plan.md',
+        'test/result.test.mjs',
+      ]);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

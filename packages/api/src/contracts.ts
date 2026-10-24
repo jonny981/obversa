@@ -275,8 +275,37 @@ export type EngineStreamEvent =
 
 export type EngineEventSink = (event: EngineStreamEvent) => void;
 
+/**
+ * How much input one request to an engine may hold, as the engine's own
+ * service counts it: in characters, or in tokens. A runtime measures a
+ * limit in tokens as one token per `CHARACTERS_PER_TOKEN` characters.
+ */
+export type EngineInputLimit =
+  | { readonly characters: number }
+  | { readonly tokens: number };
+
+/**
+ * The characters a runtime counts as one token when it measures a prompt
+ * against a limit in tokens. It is lower than the ratio of any real prompt
+ * measured against a service's own count (2.4 on a review prompt that was
+ * mostly JSON), so a prompt measured as fitting does fit.
+ */
+export const CHARACTERS_PER_TOKEN = 2;
+
+/** The most characters one request to an engine may hold, or `undefined` when it declares no limit. */
+export function inputLimitCharacters(engine: Pick<Engine, 'inputLimit'>): number | undefined {
+  const limit = engine.inputLimit;
+  if (limit === undefined) return undefined;
+  return 'characters' in limit ? limit.characters : limit.tokens * CHARACTERS_PER_TOKEN;
+}
+
 export interface Engine {
   readonly name: string;
+  /**
+   * How much input one request may hold. An engine that declares none is
+   * treated as having no limit.
+   */
+  readonly inputLimit?: EngineInputLimit;
   admit?(
     request: Omit<AgentRequest, 'prompt'>,
     signal: AbortSignal,

@@ -373,7 +373,7 @@ describe('commandSucceeds output capture', () => {
     expect(r?.output).toBeUndefined();
   });
 
-  it('truncates long stream output with the … marker', async () => {
+  it('keeps both streams whole when no output limit is given', async () => {
     const r = await untilResult(
       commandSucceeds('node', [
         '-e',
@@ -381,9 +381,28 @@ describe('commandSucceeds output capture', () => {
       ]),
       noEngine,
     );
-    expect(r?.output).toContain('x'.repeat(3998));
-    expect(r?.output).not.toContain('x'.repeat(3999));
-    expect(r?.output).toContain('\n…');
+    expect(r?.output).toContain(`stdout:\n${'x'.repeat(5000)}`);
+  });
+
+  it('keeps the failure lines and the end of each stream within an output limit', async () => {
+    const r = await untilResult(
+      commandSucceeds('node', [
+        '-e',
+        [
+          'process.stdout.write("BEGIN_MARKER\\n" + "x\\n".repeat(5000) + " FAIL  tests/a.spec.ts > adds > two numbers\\n" + "OUT_END\\n")',
+          'process.stderr.write("ERR_BEGIN\\n" + "y\\n".repeat(5000) + "ERR_END\\n")',
+          // Exit once both pipes have drained, or node cuts its own output.
+          'process.exitCode = 1',
+        ].join('; '),
+      ], { outputLimit: 2_000 }),
+      noEngine,
+    );
+    expect(r?.output!.length).toBeLessThanOrEqual(2_000);
+    expect(r?.output).toContain('- tests/a.spec.ts > adds > two numbers');
+    expect(r?.output).toContain('OUT_END');
+    expect(r?.output).toContain('ERR_END');
+    expect(r?.output).not.toContain('BEGIN_MARKER');
+    expect(r?.output).not.toContain('ERR_BEGIN');
   });
 
   it('scrubs credential-shaped strings from the captured output', async () => {
@@ -411,14 +430,14 @@ describe('commandSucceeds output capture', () => {
     expect(r?.output).toContain('failure detail');
   });
 
-  it('appends the bounded tail of combined output when requested', async () => {
+  it('adds the output to the reason when requested', async () => {
     const r = await untilResult(
       commandSucceeds(
         'node',
         [
           '-e',
           [
-            'process.stdout.write("BEGIN_MARKER\\n" + "x".repeat(5000))',
+            'process.stdout.write("BEGIN_MARKER\\n")',
             'process.stderr.write("\\nSTDERR_MARKER\\n")',
             'setTimeout(() => { console.error("END_MARKER"); process.exit(1) }, 10)',
           ].join('; '),
@@ -427,14 +446,13 @@ describe('commandSucceeds output capture', () => {
       ),
       noEngine,
     );
-    expect(r?.reason).toContain('command output (tail):');
-    expect(r?.reason).toContain('… [output truncated]');
+    expect(r?.reason).toContain('`node` exited 1\n\nexit: 1');
+    expect(r?.reason).toContain('BEGIN_MARKER');
     expect(r?.reason).toContain('STDERR_MARKER');
     expect(r?.reason).toContain('END_MARKER');
-    expect(r?.reason).not.toContain('BEGIN_MARKER');
   });
 
-  it('redacts the full combined stream before taking its tail', async () => {
+  it('redacts the output it adds to the reason', async () => {
     const injected = 's'.repeat(500);
     const r = await untilResult(
       commandSucceeds(

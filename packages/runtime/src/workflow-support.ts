@@ -162,4 +162,6 @@ export function panelReviewers(
   });
 }
 
-export { INVALID_TEAM_DECISION, outcomeFromAgentText } from './workflow-agent-response.js';
+export { INVALID_TEAM_DECISION, objectAt, outcomeFromAgentText } from './workflow-agent-response.js';
+/** The feedback block a writer's prompt carries on a send-back, so a workflow can size its prompts against an engine's limit. */
+export { feedbackBlock } from './core/feedback.js';

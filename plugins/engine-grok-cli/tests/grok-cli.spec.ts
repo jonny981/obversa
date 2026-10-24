@@ -15,7 +15,7 @@ import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   canonicalJson,
@@ -42,6 +42,15 @@ const roots: string[] = [];
 const fixtureSource = fileURLToPath(
   new URL('fixtures/grok-cli.mjs', import.meta.url),
 );
+
+// No test reads the person's own Grok login: each starts with an empty Grok home.
+// It sits one folder down, so a helper that removes a Grok home's parent
+// removes only this test's own folder.
+beforeEach(() => {
+  const home = join(temporaryDirectory('lines-grok-test-home-'), 'grok-home');
+  mkdirSync(home);
+  vi.stubEnv('GROK_HOME', home);
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -123,7 +132,7 @@ function valuesAfter(args: readonly string[], flag: string): string[] {
 }
 
 interface FixtureInvocation {
-  readonly kind: 'version' | 'model';
+  readonly kind: 'version' | 'model' | 'refresh';
   readonly program: string;
   readonly args: readonly string[];
   readonly stdin?: string;
@@ -1109,7 +1118,7 @@ describe('Grok CLI adapter', () => {
   it.each([
     ['already expired', () => new Date(Date.now() - 3_600_000).toISOString()],
     ['expires inside the call\'s limit', () => new Date(Date.now() + 5_000).toISOString()],
-  ])('fails before any process when the login %s', async (_label, expiryOf) => {
+  ])('refreshes outside the sandbox, then refuses before any model call, when the login %s and the refresh does not renew it', async (_label, expiryOf) => {
     const calls = join(temporaryDirectory('lines-grok-admission-'), 'calls.jsonl');
     const expiresAt = expiryOf();
     const authFile = join(temporaryDirectory('lines-grok-auth-'), 'auth.json');
@@ -1119,7 +1128,7 @@ describe('Grok CLI adapter', () => {
     const engine = new GrokCliEngine({
       ...options(),
       authFile,
-      environment: { OBVERSA_TEST_GROK_CALLS: calls },
+      environment: { OBVERSA_TEST_GROK_CALLS: calls, OBVERSA_TEST_GROK_REFRESH: 'no-renew' },
     });
     let error: unknown;
 
@@ -1133,10 +1142,10 @@ describe('Grok CLI adapter', () => {
     expect(error).toMatchObject({
       name: 'EngineError',
       kind: 'invalid-config',
-      message: `the Grok login expires at ${expiresAt}, before this call's limit; run grok once outside Obversa to refresh it`,
+      message: `the Grok login expires at ${expiresAt}, before this call's limit, and a refresh outside the sandbox did not renew it`,
     });
     expect(LANE_DEAD_FAILURES.has((error as EngineError).kind)).toBe(true);
-    expect(invocations(calls)).toEqual([]);
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['refresh']);
   });
 
   it.each([
@@ -1476,5 +1485,89 @@ describe('grok(model, options)', () => {
     }), options('/bin/echo'), '/tmp/lines-grok-prompt.md');
 
     expect(valuesAfter(args, '--allow')).toEqual(['Read', 'Grep', 'Edit', 'Bash']);
+  });
+});
+
+describe('a Grok login', () => {
+  function expiringLogin(home: string, inMs: number): string {
+    const expiresAt = new Date(Date.now() + inMs).toISOString();
+    writeFileSync(join(home, 'auth.json'), JSON.stringify({ token: 'fixture-token', expires_at: expiresAt }), { mode: 0o600 });
+    return expiresAt;
+  }
+
+  it('ends the attempt at once on a login error the CLI prints and keeps running', async () => {
+    const started = Date.now();
+    await expect(new GrokCliEngine({
+      ...options(),
+      environment: { OBVERSA_TEST_GROK_SCENARIO: 'login-lock' },
+    }).run(request({ timeoutMs: 60_000 }), () => {}, new AbortController().signal))
+      .rejects.toMatchObject({
+        name: 'EngineError',
+        kind: 'auth',
+        message: expect.stringContaining('auth lock: failed to open ~/.grok/auth.json.lock'),
+      });
+    expect(Date.now() - started).toBeLessThan(15_000);
+  });
+
+  it("refreshes the person's own login outside the sandbox before a sandboxed call, and the record says so", async () => {
+    const home = process.env.GROK_HOME!;
+    writeFileSync(join(home, 'fixture-home'), '');
+    expiringLogin(home, 5_000);
+    const calls = join(temporaryDirectory('lines-grok-refresh-'), 'calls.jsonl');
+    const events: EngineStreamEvent[] = [];
+    const repo = request({ timeoutMs: 60_000 }).cwd!;
+
+    await new GrokCliEngine({ ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls } })
+      .run(request({ timeoutMs: 60_000, cwd: repo }), (event) => events.push(event), new AbortController().signal);
+
+    const refresh = invocations(calls).filter((call) => call.kind === 'refresh');
+    expect(refresh).toHaveLength(1);
+    expect(refresh[0]!.args).toEqual(['models']);
+    expect(refresh[0]!.cwd).not.toBe(repo);
+    expect(refresh[0]!.grokHome).toBe(home);
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['refresh', 'version', 'model']);
+    expect(JSON.parse(readFileSync(join(home, 'auth.json'), 'utf8')).expires_at).toBe('2099-01-01T00:00:00Z');
+    expect(events).toContainEqual(expect.objectContaining({ type: 'tool', name: 'login-refresh', phase: 'result' }));
+  });
+
+  it('refreshes a chosen login file outside the sandbox and writes the renewed login back to it', async () => {
+    const authDir = temporaryDirectory('lines-grok-auth-');
+    const authFile = join(authDir, 'auth.json');
+    expiringLogin(authDir, 5_000);
+    const calls = join(temporaryDirectory('lines-grok-calls-'), 'calls.jsonl');
+    const recordPath = join(temporaryDirectory('lines-grok-record-'), 'call.json');
+
+    await new GrokCliEngine({ ...options(), authFile, environment: { OBVERSA_TEST_GROK_CALLS: calls, OBVERSA_TEST_GROK_RECORD: recordPath, OBVERSA_TEST_GROK_SCENARIO: 'invocation' } })
+      .run(request({ timeoutMs: 60_000 }), () => {}, new AbortController().signal);
+
+    const refresh = invocations(calls).filter((call) => call.kind === 'refresh');
+    expect(refresh).toHaveLength(1);
+    // It ran in the plugin's own copy, not in the person's home or the file's folder.
+    expect(refresh[0]!.grokHome).not.toBe(process.env.GROK_HOME);
+    expect(refresh[0]!.grokHome).not.toBe(authDir);
+    const renewed = readFileSync(authFile, 'utf8');
+    expect(JSON.parse(renewed).expires_at).toBe('2099-01-01T00:00:00Z');
+    // The sandboxed call then used the renewed login.
+    expect(JSON.parse(readFileSync(recordPath, 'utf8')).environment.auth).toBe(renewed);
+  });
+
+  it('makes no refresh call when the login outlasts the call', async () => {
+    expiringLogin(process.env.GROK_HOME!, 3_600_000);
+    const calls = join(temporaryDirectory('lines-grok-refresh-'), 'calls.jsonl');
+
+    await new GrokCliEngine({ ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls } })
+      .run(request({ timeoutMs: 60_000 }), () => {}, new AbortController().signal);
+
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['version', 'model']);
+  });
+
+  it("refuses with the refresh's own reason when the refresh fails", async () => {
+    expiringLogin(process.env.GROK_HOME!, 5_000);
+    const calls = join(temporaryDirectory('lines-grok-refresh-'), 'calls.jsonl');
+
+    await expect(new GrokCliEngine({ ...options(), environment: { OBVERSA_TEST_GROK_CALLS: calls, OBVERSA_TEST_GROK_REFRESH: 'fail' } })
+      .admit({ ...request({ timeoutMs: 60_000 }), prompt: undefined } as never, new AbortController().signal))
+      .rejects.toMatchObject({ kind: 'invalid-config', message: expect.stringContaining('the refresh call exited 1: refresh refused: the network is down') });
+    expect(invocations(calls).map((call) => call.kind)).toEqual(['refresh']);
   });
 });
