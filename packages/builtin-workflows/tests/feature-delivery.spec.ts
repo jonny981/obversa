@@ -179,6 +179,116 @@ describe('featureDelivery', () => {
       expect(outcome.status).toBe('pass');
       expect(builder.prompts[0]).toContain('The brief check noted:\n- [nice-to-have] the brief says a.mjs holds 2; it holds 1, which the build changes');
     });
+
+    const HOUSE_RULES = 'Wipe your feet.\nShare the biscuits.';
+
+    it('sends the house rules to the brief check when they are given, and not when they are not', async () => {
+      const { cwd } = repo();
+      const withRules = engine('reviewer', () => PASS());
+      await run(featureDelivery(config(cwd, engine('builder', () => REPORT), withRules, { houseRules: HOUSE_RULES })), { cwd });
+      expect(withRules.prompts.find((prompt) => asks.brief(prompt))).toContain(`=== the house rules ===\n${HOUSE_RULES}`);
+
+      const withoutRules = engine('reviewer', () => PASS());
+      await run(featureDelivery(config(cwd, engine('builder', () => REPORT), withoutRules)), { cwd });
+      expect(withoutRules.prompts.find((prompt) => asks.brief(prompt))).not.toContain('=== the house rules ===');
+    });
+
+    it('sends the house rules to the proof check when they are given, and not when they are not', async () => {
+      const { cwd } = repo();
+      const withRules = engine('reviewer', () => PASS());
+      await run(featureDelivery(config(cwd, engine('builder', () => REPORT), withRules, { houseRules: HOUSE_RULES })), { cwd });
+      expect(withRules.prompts.find((prompt) => asks.proof(prompt))).toContain(`=== the house rules ===\n${HOUSE_RULES}`);
+
+      const withoutRules = engine('reviewer', () => PASS());
+      await run(featureDelivery(config(cwd, engine('builder', () => REPORT), withoutRules)), { cwd });
+      expect(withoutRules.prompts.find((prompt) => asks.proof(prompt))).not.toContain('=== the house rules ===');
+    });
+
+    it('sends the house rules to the research writer and its reviewer when they are given', async () => {
+      const { cwd } = repo();
+      const analyse = engine('analyse', (request) => {
+        mkdirSync(join(request.cwd!, 'team-output'), { recursive: true });
+        if (request.prompt.startsWith('Obversa team role: research-context')) {
+          writeFileSync(join(request.cwd!, 'team-output/research-context.md'), '# context\n');
+        } else if (request.prompt.startsWith('Obversa team role: research-requirements')) {
+          writeFileSync(join(request.cwd!, 'team-output/research-requirements.md'), 'REQ-1 it works\n');
+        } else if (request.prompt.startsWith('Obversa team role: plan')) {
+          writeFileSync(join(request.cwd!, 'team-output/plan.md'), 'REQ-1 do it\n');
+        }
+        return PASS();
+      });
+      const reviewer = engine('reviewer', () => PASS());
+      const { outcome } = await run(featureDelivery(config(cwd, engine('builder', () => REPORT), reviewer, {
+        analyse: seatOf(analyse, 'analyse'),
+        files: ['a.mjs'],
+        houseRules: HOUSE_RULES,
+      })), { cwd });
+
+      expect(outcome.status).toBe('pass');
+      expect(analyse.prompts.find((prompt) => prompt.startsWith('Obversa team role: research-context'))).toContain(`=== the house rules ===\n${HOUSE_RULES}`);
+      expect(reviewer.prompts.find((prompt) => prompt.startsWith('Obversa team role: reviewer') && prompt.includes('Review target: team-output/research-context.md'))).toContain(`=== the house rules ===\n${HOUSE_RULES}`);
+    });
+
+    it('sends the house rules to the tests-first writer and its reviewers', async () => {
+      const { cwd } = repo();
+      const builder = engine('builder', (request) => {
+        if (request.prompt.startsWith('Obversa team role: tests-first')) {
+          writeFileSync(join(request.cwd!, 'a.spec.mjs'), 'export const test = 1;\n');
+          return PASS();
+        }
+        return REPORT;
+      });
+      const reviewer = engine('reviewer', () => PASS());
+      const { outcome } = await run(featureDelivery(config(cwd, builder, reviewer, {
+        files: ['a.mjs', 'a.spec.mjs'],
+        testFiles: ['a.spec.mjs'],
+        houseRules: HOUSE_RULES,
+      })), { cwd });
+
+      expect(outcome.status).toBe('pass');
+      expect(builder.prompts.find((prompt) => prompt.startsWith('Obversa team role: tests-first'))).toContain(`=== the house rules ===\n${HOUSE_RULES}`);
+      expect(reviewer.prompts.find((prompt) => prompt.startsWith('Obversa team role: reviewer') && prompt.includes('Review target: a.spec.mjs'))).toContain(`=== the house rules ===\n${HOUSE_RULES}`);
+    });
+
+    it("sends the house rules to the builder answering a report's proof send-back", async () => {
+      const { cwd } = repo();
+      let proofAsks = 0;
+      const builder = engine('builder', () => REPORT);
+      const reviewer = engine('reviewer', (request) => {
+        if (asks.proof(request.prompt)) {
+          proofAsks += 1;
+          return proofAsks === 1 ? REVISE('proof 1: paste it') : PASS();
+        }
+        return PASS();
+      });
+      const { outcome } = await run(featureDelivery(config(cwd, builder, reviewer, { houseRules: HOUSE_RULES })), { cwd });
+
+      expect(outcome.status).toBe('pass');
+      expect(builder.prompts.find((prompt) => asks.report(prompt))).toContain(`=== the house rules ===\n${HOUSE_RULES}`);
+    });
+
+    it('tells the brief check to block on a house rule that says the check blocks it', async () => {
+      const { cwd } = repo();
+      const withRules = engine('reviewer', () => PASS());
+      await run(featureDelivery(config(cwd, engine('builder', () => REPORT), withRules, { houseRules: HOUSE_RULES })), { cwd });
+      expect(withRules.prompts.find((prompt) => asks.brief(prompt))).toContain('a house rule that says the brief check blocks it');
+
+      const withoutRules = engine('reviewer', () => PASS());
+      await run(featureDelivery(config(cwd, engine('builder', () => REPORT), withoutRules)), { cwd });
+      expect(withoutRules.prompts.find((prompt) => asks.brief(prompt))).not.toContain('a house rule that says the brief check blocks it');
+    });
+
+    it('pauses the run on a block that cites a house rule, with the finding in the brief summary', async () => {
+      const { cwd } = repo();
+      const finding = 'house rule: the brief names no measure besides the tests';
+      const reviewer = engine('reviewer', (request) => asks.brief(request.prompt) ? REVISE(finding) : PASS());
+      const { outcome } = await run(featureDelivery(config(cwd, engine('builder', () => REPORT), reviewer, { houseRules: HOUSE_RULES })), { cwd });
+
+      expect(outcome.status).toBe('paused');
+      const brief = outcomes(outcome).brief!;
+      expect(brief.status).toBe('paused');
+      expect(brief.summary).toContain(finding);
+    });
   });
 
   it("tells the first build and the brief check about the earlier run's work and how it ended", async () => {

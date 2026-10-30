@@ -34,6 +34,8 @@ export interface TeamInput {
   readonly workspace: string;
   readonly files: readonly string[];
   readonly test: TestCommand;
+  /** The rules every seat reads, sent to each after the brief. */
+  readonly houseRules?: string;
 }
 
 interface FileSnapshot {
@@ -77,6 +79,7 @@ export function teamAgent(
   if (workspaceMode === 'read' && identity.tools.length === 0) {
     throw new TypeError(`${label} cannot read the workspace: reviewer seat declares no tools`);
   }
+  const houseRules = input.houseRules ? `=== the house rules ===\n${input.houseRules}\n` : '';
   const agent = agentJob({
     label,
     engine: primary.engine,
@@ -89,7 +92,7 @@ export function teamAgent(
     cwd: input.workspace,
     consumeFeedback: target !== undefined,
     ...(recordAs === undefined ? {} : { recordAs }),
-    prompt: (ctx) => `${rolePrompt(label, input.brief)}\n${typeof instructions === 'function' ? instructions(ctx) : instructions}\nReturn one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}`,
+    prompt: (ctx) => `${rolePrompt(label, input.brief)}\n${houseRules}${typeof instructions === 'function' ? instructions(ctx) : instructions}\nReturn one JSON object: {"status":"pass"|"revise","summary":"...","findings":[{"evidence":"..."}]}`,
     outcome: (text) => outcomeFromAgentText(text, target),
   });
   if (!decisionFile) return agent;

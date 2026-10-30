@@ -524,10 +524,11 @@ export function featureDelivery(config: FeatureDeliveryConfig): Job {
   const briefCheck = readOnly(briefChecker, 'brief', (ctx) => [
     'Before anything is built, check the brief below against this repository. The brief makes claims about the code; say whether they hold. Change nothing.',
     `=== the brief ===\n${briefText()}`,
+    ...houseRules,
     ...(carriedNote(ctx) === undefined ? [] : [`=== the earlier run ===\n${carriedNote(ctx)}`]),
     [
       'List every finding you can establish; do not stop at the first. Each finding says what is false or cannot be checked, and where you looked.',
-      'Block only on: a wrong goal; a false claim about the repository or its base; a check the brief requires that cannot fail.',
+      `Block only on: a wrong goal; a false claim about the repository or its base; a check the brief requires that cannot fail${houseRules.length === 0 ? '' : '; a house rule that says the brief check blocks it'}.`,
       'Never block because the tree does not yet do what the brief asks the build to do: that is the build\'s work.',
       'A note about the worktree\'s state that has gone stale, on a resumed or relaunched run, is a warning the builder sees, not a block.',
     ].join('\n'),
@@ -604,7 +605,7 @@ export function featureDelivery(config: FeatureDeliveryConfig): Job {
       cwd: config.workspace,
       timeoutMs: buildMs,
       ...stall,
-      prompt: proofSendBackPrompt(sentBack, text),
+      prompt: [proofSendBackPrompt(sentBack, text), ...houseRules].join('\n\n'),
     })({ ...ctx, lastReview: undefined });
   };
 
@@ -684,6 +685,7 @@ export function featureDelivery(config: FeatureDeliveryConfig): Job {
     `=== proofs accepted earlier that still stand; do not ask for them ===\n${proofStanding.standing.map((proof) => `- ${proof.item}`).join('\n') || '(none)'}`,
     ...(proofStanding.changed.length > 0 ? [`=== proofs accepted earlier whose files changed since; ask for them again unless the report pastes them ===\n${proofStanding.changed.map((proof) => `- ${proof.item}`).join('\n')}`] : []),
     `=== the brief ===\n${briefText()}`,
+    ...houseRules,
     `=== the builder's report ===\n${String(ctx.needs?.report?.data ?? ctx.needs?.report?.summary ?? '(none)')}`,
     'For each proof the report pastes that you accept, name the brief item it answers and the files it exercises: the code it tests or measures, its test file, and the script it ran.',
     'Reply as one JSON object and nothing after it: {"status":"pass"|"revise","summary":"...","accepted":[{"item":"the brief item, quoted","files":["path"]}],"findings":[{"severity":"block","evidence":"the item, quoted, and the proof it wants"}]}. Pass when every proof is pasted, proven by a run check, or accepted and still standing; revise with one finding per missing proof.',
@@ -731,7 +733,7 @@ export function featureDelivery(config: FeatureDeliveryConfig): Job {
   });
 
   // The stages before the build, when their seats and files are given.
-  const input: TeamInput = { brief, workspace: config.workspace, files: config.files ?? [], test: { command: process.execPath, args: [] } };
+  const input: TeamInput = { brief, workspace: config.workspace, files: config.files ?? [], test: { command: process.execPath, args: [] }, houseRules: config.houseRules };
   const before: Record<string, DagNode> = {};
   let last = 'brief';
   if (config.analyse !== undefined) {

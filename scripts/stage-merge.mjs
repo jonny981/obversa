@@ -183,6 +183,7 @@ export const stageBranches = {
   F244: 'feat/judge-by-the-guide',
   F249: 'fix/release-peer-major',
   F235: 'fix/grok-login-expiry',
+  F250: 'fix/brief-check-house-rules',
   F185: 'feat/records-for-improvement',
   F178: 'release/0.2.4',
   F181: 'release/0.2.5',

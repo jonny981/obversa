@@ -102,12 +102,14 @@ passed, reviewed change. It runs these steps in order:
    the seat that answered. With no candidate left, the run pauses and names
    the seat.
 2. **Brief check.** The first reviewer reads the brief against the
-   repository and lists every finding it can establish, in one pass. It
-   blocks only on a wrong goal, a false claim about the repository or its
-   base, or a check that cannot fail. It never blocks because the tree does
-   not yet do what the brief asks the build to do. A block pauses the run.
-   With `briefPath`, a resume reads the brief file again, so a fixed brief
-   needs no relaunch. A warning goes to the builder.
+   repository and lists every finding it can establish, in one pass. With
+   `houseRules`, it reads the house rules too. It blocks only on a wrong
+   goal, a false claim about the repository or its base, a check that
+   cannot fail, or a house rule that says the brief check blocks it. It
+   never blocks because the tree does not yet do what the brief asks the
+   build to do. A block pauses the run. With `briefPath`, a resume reads
+   the brief file again, so a fixed brief needs no relaunch. A warning
+   goes to the builder.
 3. **Build.** The `implement` seat builds the change. Its report ends with a
    commit message in a fenced block marked `commit`.
 4. **Report.** The builder's report goes to the team.
@@ -187,6 +189,7 @@ Both are re-exported from `@obversa/runtime/workflow-support`.
 | `workspace` | `string` | required | The directory the team writes in. |
 | `files` | `readonly string[]` | required | The files the brief expects written. |
 | `test` | `TestCommand` | required | `{ command, args, timeoutMs? }`, run after the writer. |
+| `houseRules` | `string` | none | Rules every seat reads. |
 
 ### `FeatureDeliveryConfig`
 
