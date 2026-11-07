@@ -66,12 +66,14 @@ export type {
  *   above it. A wrong send-back costs a round; a missed real finding costs
  *   more, so the bar sits inside the guide's confirm band.
  * - `sendBackBlocking`: a finding scored `blocking` goes back at or above
- *   this lower bar, because a missed blocker is the worst miss. It sits at
- *   the hand-off floor: no lower answer could route the finding anyway.
+ *   this lower bar, because a missed blocker is the worst miss.
  * - `stop`: a stop answer that would end the run — ship or fail — needs it.
  *   Below it the run pauses for a person instead.
- * - `handOff`: the floor. Any answer that would route the run below it, a
- *   `none_applies`, and a missing or unreadable confidence go to a person.
+ * - `handOff`: the floor. A round answer that would route the run below it,
+ *   a `none_applies`, and a missing or unreadable confidence on a round
+ *   answer go to a person. A finding answer below it settles nothing on
+ *   its own: the finding goes back with a round that is going back anyway,
+ *   and is held back when none is.
  */
 export const JUDGE_CONFIDENCE = Object.freeze({
   sendBack: 0.7,
@@ -129,15 +131,16 @@ export function stopQuestions(what = 'the draft'): JudgeQuestions {
  * asks the judge to call each finding as well: it scores each one from
  * cosmetic to blocking, and the runtime sends back only a finding scored
  * impactful or blocking whose answer clears the send-back bar for its level
- * (see `JUDGE_CONFIDENCE`); a finding whose answer sits under the hand-off
- * floor goes to a person instead, whatever its level. It
+ * (see `JUDGE_CONFIDENCE`), plus every finding whose answer sits under the
+ * hand-off floor once any finding is going back: the unsure call rides the
+ * send-back with its level, confidence and reason on it, so the record
+ * says it went back unsure. It
  * defaults to true with the default questions and to false with a caller's
  * own.
  * A finding the judge holds back never goes back to the builder; it is
  * collected on `minorFindings`, with its level and confidence, for a person
- * to read before the work lands. A `pending` one — under the hand-off
- * floor — waits on the person the run pauses for: their call sends it back
- * with its evidence or keeps it on that list. On any pause the person's
+ * to read before the work lands. An unsure one joins that list when no
+ * finding goes back. On any pause the person's
  * `"hold"` also keeps back a finding the judge acted on, and an approval
  * holds every acted finding they do not name.
  * A `product_decision` the judge asks after the last review the cap allows
@@ -188,8 +191,10 @@ const LEVEL_REASON: Record<FindingLevel, string> = {
  * scale serves every round: `impactful` or `blocking` at or over the
  * send-back bar for its level goes back to the builder, and every other
  * call joins `minorFindings`, the list a person reads before the work
- * lands. The finding's entry under `how.findings` carries the brief lines
- * it touches and its diff hunk.
+ * lands — except a call under the hand-off floor, which settles nothing on
+ * its own: it goes back with a round that is going back anyway, and joins
+ * `minorFindings` only when none is. The finding's entry under
+ * `how.findings` carries the brief lines it touches and its diff hunk.
  */
 export function findingQuestions(findings: readonly FeedbackFinding[]): JudgeQuestions {
   const questions: Record<string, JudgeQuestion> = {};
@@ -340,8 +345,9 @@ export function judgeState(input: {
  * the round's findings, the lines it changed, the tree the judge read, and
  * what the judge decided. A person's answer to a product decision is
  * recorded as the judge's request for it, with the calls the answer
- * settled — a `pending` finding carries the person's `act` or `hold`, so
- * the count of findings acted on this round is read off what went back.
+ * settled — a saved `pending` finding carries the person's `act` or
+ * `hold`, so the count of findings acted on this round is read off what
+ * went back.
  */
 export function judgeRound(
   state: JudgeState,
@@ -943,12 +949,11 @@ export function judgeDecision(
  * decisions attached: a pause the round needs is never traded for another
  * build, however sure the findings' scores are. Otherwise a finding scored
  * `impactful` or `blocking` at or over the send-back bar for its level runs
- * another round — but only while every answered finding's answer clears the
- * hand-off floor: an answer under it can route the finding neither back nor
- * to the held list, so it is marked `pending` and the round pauses for a
- * person with the judge's calls attached; their call sends each pending
- * finding back with its evidence or keeps it on the held list. When no
- * finding goes back, the round
+ * another round. An answer under the hand-off floor settles nothing on its
+ * own, so it rides whatever the rest of the round does: it goes back with
+ * the findings the judge acts on, carrying its level, confidence and
+ * reason to say the call was unsure, and it is held back like any other
+ * finding when no finding goes back. When no finding goes back, the round
  * answer decides how the work stands: a gated `holds`, `over_polishing` or
  * `not_converging` ships it as a pass with the held findings attached — a
  * run never ends short while no finding the judge acts on is open — and a
@@ -957,9 +962,8 @@ export function judgeDecision(
  *
  * Every held-back finding of the round is collected on `minorFindings`,
  * with its level and confidence, for a person to read before the work
- * lands; a `pending` one is not collected — it is not a settled call. The
- * judge's own answer routes the finding: the reviewer's severity tag only
- * informs what it reads.
+ * lands. The judge's own answer routes the finding: the reviewer's severity
+ * tag only informs what it reads.
  *
  * `askJudge` checks every asked question is answered before it decides, so
  * a call through it never reaches the fallbacks here. They stand for a
@@ -976,27 +980,34 @@ function decideEachFinding(
   questions?: JudgeQuestions,
   judged?: { readonly findings: readonly FeedbackFinding[]; readonly round: number },
 ): JudgeDecision {
-  const call = (id: string) => scoreCall(questions?.[id], answers[id]);
-  const findings = findingIds.map((id): FindingDecision => {
-    const scored = call(id);
+  const calls = findingIds.map((id) => scoreCall(questions?.[id], answers[id]));
+  // The level decides whether the finding can go back at all; the bar it
+  // must clear is the send-back one for its level. `sure` counts the calls
+  // the judge could make on its own answers alone.
+  const sure = (index: number): boolean => {
+    const scored = calls[index];
+    if (scored === undefined) return false;
+    const bar = scored.level === 'blocking' ? JUDGE_CONFIDENCE.sendBackBlocking : JUDGE_CONFIDENCE.sendBack;
+    return (scored.level === 'impactful' || scored.level === 'blocking') && scored.confidence >= bar;
+  };
+  const acting = calls.reduce<number>((count, _scored, index) => count + (sure(index) ? 1 : 0), 0);
+  const findings = findingIds.map((id, index): FindingDecision => {
+    const scored = calls[index];
     if (scored === undefined) {
       return { id, decision: round.again ? 'act' : 'hold', reason: `no answer for this finding; ${round.reason}` };
     }
     const { level, confidence } = scored;
-    // The level decides whether the finding can go back at all; the bar it
-    // must clear is the send-back one for its level. An answer under the
-    // hand-off floor settles nothing: the call is `pending`, routed neither
-    // back nor onto the held list.
-    const bar = level === 'blocking' ? JUDGE_CONFIDENCE.sendBackBlocking : JUDGE_CONFIDENCE.sendBack;
-    const acts = (level === 'impactful' || level === 'blocking') && confidence >= bar;
+    // An answer under the hand-off floor settles nothing on its own, but it
+    // costs no extra build to carry: it goes back with a round the judge is
+    // sending back anyway — its level, confidence and reason still on it to
+    // say the call was unsure — and is held back like any other finding
+    // when nothing is going back.
+    const decision = sure(index) || (confidence < JUDGE_CONFIDENCE.handOff && acting > 0) ? 'act' : 'hold';
     const reason = typeof answers[id]?.reason === 'string' && answers[id]!.reason!.trim() ? answers[id]!.reason!.trim() : LEVEL_REASON[level];
-    return { id, decision: acts ? 'act' : confidence < JUDGE_CONFIDENCE.handOff ? 'pending' : 'hold', level, confidence, reason };
+    return { id, decision, level, confidence, reason };
   });
-  const answered = findingIds.some((id) => call(id) !== undefined);
   // A judge that answered no finding decided nothing about them: every finding stands, as with whole-round judging.
-  if (!answered) return round;
-  // The collected list keeps only settled calls: a `pending` finding is not
-  // held, it is waiting on a person.
+  if (!calls.some((scored) => scored !== undefined)) return round;
   const collected = findings.flatMap((item, index) =>
     item.decision === 'hold' && judged?.findings[index] !== undefined
       ? [{
@@ -1007,31 +1018,11 @@ function decideEachFinding(
       : []);
   const minorFindings = collected.length ? { minorFindings: collected } : {};
   const acted = findings.filter((finding) => finding.decision === 'act').length;
-  const pending = findings.filter((finding) => finding.decision === 'pending');
-  const rule = `findings: ${acted} act, ${findings.length - acted - pending.length} held${pending.length ? `, ${pending.length} pending` : ''}`;
+  const rule = `findings: ${acted} act, ${findings.length - acted} held`;
   // A person being asked anyway still gets the judge's calls on each
-  // finding, and pending findings ride the pause whatever raised it — the
-  // person's call routes each of them; the pause stands over any acted
-  // finding.
+  // finding; the pause stands over any acted finding.
   if (round.stop === 'product_decision' || round.stop === 'person') {
-    return pending.length
-      ? { ...round, ask: `${round.ask} ${pendingAsk(pending.map(({ id }) => id))}`, findings, ...minorFindings }
-      : { ...round, findings, ...minorFindings };
-  }
-  // A pending finding routes neither way, so a person decides the round,
-  // with the judge's calls attached; the person's call sends each one back
-  // with its evidence or keeps it on the held list.
-  if (pending.length) {
-    const ids = pending.map((finding) => finding.id).join(', ');
-    return {
-      ...handOff(
-        `the judge's answers for ${ids} came under the ${JUDGE_CONFIDENCE.handOff} hand-off bar`,
-        rule,
-        `The judge's answers for ${ids} came under the bar that lets them route a finding. ${pendingAsk(pending.map(({ id }) => id))}`,
-      ),
-      findings,
-      ...minorFindings,
-    };
+    return { ...round, findings, ...minorFindings };
   }
   if (acted) return { again: true, reason: `the judge acts on ${acted} of ${findings.length} findings`, rule, findings, ...minorFindings };
   // Nothing goes back: a gated ending lets the work stand. One that would
@@ -1066,16 +1057,6 @@ function decideEachFinding(
 /** A stop that hands the round to a person: the answer could not be trusted to route it. */
 function handOff(reason: string, rule: string, ask: string): JudgeDecision {
   return { again: false, stop: 'person', reason, rule, ask };
-}
-
-/**
- * What a pause asks about each pending finding: the person's call routes
- * it — `"act"` sends it back to the builder, `"hold"` or no call keeps it
- * back — and with nothing sent back the work stands rather than buying a
- * build.
- */
-function pendingAsk(ids: readonly string[]): string {
-  return `For each finding the judge could not route — ${ids.join(', ')} — name "act" or "hold" under its id in feedback.findings; a finding no call names is held. If no finding goes back, the work stands.`;
 }
 
 function roundDecision(answers: Readonly<Record<string, JudgeAnswer>>): JudgeDecision {
@@ -1445,9 +1426,10 @@ export async function consultJudge(
  * The call a person's answer settles on each finding of the round:
  * `feedback.findings` may name `"act"` (it goes back to the builder) or
  * `"hold"` (it joins `minorFindings`) per finding id, and that call wins
- * over the judge's. A pending finding the answer does not name is held:
- * the person was asked about it by id, so silence never sends unsure work
- * back. A finding the judge acted on that the answer does not name goes
+ * over the judge's. A pending finding a saved question still holds —
+ * recorded before unsure calls routed with the round — is held when the
+ * answer does not name it: the person was asked about it by id, so silence
+ * never sends unsure work back. A finding the judge acted on that the answer does not name goes
  * back with the answer, unless the answer is an approval
  * (`decision: "approved"`), which holds it. The judge's level, confidence
  * and reason stay on the resolved call, so the round's record still says
@@ -1510,10 +1492,10 @@ export function minorFindings(skipped: readonly SkippedFinding[]): FeedbackFindi
  * What the judge's decisions on a round's findings send on: the findings
  * acted on, each carrying its reason, and the skipped list grown by this
  * round's held-back findings. A finding the judge acted on is the judge's
- * own call; one a person sent back over the judge's unsure answer keeps
- * the level and confidence of that call — an acted call under the
- * hand-off floor could only have got there by a person. A round the judge
- * did not decide
+ * own call; one sent back unsure keeps the level and confidence of that
+ * call — an acted call under the hand-off floor went back unsure, by the
+ * round's own routing or a person's call on a saved question. A round the
+ * judge did not decide
  * each finding of sends every finding and holds none back.
  */
 export function judgedFindings(

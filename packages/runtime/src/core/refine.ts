@@ -467,9 +467,9 @@ export function judgedReview(work: RefinedWork, cfgJudge: Judge, review: Job, ru
       const answered = judgedFindings(findings, { findings: result.state.decided }, result.state.skipped ?? [], state.round);
       shared.skipped = answered.skipped;
       // The person's call can let the work stand — an approval, "hold all",
-      // or an answer that leaves only pending findings unnamed: with
-      // nothing acted on and no changes requested, the run ends as a pass,
-      // and what they held lands on `minorFindings`.
+      // or an answer that leaves only findings a saved question still calls
+      // pending unnamed: with nothing acted on and no changes requested,
+      // the run ends as a pass, and what they held lands on `minorFindings`.
       if (answered.acted.length === 0 && result.answer.decision !== 'changes-requested') {
         const minors = minorFindings(answered.skipped);
         return {

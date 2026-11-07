@@ -9,13 +9,16 @@ can't know how many rounds it will need.
 
 The reviewer says what needs fixing. The judge reads each note and the
 history of revisions, then scores each one from cosmetic to blocking,
-with a confidence on each call. A note goes back to the writer only when
-its score is impactful or blocking and its confidence clears the bar for
-its level. When at least one is sent back, the workflow carries those
-notes to the writer and runs the next round. When none is, the work
-stands unless the judge's stop answer ends the run in a fail, or an
-answer too weak to route it, or `none_applies`, pauses the run for a
-person.
+with a confidence on each call. A note goes back to the writer when its
+score is impactful or blocking and its confidence clears the bar for its
+level. A note whose confidence sits under the hand-off floor goes back
+too when at least one other note is going back, marked unsure with its
+level, confidence and reason: the round spends no extra build on it, and
+asks no person for it. When at least one is sent back, the workflow
+carries those notes to the writer and runs the next round. When none is,
+the work stands unless the judge's stop answer ends the run in a fail,
+or an answer too weak to route it, or `none_applies`, pauses the run for
+a person.
 With no cap, a run ends when the judge stops it or the review passes. You
 can add a cap as a backstop. Put a person's decision where the process
 needs one; this example asks before publication.
@@ -77,7 +80,8 @@ through because the rest of the list was trivial.
 
 - **The judge sends at least one finding back.** The page goes back:
   the writer gets only the findings the judge sent back, each with
-  the judge's reason.
+  the judge's reason. A finding sent back unsure also carries the level
+  it scored and the confidence its answer carried.
 - **The judge holds every finding back.** A confident `holds`,
   `over_polishing`, `not_converging` or `continue` stands the page as a
   pass, with the held findings attached, and an answer too weak to route
@@ -98,21 +102,29 @@ Every route the judge's answer drives is gated on its confidence, with the
 bars in `JUDGE_CONFIDENCE`. A finding scored impactful goes back at or
 above the send-back bar (0.7); a blocking one clears a lower bar (0.6),
 because a missed blocker is the worst miss. A stop answer that would end
-the run needs the stop bar (0.8). Anything under the hand-off bar (0.6),
-a `none_applies` choice, and a reply that cannot be read go to a person.
-The floor covers a finding's answer too: under it the call cannot be
-trusted to route the finding either way, back or onto the held list, so
-the finding is marked `pending` instead of held, and the run pauses with
-the question and the judge's answer attached, never spending another
-build on a call it could not trust. The person's call then decides each
-finding on its own. An `"act"` named under the finding's id in
-`feedback.findings` sends it back to the writer with its evidence. A
-`"hold"` keeps it back on `minorFindings`, even when the judge acted on
-it. A pending finding the answer does not name is held. A finding the
-judge acted on that the answer does not name goes back, unless the answer
-approves the work (`decision: "approved"`), which holds it. When the call
-sends no finding back, the run ends there as a pass and buys no extra
-build. The
+the run needs the stop bar (0.8). A round answer under the hand-off bar
+(0.6), a `none_applies` choice, and a reply that cannot be read go to a
+person.
+The floor covers a finding's answer too: under it the call is unsure,
+never confident enough to route the finding on its own. It never pauses
+the round for that alone, because it costs no extra build. The finding
+goes back with the findings the judge acts on, marked unsure with its
+level, confidence and reason so the writer knows how much weight to give
+it, and the record says it went back unsure. When nothing is going back,
+the unsure finding is held like any other, onto `minorFindings` for the
+person who reads the run before the work lands.
+When a pause the round needed anyway, a product decision, a hand-off
+the round answer raised, or a spent cap asking, carries the judge's
+calls on the findings, the person's answer settles each one. An `"act"`
+named under the finding's id in `feedback.findings` sends it back to the
+writer with its evidence. A `"hold"` keeps it back on `minorFindings`,
+even when the judge acted on it. A finding the answer does not name
+keeps the judge's call: an acted one goes back with the answer, a held
+one stays held, unless the answer approves the work
+(`decision: "approved"`), which holds the acted ones too. A `pending`
+finding a question saved before this routing still carries is held when
+the answer does not name it. When the call sends no finding back, the
+run ends there as a pass and buys no extra build. The
 values are starting bars, tuned against labelled findings with
 `tools/calibrate-judge.mjs`.
 
@@ -293,10 +305,12 @@ judgement each:
 The answers about each finding decide the route, each gated on its
 confidence by the bars in `JUDGE_CONFIDENCE`. A finding the judge scores
 impactful at or over the send-back bar, or blocking at or over its lower
-one, is recorded `act`, and another round runs. Every other finding is
+one, is recorded `act`, and another round runs. An answer under the
+hand-off floor is unsure: it is recorded `act` too when at least one
+finding is going back, still carrying its level, confidence and reason,
+and `hold` when none is. Every other finding is
 recorded `hold` with its level and confidence and joins the collected
-list, or `pending` when its answer sits under the hand-off floor: no
-settled call, and it never joins the collected list. When
+list. When
 every finding is held back, the work stands: a confident `holds`,
 `over_polishing` or `not_converging` ships it as a pass with the
 collected findings on the outcome as `minorFindings`, a `continue` that

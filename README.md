@@ -112,9 +112,12 @@ stops them or the review passes. Jev answers one question per finding, a
 product decision first, and `stop_reason`, a `choice` of how the run
 should end, `none_applies` included. Jev decides a blocking finding too.
 Each answer is gated on the
-confidence it reports: a finding goes back only at or over the send-back
+confidence it reports: a finding goes back at or over the send-back
 bar for its level, a stop that would end the run needs the stop bar, and
-a `none_applies` or an answer under the hand-off bar goes to a person. To
+a `none_applies` or a round answer under the hand-off bar goes to a
+person. A finding answer under that bar settles nothing on its own: it
+goes back with findings that are going back anyway, marked unsure, and
+is held back onto `minorFindings` when none are. To
 bound the returns as well, pass
 `judge(judgeSeat, { cap: 4 })`: it allows four returns to the writer, and
 Jev reads the review of the last one too. A `product_decision` Jev asks

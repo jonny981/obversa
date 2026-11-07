@@ -273,38 +273,49 @@ describe('judgeDecision for each finding', () => {
     expect(decision.minorFindings).toMatchObject([{ evidence: 'one', judgeLevel: 'impactful', judgeConfidence: 0.6 }]);
   });
 
-  it('hands a finding answer under the hand-off floor to a person, instead of routing it either way', () => {
+  it('an unsure finding goes back with a round that is going back anyway, and is held when nothing goes back', () => {
     const findings = [
       { reviewer: 'r', severity: 'should-fix' as const, evidence: 'one' },
       { reviewer: 'r', severity: 'should-fix' as const, evidence: 'two' },
     ];
     const judged = { findings, round: 2 };
-    // A blocking score under the floor: its level's lower bar cannot save
-    // it, and it cannot sit on the held list either — a person decides.
+    // A blocking score under the floor cannot route on its own — but the
+    // round goes back anyway on the sure call, so it rides with it, its
+    // level and confidence still on it to say the call was unsure.
     const decision = judgeDecision({
+      stop_reason: { choice: 'continue', confidence: 0.95 },
+      'finding-a': { score: 3, confidence: 0.55 },
+      'finding-b': { score: 2, confidence: 0.95 },
+    }, ids, scores, judged);
+    expect(decision).toMatchObject({ again: true, rule: 'findings: 2 act, 0 held' });
+    expect(decision.findings).toMatchObject([
+      { id: 'finding-a', decision: 'act', level: 'blocking', confidence: 0.55 },
+      { id: 'finding-b', decision: 'act', level: 'impactful', confidence: 0.95 },
+    ]);
+    // Nothing going back: the same unsure answer is held like any settled
+    // hold, and the round ends by the stop rules — no person is asked.
+    const held = judgeDecision({
       stop_reason: { choice: 'continue', confidence: 0.95 },
       'finding-a': { score: 3, confidence: 0.55 },
       'finding-b': { score: 0, confidence: 0.95 },
     }, ids, scores, judged);
-    expect(decision).toMatchObject({ again: false, stop: 'person', rule: 'findings: 0 act, 1 held, 1 pending' });
-    expect(decision.findings).toMatchObject([
-      { id: 'finding-a', decision: 'pending', level: 'blocking', confidence: 0.55 },
-      { id: 'finding-b', decision: 'hold', level: 'cosmetic', confidence: 0.95 },
+    expect(held).toMatchObject({ again: false, stop: 'ship', rule: 'findings: 0 act, 2 held' });
+    expect(held.minorFindings).toMatchObject([
+      { evidence: 'one', judgeLevel: 'blocking', judgeConfidence: 0.55 },
+      { evidence: 'two', judgeLevel: 'cosmetic', judgeConfidence: 0.95 },
     ]);
-    expect(decision.ask).toContain('finding-a');
-    // A missing confidence reads 0: under the floor, so no held route either.
+    // A missing confidence reads 0: unsure, so it is held the same way.
     expect(judgeDecision({
       stop_reason: { choice: 'holds', confidence: 0.95 },
       'finding-a': { score: 2 },
       'finding-b': { score: 0, confidence: 0.95 },
-    }, ids, scores, judged)).toMatchObject({ again: false, stop: 'person' });
-    // The same under-floor answer pauses for a person even when another
-    // finding's answer is sure enough to send back on its own.
-    expect(judgeDecision({
-      stop_reason: { choice: 'continue', confidence: 0.95 },
-      'finding-a': { score: 2, confidence: 0.9 },
-      'finding-b': { score: 0, confidence: 0.3 },
-    }, ids, scores, judged)).toMatchObject({ again: false, stop: 'person', rule: 'findings: 1 act, 0 held, 1 pending' });
+    }, ids, scores, judged)).toMatchObject({
+      again: false, stop: 'ship',
+      findings: [
+        { id: 'finding-a', decision: 'hold', level: 'impactful', confidence: 0 },
+        { id: 'finding-b', decision: 'hold', level: 'cosmetic', confidence: 0.95 },
+      ],
+    });
   });
 
   it('keeps a required pause for a person over an acted finding: a hand-off is never traded for another round', () => {

@@ -1,11 +1,13 @@
 /**
  * The judge gates every action on the answer's confidence: a finding goes
- * back to the builder only at or above the send-back bar for its level, a
- * stop that would end the run only at or above the stop bar, and any answer
- * under the hand-off bar — or `none_applies` — goes to a person. Every
- * per-finding question is a `score` over ordered levels, and the runtime
- * computes the round counts and repeat findings itself; no question asks
- * the model to count or compare.
+ * back to the builder at or above the send-back bar for its level, a stop
+ * that would end the run only at or above the stop bar, and a round answer
+ * under the hand-off bar — or `none_applies` — goes to a person. A finding
+ * answer under the hand-off bar settles nothing on its own: it goes back
+ * with a round that is going back anyway, and is held back when none is.
+ * Every per-finding question is a `score` over ordered levels, and the
+ * runtime computes the round counts and repeat findings itself; no
+ * question asks the model to count or compare.
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,6 +29,7 @@ import {
   stopQuestions,
 } from '../src/core/judge.ts';
 import { workTree } from '../src/core/git.ts';
+import type { FindingDecision } from '../src/core/types.ts';
 import { MockEngine } from '../src/testing.ts';
 import { cleanupRepos, tmpRepo, write } from './git-helpers.ts';
 
@@ -110,44 +113,57 @@ describe('the per-finding confidence gate', () => {
     }
   });
 
-  it('hands a finding whose answer carries no confidence to a person: missing is uncertain', () => {
+  it('holds a finding whose answer carries no confidence: missing is uncertain', () => {
     const decision = call({ score: 3, reason: 'data loss' });
-    expect(decision).toMatchObject({ again: false, stop: 'person' });
-    expect(decision.findings?.[0]).toMatchObject({ decision: 'pending', level: 'blocking', confidence: 0 });
+    // Nothing is going back, so the unsure call is held — and the confident
+    // continue ends the round by the stop rules, with no person asked.
+    expect(decision).toMatchObject({ again: false, stop: 'ship' });
+    expect(decision.findings?.[0]).toMatchObject({ decision: 'hold', level: 'blocking', confidence: 0 });
+    expect(decision.minorFindings).toEqual([
+      expect.objectContaining({ evidence: FINDING.evidence, judgeLevel: 'blocking', judgeConfidence: 0 }),
+    ]);
   });
 
-  it('marks a blocking score under the hand-off bar pending: no level\'s bar goes under the floor', () => {
+  it('holds a blocking score under the hand-off bar: an unsure blocker is still a blocker a person reads', () => {
     const decision = call({ score: 3, confidence: JUDGE_CONFIDENCE.handOff - 0.01, reason: 'data loss' });
-    expect(decision).toMatchObject({ again: false, stop: 'person' });
-    expect(decision.findings?.[0]).toMatchObject({ decision: 'pending', level: 'blocking' });
-    // Not a settled hold: the collected list keeps only calls the judge could make.
-    expect(decision.minorFindings).toBeUndefined();
+    expect(decision).toMatchObject({ again: false, stop: 'ship' });
+    expect(decision.findings?.[0]).toMatchObject({ decision: 'hold', level: 'blocking' });
+    expect(decision.minorFindings).toEqual([
+      expect.objectContaining({ evidence: FINDING.evidence, judgeLevel: 'blocking', judgeConfidence: JUDGE_CONFIDENCE.handOff - 0.01, judgeReason: 'data loss' }),
+    ]);
   });
 
-  it('sends a pending finding back on the person\'s act, holds it on their hold — never onto the held list unsettled', () => {
-    const decided = call({ score: 3, confidence: JUDGE_CONFIDENCE.handOff - 0.01 });
-    const pending = decided.findings![0]!;
-    expect(pending.decision).toBe('pending');
-    // The person sent it back: the unsure call's level and confidence ride it.
+  it('sends an unsure finding back with the finding the judge acts on, its level and confidence still on it', () => {
+    const mixed = judgeDecision({
+      ...CONFIDENT_ROUND,
+      'finding-1': { score: 3, confidence: JUDGE_CONFIDENCE.handOff - 0.01, reason: 'data loss' },
+      'finding-2': { score: 2, confidence: 0.95, reason: 'a reader misses the audience' },
+    }, ['finding-1', 'finding-2'], findingQuestions([FINDING, TASTE]), { findings: [FINDING, TASTE], round: 2 });
+    expect(mixed).toMatchObject({ again: true, rule: 'findings: 2 act, 0 held' });
+    const split = judgedFindings([FINDING, TASTE], { findings: mixed.findings! }, [], 2);
+    // Both reach the builder; the unsure call carries its level and
+    // confidence to say it went back unsure.
+    expect(split.acted).toMatchObject([
+      { evidence: FINDING.evidence, id: 'finding-1', judgeReason: 'data loss', judgeLevel: 'blocking', judgeConfidence: JUDGE_CONFIDENCE.handOff - 0.01 },
+      { evidence: TASTE.evidence, id: 'finding-2', judgeReason: 'a reader misses the audience' },
+    ]);
+    expect(split.acted[1]).not.toHaveProperty('judgeLevel');
+    expect(split.skipped).toEqual([]);
+  });
+
+  it('still reads a pending call a saved question can hold: the person\'s act sends it back, their hold settles it', () => {
+    // Saved checkpoints and `refine:judge` events written before unsure
+    // calls routed with the round can still hold `pending`; a person's call
+    // settles each one the same way it always did.
+    const pending: FindingDecision = { id: 'finding-1', decision: 'pending', level: 'blocking', confidence: JUDGE_CONFIDENCE.handOff - 0.01, reason: 'data loss' };
     const routed = judgedFindings([FINDING], { findings: [{ ...pending, decision: 'act' }] }, [], 2);
     expect(routed.acted).toMatchObject([
       { evidence: FINDING.evidence, id: 'finding-1', judgeLevel: 'blocking', judgeConfidence: JUDGE_CONFIDENCE.handOff - 0.01 },
     ]);
     expect(routed.skipped).toEqual([]);
-    // The person held it: it settles on the held list like any held finding.
     const held = judgedFindings([FINDING], { findings: [{ ...pending, decision: 'hold' }] }, [], 2);
     expect(held.acted).toEqual([]);
     expect(held.skipped).toMatchObject([{ finding: FINDING, level: 'blocking', confidence: JUDGE_CONFIDENCE.handOff - 0.01 }]);
-    // A settled hold in the same round still settles.
-    const mixed = judgeDecision({
-      ...CONFIDENT_ROUND,
-      'finding-1': { score: 3, confidence: JUDGE_CONFIDENCE.handOff - 0.01 },
-      'finding-2': { score: 0, confidence: 0.95, reason: 'a nicety' },
-    }, ['finding-1', 'finding-2'], findingQuestions([FINDING, TASTE]), { findings: [FINDING, TASTE], round: 2 });
-    const split = judgedFindings([FINDING, TASTE], { findings: mixed.findings!.map((item) =>
-      item.decision === 'pending' ? { ...item, decision: 'act' as const } : item) }, [], 2);
-    expect(split.acted.map((finding) => finding.evidence)).toEqual([FINDING.evidence]);
-    expect(split.skipped).toMatchObject([{ finding: TASTE, level: 'cosmetic' }]);
   });
 
   it('hands a continue under the stop bar to a person when no finding goes back', () => {
@@ -570,42 +586,51 @@ describe('a run under the gate', () => {
     expect(calls.writer).toHaveLength(1);
   });
 
-  it('sends a pending finding back on the person\'s "act" call: its evidence reaches the builder, and it never joins the held list', async () => {
+  it('sends an unsure finding back with the finding the judge acts on: both reach the builder, and no person is asked', async () => {
     const { job, calls } = judged({
       reviewerReplies: [
-        { status: 'revise', summary: 'one finding', findings: [FINDING] },
-        { status: 'revise', summary: 'a taste note', findings: [TASTE] },
+        { status: 'revise', summary: 'two findings', findings: [FINDING, TASTE] },
+        { status: 'pass', summary: 'fine' },
       ],
       judgeReply: (prompt) => {
-        const { state, questions } = JSON.parse(prompt) as { state: { when: { round: number } }; questions: JudgeQuestions };
+        const { questions } = JSON.parse(prompt) as { questions: JudgeQuestions };
         const answers: Record<string, unknown> = { ...CONFIDENT_ROUND };
         for (const key of Object.keys(questions)) {
           if (!key.startsWith('finding-')) continue;
-          // Round 1's finding is blocking under the hand-off floor: pending.
-          answers[key] = state.when.round === 1
-            ? { score: 3, confidence: JUDGE_CONFIDENCE.handOff - 0.01, reason: 'data loss' }
-            : { score: 0, confidence: 0.95, reason: 'a nicety' };
+          // finding-1 is confidently blocking; finding-2's answer sits under
+          // the hand-off floor, so it rides the send-back, unsure.
+          answers[key] = key === 'finding-1'
+            ? { score: 3, confidence: 0.95, reason: 'data loss' }
+            : { score: 3, confidence: JUDGE_CONFIDENCE.handOff - 0.01, reason: 'the README line no longer matches' };
         }
         return answers;
       },
-      interaction: {
-        id: 'hand-off',
-        responseSchema: {},
-        answer: async () => ({ feedback: { findings: { 'finding-1': 'act' } }, prompt: 'Send finding-1 back.' }),
-      },
     });
-    const result = await run(job, { cwd: workDir(), onEvent: () => {} });
+    const events: LoopEvent[] = [];
+    const result = await run(job, { cwd: workDir(), onEvent: (event) => events.push(event) });
     expect(result.outcome.status).toBe('pass');
-    // The person's "act" went to the builder with the pending finding's evidence.
     expect(calls.writer).toHaveLength(2);
-    expect(calls.writer[1]).toContain('Send finding-1 back.');
+    // Both findings reach the builder; the unsure one reads as unsure, with
+    // its evidence, level, confidence and reason.
     expect(calls.writer[1]).toContain(FINDING.evidence);
-    // It never settled as a hold: the next round's judge packet names no skipped finding.
-    const next = JSON.parse(calls.judge[2]!) as { state: { when: { skipped?: unknown[] } } };
-    expect(next.state.when.skipped).toBeUndefined();
+    expect(calls.writer[1]).toContain(TASTE.evidence);
+    expect(calls.writer[1]).toContain('the README line no longer matches');
+    expect(calls.writer[1]).toContain('unsure');
+    expect(calls.writer[1]).toContain((JUDGE_CONFIDENCE.handOff - 0.01).toFixed(2));
+    // The event and the rule carry the same count of findings sent back.
+    const judgedEvent = events.find((e): e is Extract<LoopEvent, { kind: 'refine:judge' }> => e.kind === 'refine:judge');
+    expect(judgedEvent).toMatchObject({ route: 'again', rule: 'findings: 2 act, 0 held' });
+    expect(judgedEvent?.findings).toEqual([
+      { id: 'finding-1', decision: 'act', level: 'blocking', confidence: 0.95, reason: 'data loss' },
+      { id: 'finding-2', decision: 'act', level: 'blocking', confidence: JUDGE_CONFIDENCE.handOff - 0.01, reason: 'the README line no longer matches' },
+    ]);
+    // The round call's packet names the same acted count.
+    const roundCall = JSON.parse(calls.judge[1]!) as { state: { when: Record<string, unknown> } };
+    expect(roundCall.state.when.actedOnThisRound).toBe(2);
   });
 
-  it('honours a person\'s "hold": nothing goes back, the run ends as a pass, and `minorFindings` carries the held finding', async () => {
+  it('holds an unsure finding when nothing goes back: the run ends by the stop rules and no person is asked', async () => {
+    let asked = false;
     const { job, calls } = judged({
       reviewerReplies: [{ status: 'revise', summary: 'one finding', findings: [FINDING] }],
       judgeReply: answering({
@@ -614,17 +639,41 @@ describe('a run under the gate', () => {
       interaction: {
         id: 'hand-off',
         responseSchema: {},
-        answer: async () => ({ feedback: { findings: { 'finding-1': 'hold' } }, prompt: 'Hold finding-1; ship it as it stands.' }),
+        answer: async () => {
+          asked = true;
+          return { feedback: {}, prompt: 'should never run' };
+        },
       },
     });
     const result = await run(job, { cwd: workDir(), onEvent: () => {} });
     expect(result.outcome.status).toBe('pass');
-    // No finding went back, so the person bought no build: the work stands.
+    // No person was asked: the confident continue ended the round, and the
+    // unsure blocker landed on the list a person reads before the work lands.
+    expect(asked).toBe(false);
     expect(calls.writer).toHaveLength(1);
     const data = result.outcome.data as Record<string, { minorFindings?: unknown[] }>;
     expect(data.write?.minorFindings).toEqual([
-      expect.objectContaining({ evidence: FINDING.evidence, judgeLevel: 'blocking', judgeConfidence: JUDGE_CONFIDENCE.handOff - 0.01 }),
+      expect.objectContaining({ evidence: FINDING.evidence, judgeLevel: 'blocking', judgeConfidence: JUDGE_CONFIDENCE.handOff - 0.01, judgeReason: 'data loss' }),
     ]);
+  });
+
+  it('a finite score with no confidence and no probabilities routes as an unsure finding', async () => {
+    for (const answer of [
+      { score: 3, reason: 'data loss' },
+      { score: 3 },
+    ]) {
+      const { job, calls } = judged({
+        reviewerReplies: [{ status: 'revise', summary: 'one finding', findings: [FINDING] }],
+        judgeReply: answering({ 'finding-1': answer }),
+      });
+      const result = await run(job, { cwd: workDir(), onEvent: () => {} });
+      expect(result.outcome.status).toBe('pass');
+      expect(calls.writer).toHaveLength(1);
+      const data = result.outcome.data as Record<string, { minorFindings?: unknown[] }>;
+      expect(data.write?.minorFindings).toEqual([
+        expect.objectContaining({ evidence: FINDING.evidence, judgeLevel: 'blocking', judgeConfidence: 0 }),
+      ]);
+    }
   });
 
   it('honours a person\'s "ship it" on an undecidable round: the work stands, with no extra build', async () => {
@@ -647,7 +696,7 @@ describe('a run under the gate', () => {
     ]);
   });
 
-  it('holds a pending finding the person never named: an unnamed pending finding never goes back', async () => {
+  it('holds an unsure finding through a pause the round answer raised, when the person lets the work stand', async () => {
     const { job, calls } = judged({
       reviewerReplies: [{ status: 'revise', summary: 'one finding', findings: [FINDING] }],
       judgeReply: answering({
@@ -657,7 +706,7 @@ describe('a run under the gate', () => {
       interaction: {
         id: 'hand-off',
         responseSchema: {},
-        // "Ship it" names no finding: the pending one is held, not sent back.
+        // "Ship it" names no finding: the held one stays held, not sent back.
         answer: async () => ({ feedback: { ruling: 'ship' }, prompt: 'Ship it as it stands.' }),
       },
     });
@@ -670,7 +719,7 @@ describe('a run under the gate', () => {
     ]);
   });
 
-  it('asks hold/act for each pending finding on every pause, whatever the stop reason', async () => {
+  it('an unsure finding rides a pause the round raised as a settled hold: the ask never names it', async () => {
     for (const over of [
       { product_decision: { noul: 0.95 } },
       { stop_reason: { choice: 'none_applies', confidence: 0.9 } },
@@ -685,10 +734,15 @@ describe('a run under the gate', () => {
       });
       const result = await run(job, { cwd: workDir(), onEvent: () => {} });
       expect(result.outcome.status).toBe('paused');
-      const data = result.outcome.data as Record<string, { data?: { decisionText?: string } }>;
-      // The pause asks about the pending finding itself, not only the round.
-      expect(data.write?.data?.decisionText).toContain('finding-1');
-      expect(data.write?.data?.decisionText).toContain('hold');
+      const data = result.outcome.data as Record<string, {
+        data?: { decisionText?: string; input?: { material?: { decided?: readonly { id: string; decision: string }[] } } };
+      }>;
+      // The pause asks about the round, never about the unsure finding: it
+      // is already a settled hold on the saved calls the person's answer reads.
+      expect(data.write?.data?.decisionText).not.toContain('finding-1');
+      expect(data.write?.data?.input?.material?.decided).toEqual([
+        expect.objectContaining({ id: 'finding-1', decision: 'hold' }),
+      ]);
       expect(calls.writer).toHaveLength(1);
     }
   });

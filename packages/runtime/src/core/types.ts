@@ -248,9 +248,9 @@ export interface FeedbackFinding {
   disputed?: boolean;
   /** Why a judge sent this finding back, when a judge decided it. */
   judgeReason?: string;
-  /** The level a judge's score landed this finding on, set on a `minorFindings` entry. */
+  /** The level a judge's score landed this finding on, set on a `minorFindings` entry and on a finding sent back unsure. */
   judgeLevel?: FindingLevel;
-  /** The confidence that score answer carried, set on a `minorFindings` entry. */
+  /** The confidence that score answer carried, set the same way. */
   judgeConfidence?: number;
   /** The finding's id in its review round (`finding-2`), set when a judge decided each finding. */
   id?: string;
@@ -304,12 +304,14 @@ export type FindingLevel = 'cosmetic' | 'minor' | 'impactful' | 'blocking';
 /**
  * The judge's decision on one finding. `act` sends it back to the builder:
  * the judge's score landed on `impactful` or `blocking` at a confidence its
- * level's send-back bar clears. `hold` stays with the judge and is
- * collected on `minorFindings`, with the level and confidence its answer
- * carried, for a person to read before the work lands. `pending` settles
- * nothing: the answer came under the hand-off floor, so the run pauses for
- * a person, whose call sends the finding back with its evidence. It never
- * routes onto the held list.
+ * level's send-back bar clears — or its answer sat under the hand-off
+ * floor while another finding was already going back, in which case the
+ * level and confidence on the call say it went back unsure. `hold` stays
+ * with the judge and is collected on `minorFindings`, with the level and
+ * confidence its answer carried, for a person to read before the work
+ * lands. `pending` is only what a question saved before unsure calls
+ * routed with the round can still hold: the person's call settles it, and
+ * an unnamed one is held.
  */
 export interface FindingDecision {
   readonly id: string;
@@ -1490,10 +1492,12 @@ export type LoopEvent =
       status?: 'pass' | 'fail' | 'paused';
       // When the judge decides each finding: every finding of the round, by
       // its id, with `act` (scored impactful or blocking at a confidence its
-      // level's bar clears, sent back to the builder), `hold` (stays with
-      // the judge) or `pending` (its answer sat under the hand-off floor, so
-      // a person decides it), the level and confidence its answer carried,
-      // and why.
+      // level's bar clears, or under the hand-off floor while another
+      // finding was already going back — sent back to the builder) or
+      // `hold` (stays with the judge), the level and confidence its answer
+      // carried, and why. A saved event can still hold `pending` (its
+      // answer sat under the hand-off floor, so a person was asked): the
+      // person's call settles it, and an unnamed one is held.
       findings?: readonly { readonly id: string; readonly decision: 'act' | 'hold' | 'pending'; readonly level?: FindingLevel; readonly confidence?: number; readonly reason: string }[];
       // The findings of this round that did not go back to the builder,
       // collected for a person to read before the work lands, each with

@@ -75,7 +75,12 @@ function findingLine(finding: FeedbackFinding): string {
   const disputed = finding.disputed
     ? ` Disputed: ${(finding.votes ?? []).map((vote) => `${vote.reviewer} ${vote.vote} (${oneLine(vote.reason)})`).join('; ')}.`
     : '';
-  const judge = finding.judgeReason ? ` Why the judge sent it back: ${oneLine(finding.judgeReason)}` : '';
+  // The judge's level and confidence ride a finding it sent back unsure:
+  // its answer sat under the hand-off floor, so the builder knows how much
+  // weight to give the call.
+  const unsure = finding.judgeLevel !== undefined && finding.judgeConfidence !== undefined
+    ? ` unsure (${finding.judgeLevel}, ${finding.judgeConfidence.toFixed(2)} confidence)` : '';
+  const judge = finding.judgeReason ? ` Why the judge sent it back${unsure}: ${oneLine(finding.judgeReason)}` : '';
   return `- ${reviewer}[${severity}]: ${oneLine(finding.evidence)}${decision}${recommendation}${disputed}${judge}`;
 }
 

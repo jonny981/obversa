@@ -4,8 +4,8 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { dag, EngineError, fnJob, judge, review, revisionRequest, run, stage, stopQuestions, withEnv, workflow } from '../src/api.ts';
-import type { AgentRequest, JudgeQuestions, LoopEvent, Outcome, TeamSeat } from '../src/api.ts';
+import { agentJob, createCallbackClient, dag, EngineError, fnJob, judge, review, revisionRequest, run, stage, stopQuestions, withEnv, workflow } from '../src/api.ts';
+import type { AgentRequest, JudgeQuestions, JsonObject, LoopEvent, Outcome, TeamSeat } from '../src/api.ts';
 import { MockEngine } from '../src/testing.ts';
 
 function seat(engine: MockEngine, model: string, tools: readonly string[] = []): TeamSeat {
@@ -1449,6 +1449,289 @@ describe('refine: a failed judge stops the rounds', () => {
       const kept = JSON.stringify(request);
       expect(kept).not.toContain(email);
       expect(kept).not.toContain(token);
+    }
+  });
+});
+
+describe('an unsure finding rides the send-back', () => {
+  const SURE = { severity: 'block', evidence: 'SURE: a write the read skips is lost' } as const;
+  const UNSURE = { severity: 'block', evidence: 'UNSURE: the README line may be stale' } as const;
+  /** finding-1 is confidently blocking; every other finding's answer sits under the hand-off floor. */
+  const unsureJudge = (prompt: string) => {
+    const { questions } = JSON.parse(prompt) as { questions: Record<string, unknown> };
+    const answers: Record<string, unknown> = { ...roundAnswers('continue') };
+    for (const key of Object.keys(questions)) {
+      if (!key.startsWith('finding-')) continue;
+      answers[key] = key === 'finding-1'
+        ? { score: 3, confidence: 0.95, reason: 'data loss' }
+        : { score: 3, confidence: 0.5, reason: 'it may not matter' };
+    }
+    return answers;
+  };
+
+  it('through the dag path the builder reads both findings, the unsure one marked, and no person is asked', async () => {
+    const writerCalls: string[] = [];
+    const judgeCalls: AgentRequest[] = [];
+    let checks = 0;
+    const writer = new MockEngine((req) => {
+      writerCalls.push(req.prompt);
+      writeFileSync(join(req.cwd!, 'page.md'), `draft ${writerCalls.length}`);
+      return 'wrote';
+    });
+    const judgeEngine = new MockEngine((req) => {
+      judgeCalls.push(req);
+      return JSON.stringify(unsureJudge(req.prompt));
+    });
+    const job = dag({
+      name: 'unsure-send-back',
+      nodes: {
+        write: {
+          refine: review({ judge: judge(seat(judgeEngine, 'judge-mock')) }),
+          job: agentJob({ engine: writer, prompt: 'Write the page.', consumeFeedback: true }),
+        },
+        check: {
+          needs: 'write',
+          sendsBackTo: ['write'],
+          job: fnJob('check', () => {
+            checks += 1;
+            return checks === 1
+              ? revisionRequest({ target: 'write', reason: 'not yet', findings: [SURE, UNSURE] })
+              : ({ status: 'pass' } as const);
+          }),
+        },
+      },
+    });
+    const events: LoopEvent[] = [];
+    const result = await run(job, { cwd: workDir(), onEvent: (event) => events.push(event) });
+    expect(result.outcome.status).toBe('pass');
+    // The unsure finding went back beside the one the judge is sure of:
+    // the builder reads its evidence, its reason, and the mark that the
+    // call was unsure.
+    expect(writerCalls).toHaveLength(2);
+    expect(writerCalls[1]).toContain(SURE.evidence);
+    expect(writerCalls[1]).toContain(UNSURE.evidence);
+    expect(writerCalls[1]).toContain('unsure');
+    expect(writerCalls[1]).toContain('0.50');
+    expect(writerCalls[1]).toContain('it may not matter');
+    // The event and the packet's acted count agree on 2.
+    const judged = judgeEventsOf(events)[0]!;
+    expect(judged).toMatchObject({ route: 'again', rule: 'findings: 2 act, 0 held' });
+    expect(judged.findings).toEqual([
+      { id: 'finding-1', decision: 'act', level: 'blocking', confidence: 0.95, reason: 'data loss' },
+      { id: 'finding-2', decision: 'act', level: 'blocking', confidence: 0.5, reason: 'it may not matter' },
+    ]);
+    const roundCall = JSON.parse(judgeCalls[1]!.prompt) as { state: { when: Record<string, unknown> } };
+    expect(roundCall.state.when.actedOnThisRound).toBe(2);
+  });
+
+  it('through the dag path with a spent cap, a later packet\'s history counts the unsure send-back too', async () => {
+    const writerCalls: string[] = [];
+    const judgeCalls: AgentRequest[] = [];
+    let checks = 0;
+    const writer = new MockEngine((req) => {
+      writerCalls.push(req.prompt);
+      writeFileSync(join(req.cwd!, 'page.md'), `draft ${writerCalls.length}`);
+      return 'wrote';
+    });
+    const judgeEngine = new MockEngine((req) => {
+      judgeCalls.push(req);
+      return JSON.stringify(unsureJudge(req.prompt));
+    });
+    const job = dag({
+      name: 'unsure-send-back-capped',
+      nodes: {
+        write: {
+          refine: review({ judge: judge(seat(judgeEngine, 'judge-mock'), { cap: 1 }) }),
+          job: agentJob({ engine: writer, prompt: 'Write the page.', consumeFeedback: true }),
+        },
+        check: {
+          needs: 'write',
+          sendsBackTo: ['write'],
+          job: fnJob('check', () => {
+            checks += 1;
+            return checks === 1
+              ? revisionRequest({ target: 'write', reason: 'not yet', findings: [SURE, UNSURE] })
+              : checks === 2
+                ? revisionRequest({ target: 'write', reason: 'one remains', findings: [SURE] })
+                : ({ status: 'pass' } as const);
+          }),
+        },
+      },
+    });
+    const events: LoopEvent[] = [];
+    const result = await run(job, { cwd: workDir(), onEvent: (event) => events.push(event) });
+    expect(result.outcome.status).toBe('pass');
+    expect(writerCalls).toHaveLength(3);
+    // Round 1 sent the unsure finding back beside the confident one; the
+    // granted round's builder still reads what was sent back at the cap.
+    expect(writerCalls[1]).toContain(SURE.evidence);
+    expect(writerCalls[1]).toContain(UNSURE.evidence);
+    expect(writerCalls[1]).toContain('unsure');
+    expect(writerCalls[2]).toContain(SURE.evidence);
+    const judged = judgeEventsOf(events);
+    expect(judged).toHaveLength(2);
+    expect(judged[0]).toMatchObject({ route: 'again', rule: 'findings: 2 act, 0 held' });
+    // The spent cap grants round 3 because the acted count fell, and the
+    // unsure send-back is part of the count it fell from.
+    expect(judged[1]).toMatchObject({
+      route: 'again',
+      rule: 'findings: 1 act, 0 held',
+      reason: expect.stringContaining('the cap of 1 is spent, and the findings acted on fell from 2 to 1'),
+    });
+    // The packet the round-2 ask read agrees: this round acted on one, and
+    // round 1's history entry counts both findings it sent back.
+    const roundCall = JSON.parse(roundCalls(judgeCalls)[1]!.prompt) as {
+      state: { when: Record<string, unknown> };
+    };
+    expect(roundCall.state.when.lastRound).toBe(true);
+    expect(roundCall.state.when.actedOnThisRound).toBe(1);
+    expect(roundCall.state.when.rounds).toEqual([expect.objectContaining({ round: 1, acted: 2 })]);
+  });
+
+  it('an unsure finding still counts when a spent cap weighs the grant: packet, event and history agree', async () => {
+    const team = scriptedTeam({
+      cap: 1,
+      reviewerReplies: [
+        revise(REAL, TONE, TITLE),
+        revise(SURE, UNSURE),
+        PASS,
+      ],
+      judgeReplies: [(prompt: string) => {
+        const { state, questions } = JSON.parse(prompt) as {
+          state: { when: { round: number } };
+          questions: Record<string, unknown>;
+        };
+        const answers: Record<string, unknown> = { ...roundAnswers('continue') };
+        for (const key of Object.keys(questions)) {
+          if (!key.startsWith('finding-')) continue;
+          // Round 1 acts on all three; round 2 acts on the confident one,
+          // and the unsure one rides with it.
+          answers[key] = state.when.round === 2 && key !== 'finding-1'
+            ? { score: 3, confidence: 0.5, reason: 'it may not matter' }
+            : { score: 3, confidence: 0.95, reason: 'worth a round' };
+        }
+        return answers;
+      }],
+    });
+    const events: LoopEvent[] = [];
+    const result = await run(team.job, { cwd: workDir(), onEvent: (event) => events.push(event) });
+    expect(result.outcome.status).toBe('pass');
+    expect(team.writerCalls).toHaveLength(3);
+    // The builder's last send-back carries both findings, the unsure one marked.
+    expect(team.writerCalls[2]!.prompt).toContain(SURE.evidence);
+    expect(team.writerCalls[2]!.prompt).toContain(UNSURE.evidence);
+    expect(team.writerCalls[2]!.prompt).toContain('unsure');
+    // The last round the cap allowed was granted on the falling acted count:
+    // 2 findings sent back, the unsure one counted.
+    const judged = judgeEventsOf(events);
+    expect(judged).toHaveLength(2);
+    expect(judged[1]).toMatchObject({
+      route: 'again',
+      rule: 'findings: 2 act, 0 held',
+      reason: expect.stringContaining('the cap of 1 is spent, and the findings acted on fell from 3 to 2'),
+    });
+    // The packet the round-2 ask read names the same count, and the rounds
+    // history it carried names round 1's.
+    const roundCall = JSON.parse(roundCalls(team.judgeCalls)[1]!.prompt) as {
+      state: { when: Record<string, unknown> };
+    };
+    expect(roundCall.state.when.actedOnThisRound).toBe(2);
+    expect(roundCall.state.when.rounds).toEqual([expect.objectContaining({ round: 1, acted: 3 })]);
+  });
+
+  it('a saved pending finding is still settled by the person who was asked: unnamed held, named act sent back', async () => {
+    const pauseTeam = {
+      reviewerReplies: [revise(UNSURE)],
+      judgeReplies: [(prompt: string) => {
+        const { questions } = JSON.parse(prompt) as { questions: Record<string, unknown> };
+        const answers: Record<string, unknown> = {
+          ...roundAnswers('continue'),
+          stop_reason: { choice: 'none_applies', confidence: 0.9 },
+        };
+        for (const key of Object.keys(questions)) {
+          if (key.startsWith('finding-')) answers[key] = { score: 3, confidence: 0.5, reason: 'it may not matter' };
+        }
+        return answers;
+      }],
+    };
+    // What an older run saved beside the question: the unsure call sat as
+    // `pending` on the asked calls.
+    const asSavedBefore = (file: string) => {
+      const lines = readFileSync(file, 'utf8').trim().split('\n').map((line) => {
+        const event = JSON.parse(line) as { kind?: string; data?: { state?: { decided?: { decision: string }[] } } };
+        const decided = event.kind === 'interaction:checkpoint' ? event.data?.state?.decided : undefined;
+        if (Array.isArray(decided)) for (const item of decided) item.decision = 'pending';
+        return JSON.stringify(event);
+      });
+      writeFileSync(file, `${lines.join('\n')}\n`);
+    };
+    const pausedRequest = async (callbacks: ReturnType<typeof createCallbackClient>) => {
+      const [request] = await callbacks.listPending();
+      expect(request).toBeDefined();
+      return request!;
+    };
+    const answer = async (
+      callbacks: ReturnType<typeof createCallbackClient>,
+      request: Awaited<ReturnType<typeof pausedRequest>>,
+      response: JsonObject,
+    ) => {
+      const claim = await callbacks.claim(request.requestId, 'person');
+      expect(claim).toMatchObject({ ok: true });
+      if (!claim.ok) throw new Error('claim refused');
+      expect(await callbacks.submit(request.requestId, claim.claimToken, 'person', request.digest, response))
+        .toMatchObject({ ok: true });
+    };
+
+    // An answer that names no finding holds the saved pending one: nothing
+    // is re-built, re-reviewed or re-asked, and the held finding reaches
+    // minorFindings for the person who reads the run before it lands.
+    {
+      const dir = workDir();
+      const record = join(dir, 'record.jsonl');
+      const callbacks = createCallbackClient();
+      const first = scriptedTeam(pauseTeam);
+      expect((await run(first.job, { cwd: dir, recordTo: record, callbacks })).outcome.status).toBe('paused');
+      asSavedBefore(record);
+      const second = scriptedTeam(pauseTeam);
+      expect((await run(second.job, { cwd: dir, recordTo: record, resume: true, callbacks })).outcome.status).toBe('paused');
+      await answer(callbacks, await pausedRequest(callbacks), { feedback: {}, prompt: 'Ship it as it stands.' });
+      const third = scriptedTeam({ ...pauseTeam, reviewerReplies: [] });
+      const done = await run(third.job, { cwd: dir, recordTo: record, resume: true, callbacks });
+      expect(done.outcome.status).toBe('pass');
+      expect(third.writerCalls).toHaveLength(0);
+      expect(third.reviewCalls).toHaveLength(0);
+      expect(third.judgeCalls).toHaveLength(0);
+      const data = done.outcome.data as Record<string, { minorFindings?: { evidence: string }[] }>;
+      expect(data.write?.minorFindings).toEqual([
+        expect.objectContaining({ evidence: UNSURE.evidence, judgeLevel: 'blocking', judgeConfidence: 0.5, judgeReason: 'it may not matter' }),
+      ]);
+    }
+
+    // An answer that names the saved pending finding `act` sends it to the
+    // builder with its unsure call still on it; the round it buys is built
+    // and reviewed fresh, and the judge is never re-asked about the saved one.
+    {
+      const dir = workDir();
+      const record = join(dir, 'record.jsonl');
+      const callbacks = createCallbackClient();
+      const first = scriptedTeam(pauseTeam);
+      expect((await run(first.job, { cwd: dir, recordTo: record, callbacks })).outcome.status).toBe('paused');
+      asSavedBefore(record);
+      const second = scriptedTeam(pauseTeam);
+      expect((await run(second.job, { cwd: dir, recordTo: record, resume: true, callbacks })).outcome.status).toBe('paused');
+      await answer(callbacks, await pausedRequest(callbacks), {
+        feedback: { findings: { 'finding-1': 'act' } },
+        prompt: 'Send the README line back.',
+      });
+      const third = scriptedTeam({ ...pauseTeam, reviewerReplies: [PASS], draftText: 'revised' });
+      const done = await run(third.job, { cwd: dir, recordTo: record, resume: true, callbacks });
+      expect(done.outcome.status).toBe('pass');
+      expect(third.writerCalls).toHaveLength(1);
+      expect(third.writerCalls[0]!.prompt).toContain(UNSURE.evidence);
+      expect(third.writerCalls[0]!.prompt).toContain('unsure');
+      expect(third.writerCalls[0]!.prompt).toContain('Send the README line back.');
+      expect(third.reviewCalls).toHaveLength(1);
+      expect(third.judgeCalls).toHaveLength(0);
     }
   });
 });

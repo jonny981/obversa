@@ -1151,8 +1151,9 @@ export function dag(config: DagConfig): Job {
           const answered = judgedFindings(requestFindings, { findings: result.state.decided }, result.state.skipped ?? [], count);
           judgeSkipped.set(to, answered.skipped);
           // The person's call can let the work stand — an approval, "hold
-          // all", or an answer that leaves only pending findings unnamed:
-          // with nothing acted on and no changes requested, `from`'s review outcome
+          // all", or an answer that leaves only findings a saved question
+          // still calls pending unnamed: with nothing acted on and no
+          // changes requested, `from`'s review outcome
           // stops standing in the way and the held findings land on
           // `minorFindings`.
           if (answered.acted.length === 0 && result.answer.decision !== 'changes-requested') {
